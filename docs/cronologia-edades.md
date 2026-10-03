@@ -1,7 +1,7 @@
 # Cronología · Tratamiento de edades
 
-> Estado: **diseño, sin implementar** (Prioridad 3, junto con el resto de la Cronología).
-> Depende de que cada capítulo tenga un punto en el tiempo del relato, que es la base de la Cronología.
+> Estado: **diseño aprobado como base de la futura Cronología, sin implementar** (Prioridad 3).
+> La primera versión fecha cada capítulo; el modelo está preparado para admitir después cambios de tiempo dentro de un capítulo o escena sin rediseñarlo.
 
 ## Problema
 
@@ -16,8 +16,9 @@
 1. **La edad no se guarda, se calcula.** Se guarda un *ancla* (nacimiento o edad en un punto conocido) y la edad en cada capítulo sale de la diferencia de tiempo.
 2. **Nada se sobrescribe.** El texto actual de "Edad o nacimiento" se conserva como nota. El ancla es un dato aparte.
 3. **La imprecisión es legítima.** "Nació en 1951" no dice si en 1972 tiene 20 o 21. La app muestra un rango ("20–21") en vez de inventar.
-4. **Avisar, no corregir.** Las inconsistencias se señalan, y el autor decide. Un salto atrás o una edad "rara" pueden ser intencionados.
+4. **Advertir, nunca bloquear.** Las inconsistencias temporales son advertencias para el autor, no errores. Nada impide guardar, escribir, insertar una escena ni usar el asistente. Un salto atrás o una edad "rara" pueden ser intencionados, y el autor puede descartar una advertencia concreta.
 5. **Determinista, sin IA.** El cálculo y la detección son aritmética local, sin llamadas a ningún modelo.
+6. **Del capítulo a la escena sin rediseño.** El tiempo del relato se modela como marcas temporales ancladas a una posición del manuscrito. En la primera versión la única posición admitida es el inicio del capítulo; más adelante, cualquier punto del texto.
 
 ## Modelo de datos
 
@@ -35,29 +36,49 @@ interface StoryDate {
 
 Ajuste de novela (Guía Maestra o Cronología): `calendar: "real" | "relativo"`. En calendario relativo los años se muestran como "Año 0", "Año 5", y el autor no está obligado a inventar fechas reales.
 
-### Punto temporal de cada capítulo (base de la Cronología)
+### Marcas temporales (base de la Cronología)
+
+El tiempo del relato no es una columna del capítulo. Es una lista de **marcas temporales**, cada una anclada a un punto del manuscrito:
 
 ```ts
-// en chapters
-story_start: StoryDate | null;   // cuándo empieza el capítulo en el tiempo del relato
-story_end:   StoryDate | null;   // opcional; si falta, se asume el mismo punto
-story_flashback: boolean;        // el capítulo ocurre antes que el anterior, a propósito
+interface TimeMark {
+  id: string;
+  chapter_id: string;
+  anchor: { at: "chapter_start" }                          // v1: sólo esto
+        | { at: "text"; offset: number; quote: string };   // futuro: dentro del capítulo o escena
+  when: { date: StoryDate }                                 // "marzo de 1972"
+      | { after: Interval; from?: string /* id de otra marca; por defecto, la anterior */ };  // "cinco años después"
+  flashback: boolean;   // a propósito anterior a la marca previa
+  label: string;        // texto libre opcional: "cinco años después", "esa misma noche"
+}
+
+interface Interval { years?: number; months?: number; days?: number }
 ```
 
-Un capítulo sin fecha **hereda** la del capítulo fechado anterior y se marca como *estimado* en la interfaz. Así basta con fechar los capítulos donde el tiempo salta.
+- **Primera versión:** cada capítulo tiene como mucho una marca, con `anchor.at = "chapter_start"`. En la interfaz es el campo "Tiempo del relato" del capítulo, sin hablar de marcas.
+- **Fechas relativas desde el principio.** `when.after` ya permite "cinco años después del capítulo anterior" sin fecha absoluta. Es el mismo mecanismo que necesitará "cinco años después" en mitad de un capítulo.
+- **Herencia.** Un punto del texto sin marca propia toma la marca anterior en orden de lectura (capítulo y posición), marcado como *estimado*. En la v1 eso equivale a heredar la del capítulo anterior.
+
+**Evolución sin rediseño.** Para admitir saltos dentro de un capítulo o escena basta con:
+
+1. Permitir `anchor.at = "text"` y más de una marca por capítulo. Ni la tabla ni el cálculo cambian, porque ya resuelven "la marca vigente en una posición".
+2. Crear marcas desde el editor: seleccionar "Cinco años después" y elegir *Marcar cambio de tiempo aquí*.
+3. Mantener los anclajes cuando el texto cambia. `offset` se recoloca con `quote` (el texto citado), con la misma técnica que `applyRewrite` ya usa para encontrar un fragmento que se movió. Si la cita desaparece, la marca pasa al inicio del capítulo con una advertencia, sin perderse.
+
+Todo lo que consume tiempo (edades, contexto de IA, advertencias) pregunta por **una posición** (`chapter_id` y `offset`), nunca por "el capítulo". En la v1 el offset se ignora; cuando existan marcas internas, las mismas funciones darán la edad correcta antes y después del salto.
 
 ### Ancla de edad del personaje
 
 ```ts
 type AgeAnchor =
   | { kind: "birth"; date: StoryDate }                              // nació en 1951 (o 12/03/1951)
-  | { kind: "age_at"; age: number; at: { chapter_id: string } | { date: StoryDate } }; // tenía 21 en el capítulo 1
+  | { kind: "age_at"; age: number; at: { mark_id: string } | { date: StoryDate } }; // tenía 21 en el capítulo 1 (su marca)
 ```
 
 ```ts
 // en characters (además de `age`, que se queda como nota libre)
 age_anchor: AgeAnchor | null;
-age_approx: boolean;             // "unos cuarenta": la edad es aproximada, se muestra con "≈" y no genera conflictos de ±1 año
+age_approx: boolean;             // "unos cuarenta": la edad es aproximada, se muestra con "≈" y no genera advertencias por ±1 año
 death: StoryDate | null;         // opcional; para avisar de apariciones posteriores
 ```
 
@@ -79,10 +100,19 @@ Así una afirmación del manuscrito ("cumplió treinta ese invierno") queda regi
 ### Esquema (borrador)
 
 ```sql
-alter table public.chapters
-  add column if not exists story_start     jsonb,
-  add column if not exists story_end       jsonb,
-  add column if not exists story_flashback boolean not null default false;
+create table if not exists public.time_marks (
+  id          uuid primary key default gen_random_uuid(),
+  novel_id    uuid not null references public.novels(id) on delete cascade,
+  chapter_id  uuid not null,
+  anchor      jsonb not null default '{"at":"chapter_start"}',
+  "when"      jsonb not null,
+  flashback   boolean not null default false,
+  label       text not null default '',
+  foreign key (chapter_id, novel_id) references public.chapters(id, novel_id) on delete cascade
+);
+-- v1: una marca por capítulo, sólo al inicio. Se elimina este índice al admitir marcas internas.
+create unique index if not exists time_marks_one_per_chapter
+  on public.time_marks(chapter_id) where (anchor ->> 'at') = 'chapter_start';
 
 alter table public.characters
   add column if not exists age_anchor jsonb,
@@ -94,37 +124,46 @@ alter table public.facts
   add column if not exists age_claim  jsonb;
 ```
 
-`jsonb` con validación en `lib/memory.ts`, igual que el resto de campos. `age_claim.character_id` y `age_at.at.chapter_id` se validan contra la misma novela en la API, porque no son claves foráneas. `duplicate_novel` debe reasignar esos ids, igual que hoy reasigna capítulos y personajes.
+`jsonb` con validación en `lib/memory.ts`, igual que el resto de campos. `age_claim.character_id` y `age_at.at.mark_id` se validan contra la misma novela en la API, porque no son claves foráneas. `duplicate_novel` debe reasignar esos ids, igual que hoy reasigna capítulos y personajes, y copiar también `time_marks`.
 
 ## Cálculo
 
 `lib/chronology.ts`, puro y sin E/S:
 
 ```ts
-storyPointOf(chapterId): { date: StoryDate | null; offset: Interval | null; estimated: boolean }
-ageAt(character, point): { min: number; max: number; approx: boolean } | null
+type Position = { chapter_id: string; offset?: number };   // offset se ignora en la v1
+storyPointAt(pos: Position): { date: StoryDate | null; sinceMark: Interval | null; estimated: boolean }
+ageAt(character, pos: Position): { min: number; max: number; approx: boolean } | null
+warnings(novel): TimeWarning[]
 ```
 
 - Con fechas parciales se trabaja con intervalos. Nacido en 1951 → en 1972 tiene `{min: 20, max: 21}`. Nacido el 12/03/1951 y capítulo en 06/1972 → `{21, 21}`.
-- Con `age_at` sobre un capítulo, la edad en otro capítulo es `age + Δ`, donde Δ es el tiempo entre ambos puntos (también un intervalo si las fechas son parciales).
+- Con `age_at` sobre una marca, la edad en otro capítulo es `age + Δ`, donde Δ es el tiempo entre ambos puntos (también un intervalo si las fechas son parciales).
 - Sin ancla, o sin forma de relacionar los dos puntos, devuelve `null` y la interfaz muestra la nota libre tal cual.
 
-**Ejemplo del enunciado.** Ancla: 21 años en el capítulo 1 (1972). Capítulo 6: 1977. En el capítulo 6 se muestra **26**, y la ficha sigue diciendo "21 en el capítulo 1". Si el capítulo 1 fuera "Año 0" y el 6 "Año 5", el resultado es el mismo.
+**Ejemplo del enunciado.** Ancla: 21 años en el capítulo 1 (1972). Capítulo 6: 1977. En el capítulo 6 se muestra **26**, y la ficha sigue diciendo "21 en el capítulo 1". Si el capítulo 1 fuera "Año 0" y el 6 "Año 5", o si el 6 dijera sólo "cinco años después", el resultado es el mismo. Cuando existan marcas internas, un "cinco años después" a mitad del capítulo 6 hará que el personaje tenga 21 antes de la marca y 26 después.
 
-## Detección de inconsistencias
+## Advertencias temporales
 
-| Regla | Gravedad | Ejemplo |
+Todas son **advertencias para el autor, nunca errores bloqueantes**. No impiden guardar, escribir, insertar ni consultar al asistente, y la API las calcula aparte, sin rechazar ningún dato por incoherente. Hay dos niveles, sólo para ordenar la lista:
+
+- **Probable error**: casi seguro un descuido (edad negativa, contradicción entre dos datos).
+- **Revisar**: puede ser intencionado (retroceso, aparición tras la muerte).
+
+El autor puede **descartar** una advertencia concreta ("es intencionado"). El descarte se guarda y no vuelve a aparecer mientras no cambien los datos que la producen.
+
+| Regla | Nivel | Ejemplo |
 |---|---|---|
-| Una declaración de edad (`age_claim`) cae fuera del rango calculado | Conflicto | Ancla: 21 en 1972. Hecho de 1980 dice 35 (debería ser 29). |
-| Un personaje aparece (por nombre o apodo, como ya detecta `context.ts`) o tiene hechos en un punto anterior a su nacimiento | Conflicto | Nace en 1960; aparece en el capítulo de 1955. |
-| Aparece en un punto posterior a `death` en un capítulo que no es retrospectiva | Aviso | Muere en 1980; dialoga en el capítulo de 1984. |
-| Dos anclas o declaraciones incompatibles entre sí | Conflicto | Nació en 1951, pero un hecho de 1972 dice 25. |
-| Las fechas de capítulo retroceden sin `story_flashback` | Aviso | Cap. 7 en 1975, cap. 8 en 1973. |
-| Edad implausible para una relación de parentesco (padre/madre con menos de ~12 años de diferencia, o hijo mayor que su progenitor) | Aviso | Juan "padre de" Pedro; Juan nace en 1950, Pedro en 1958. |
-| Edad negativa o mayor de ~120 en algún capítulo donde aparece | Conflicto | Normalmente revela un año mal tecleado. |
+| Una declaración de edad (`age_claim`) cae fuera del rango calculado | Probable error | Ancla: 21 en 1972. Hecho de 1980 dice 35 (debería ser 29). |
+| Un personaje aparece (por nombre o apodo, como ya detecta `context.ts`) o tiene hechos en un punto anterior a su nacimiento | Probable error | Nace en 1960; aparece en el capítulo de 1955. |
+| Aparece en un punto posterior a `death` en un capítulo que no es retrospectiva | Revisar | Muere en 1980; dialoga en el capítulo de 1984. |
+| Dos anclas o declaraciones incompatibles entre sí | Probable error | Nació en 1951, pero un hecho de 1972 dice 25. |
+| Las fechas retroceden respecto a la marca anterior sin `flashback` | Revisar | Cap. 7 en 1975, cap. 8 en 1973. |
+| Edad implausible para una relación de parentesco (padre/madre con menos de ~12 años de diferencia, o hijo mayor que su progenitor) | Revisar | Juan "padre de" Pedro; Juan nace en 1950, Pedro en 1958. |
+| Edad negativa o mayor de ~120 en algún capítulo donde aparece | Probable error | Normalmente revela un año mal tecleado. |
 
 - Con `age_approx` no se marcan desfases de ±1 año.
-- Retrospectivas: los capítulos con `story_flashback` no disparan el aviso de retroceso, pero sí se comprueban las edades en su punto.
+- Retrospectivas: las marcas con `flashback` no disparan el aviso de retroceso, pero sí se comprueban las edades en su punto.
 - **Fuera de alcance de esta fase:** leer el texto del manuscrito buscando "tenía 30 años" junto a un nombre. Es heurístico y daría falsos positivos. Mientras tanto, la acción *Consistencia* del asistente recibe las edades calculadas (ver abajo) y puede señalarlo ella.
 
 ## Interfaz
@@ -134,13 +173,14 @@ ageAt(character, point): { min: number; max: number; approx: boolean } | null
   - la nota libre de siempre, con el texto actual intacto.
   
   Debajo, en gris: "En este capítulo: 26 años" (o "20–21", o "≈ 40").
-- **Lista de capítulos**: un campo "Tiempo del relato" por capítulo (fecha parcial y la casilla *Retrospectiva*). Los heredados se muestran en cursiva como estimados.
-- **Vista Cronología**: una tabla de personajes por capítulos, con la edad en cada celda. Las celdas con conflicto se marcan, y al pie hay una lista de inconsistencias que enlazan al capítulo, la ficha o el hecho implicado.
+- **Lista de capítulos**: un campo "Tiempo del relato" por capítulo: fecha parcial **o** "N años/meses/días después", y la casilla *Retrospectiva*. Por debajo crea o edita la marca de inicio del capítulo. Los heredados se muestran en cursiva como estimados.
+- **Advertencias**: un indicador discreto (por ejemplo "2 advertencias de tiempo") en la ficha y en la Cronología. Nunca un diálogo modal ni un botón deshabilitado.
+- **Vista Cronología**: una tabla de personajes por capítulos, con la edad en cada celda. Las celdas con advertencia se marcan, y al pie hay una lista de advertencias que enlazan al capítulo, la ficha o el hecho implicado.
 
 ## Asistente (contexto de IA)
 
 - En las fichas que se envían, la edad se da **calculada para el capítulo actual**: `Edad en este punto: 26 (21 en el capítulo 1; han pasado 5 años)`. La nota libre se añade sólo si aporta algo distinto.
-- Si hay un conflicto que afecta a un personaje de la selección, la acción *Consistencia* lo recibe como dato.
+- Si hay una advertencia que afecta a un personaje de la selección, la acción *Consistencia* lo recibe como dato.
 - Esto cambia `lib/ai/prompts.ts` (formato de la ficha) y `lib/ai/context.ts` (pasar el punto temporal del capítulo).
 
 ## Migración del texto existente
@@ -151,15 +191,16 @@ ageAt(character, point): { min: number; max: number; approx: boolean } | null
 
 ## Pruebas previstas
 
-- Unitarias de `lib/chronology.ts`: fechas parciales y rangos, anclas `birth` y `age_at`, herencia de fechas entre capítulos, calendario relativo, retrospectivas, `age_approx`, cada regla de la tabla de inconsistencias. Incluye el caso del enunciado (21 → 26 en cinco años, sin cambiar el ancla).
+- Unitarias de `lib/chronology.ts`: fechas parciales y rangos, anclas `birth` y `age_at`, marcas relativas ("cinco años después"), herencia de marcas, varias marcas en un mismo capítulo (aunque la v1 no las cree, el cálculo ya debe resolverlas), calendario relativo, retrospectivas, `age_approx`, cada regla de la tabla de inconsistencias. Incluye el caso del enunciado (21 → 26 en cinco años, sin cambiar el ancla).
 - API: validación de `StoryDate` y de ids entre novelas, y `duplicate_novel` reasignando ids dentro del JSON.
 - Prompts: la ficha enviada muestra la edad calculada para el capítulo actual.
-- E2E: definir un ancla, fechar dos capítulos y ver la edad cambiar al pasar de uno a otro. Una declaración contradictoria aparece en la lista de inconsistencias.
+- E2E: definir un ancla, fechar dos capítulos y ver la edad cambiar al pasar de uno a otro. Una declaración contradictoria aparece como advertencia, y el capítulo se sigue guardando y editando con normalidad.
 
 ## Orden de implementación sugerido
 
-1. Fecha del relato por capítulo (base de toda la Cronología).
+1. Marcas temporales con una por capítulo (base de toda la Cronología).
 2. Ancla de edad, cálculo y "En este capítulo: N años" en la ficha.
 3. Edad calculada en el contexto del asistente.
-4. Vista Cronología y reglas de inconsistencia.
+4. Vista Cronología y advertencias.
 5. Declaraciones de edad en hechos y propuesta de ancla desde la nota libre.
+6. (Posterior) Marcas dentro del capítulo o escena: quitar el índice de una marca por capítulo y añadir *Marcar cambio de tiempo aquí* en el editor.
