@@ -304,6 +304,13 @@ input:focus,
   max-height: 9em;
   overflow: hidden;
 }
+.quote-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: -6px;
+}
 .quote.empty {
   color: var(--muted);
   font-family: var(--sans);

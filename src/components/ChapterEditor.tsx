@@ -17,6 +17,8 @@ export interface EditorHandle {
   applyRewrite(original: Selection, rewrite: string): boolean;
   /** Inserts a scene at the cursor as its own paragraphs (undoable). */
   insertAtCursor(text: string): void;
+  /** Collapses the selection to its end, so nothing is selected. */
+  clearSelection(): void;
   /** Saves and waits; true when nothing is left unsaved. */
   flush(): Promise<boolean>;
 }
@@ -160,8 +162,14 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
         const tail = !after ? "" : after.startsWith("\n\n") ? "" : after.startsWith("\n") ? "\n" : "\n\n";
         replaceRange(at, at, `${lead}${text.trim()}${tail}`);
       },
+      clearSelection() {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.setSelectionRange(el.selectionEnd, el.selectionEnd);
+        updateSelection();
+      },
     }),
-    [flush, replaceRange],
+    [flush, replaceRange, updateSelection],
   );
 
   return (

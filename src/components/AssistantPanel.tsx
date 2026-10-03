@@ -30,6 +30,7 @@ interface Props {
   getCursor(): number;
   onApply(original: Selection, rewrite: string): boolean;
   onInsert(text: string): void;
+  onClearSelection(): void;
 }
 
 type Mode = "edit" | "scene";
@@ -109,6 +110,7 @@ function AssistantPanel(props: Props) {
     getCursor,
     onApply,
     onInsert,
+    onClearSelection,
   } = props;
 
   const [mode, setMode] = useState<Mode>("edit");
@@ -395,12 +397,20 @@ function AssistantPanel(props: Props) {
             {providerSelect}
             {contextControls}
           </div>
+          {selection && (
+            <div className="quote-head">
+              <span className="muted small">Fragmento seleccionado en el editor</span>
+              <button className="link" onClick={onClearSelection} title="Para usar otro, selecciónalo en el editor">
+                Quitar
+              </button>
+            </div>
+          )}
           <blockquote className={`quote${selection ? "" : " empty"}`}>
             {selection
               ? selection.text.length > 400
                 ? `${selection.text.slice(0, 400)}…`
                 : selection.text
-              : "Selecciona un fragmento en el editor."}
+              : "Selecciona un fragmento en el editor; aparecerá aquí."}
           </blockquote>
           {current.character === "required" && !memory.characters.length && (
             <p className="muted small">Esta acción necesita la ficha de un personaje.</p>

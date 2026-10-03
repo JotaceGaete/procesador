@@ -138,6 +138,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
     [],
   );
   const insertAtCursor = useCallback((text: string) => editorRef.current?.insertAtCursor(text), []);
+  const clearSelection = useCallback(() => editorRef.current?.clearSelection(), []);
 
   if (loadError) {
     return (
@@ -242,6 +243,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
         getCursor={getCursor}
         onApply={applyRewrite}
         onInsert={insertAtCursor}
+        onClearSelection={clearSelection}
       />
 
       {modal === "novel" && (
