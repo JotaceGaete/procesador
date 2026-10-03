@@ -4,6 +4,7 @@ import { assertId, db, getMemory, getNovel, getOutline } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { cleanGuide } from "@/lib/guide";
 import { availableProviders, defaultProvider } from "@/lib/ai/providers";
+import { getNovelImages, imageFiles, removeFiles } from "@/lib/images-server";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -17,9 +18,10 @@ export const GET = handler<Ctx>(async (_request, { params }) => {
     if (error) throw error;
     chapters = await getOutline(novel.id);
   }
-  const memory = await getMemory(novel.id);
+  // Images are kept apart from `memory`, which is what the assistant's context is built from.
+  const [memory, images] = await Promise.all([getMemory(novel.id), getNovelImages(novel.id)]);
   return NextResponse.json(
-    { novel, chapters, memory, providers: availableProviders(), defaultProvider: defaultProvider() },
+    { novel, chapters, memory, images, providers: availableProviders(), defaultProvider: defaultProvider() },
     { headers: { "Cache-Control": "no-store" } },
   );
 });
@@ -49,10 +51,12 @@ export const PATCH = handler<Ctx>(async (request, { params }) => {
   return NextResponse.json(data);
 });
 
-/** Deletes the novel with its chapters and memory (cascade). The UI asks for explicit confirmation. */
+/** Deletes the novel with its chapters, memory and images (cascade). The UI asks for explicit confirmation. */
 export const DELETE = handler<Ctx>(async (_request, { params }) => {
   const id = assertId((await params).id, "Novela");
+  const files = await imageFiles("novel_id", id);
   const { error } = await db().from("novels").delete().eq("id", id);
   if (error) throw error;
+  await removeFiles(files);
   return new NextResponse(null, { status: 204 });
 });

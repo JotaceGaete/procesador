@@ -129,6 +129,35 @@ create table if not exists public.fact_characters (
   foreign key (character_id, novel_id) references public.characters(id, novel_id) on delete cascade
 );
 
+-- Memoria visual: imagen principal y galería de cada personaje.
+-- Los archivos viven en el bucket privado 'character-images'; aquí sólo referencias y metadatos.
+-- stage_label es una etiqueta descriptiva ("1982", "tras la cárcel"), no un dato cronológico.
+create table if not exists public.character_images (
+  id           uuid primary key default gen_random_uuid(),
+  novel_id     uuid not null references public.novels(id) on delete cascade,
+  character_id uuid not null,
+  storage_path text not null unique,
+  thumb_path   text not null unique,
+  content_type text not null check (content_type in ('image/webp', 'image/jpeg', 'image/png')),
+  -- Sube cuando cambian los bytes; va en la ruta y en la URL, así una versión vieja nunca se sirve.
+  version      integer not null default 1 check (version > 0),
+  caption      text not null default '',
+  stage_label  text not null default '',
+  is_primary   boolean not null default false,
+  sort_order   integer not null default 0,
+  width        integer not null check (width > 0),
+  height       integer not null check (height > 0),
+  bytes        integer not null check (bytes > 0),
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  foreign key (character_id, novel_id) references public.characters(id, novel_id) on delete cascade
+);
+create index if not exists character_images_character_idx on public.character_images(character_id, sort_order);
+create index if not exists character_images_novel_idx on public.character_images(novel_id);
+-- Como mucho una imagen principal por personaje.
+create unique index if not exists character_images_one_primary
+  on public.character_images(character_id) where is_primary;
+
 -- ---------------------------------------------------------------------------
 -- Triggers
 -- ---------------------------------------------------------------------------
@@ -154,11 +183,52 @@ end $$;
 do $$
 declare t text;
 begin
-  foreach t in array array['novels', 'characters', 'relationships', 'places', 'facts'] loop
+  foreach t in array array['novels', 'characters', 'relationships', 'places', 'facts', 'character_images'] loop
     execute format('drop trigger if exists %I_touch on public.%I', t, t);
     execute format('create trigger %I_touch before update on public.%I for each row execute function public.touch_row()', t, t);
   end loop;
 end $$;
+
+-- Al añadir: se coloca al final, la primera del personaje es la principal y hay un máximo por personaje.
+-- El bloqueo de la fila del personaje serializa subidas simultáneas.
+create or replace function public.character_image_insert() returns trigger
+language plpgsql set search_path = '' as $$
+declare v_count integer;
+begin
+  -- duplicate_novel copia filas tal cual (orden y principal incluidos).
+  if current_setting('procesador.copying_images', true) = 'on' then
+    return new;
+  end if;
+  perform 1 from public.characters where id = new.character_id for update;
+  select count(*) into v_count from public.character_images where character_id = new.character_id;
+  if v_count >= 40 then
+    raise exception 'Máximo 40 imágenes por personaje.' using errcode = '22023';
+  end if;
+  new.sort_order = coalesce((select max(sort_order) + 1 from public.character_images where character_id = new.character_id), 1);
+  new.is_primary = v_count = 0;
+  return new;
+end $$;
+
+-- Al borrar la principal, la siguiente en orden pasa a serlo (si queda alguna).
+create or replace function public.character_image_deleted() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  if old.is_primary then
+    update public.character_images set is_primary = true
+    where id = (select id from public.character_images
+                where character_id = old.character_id
+                order by sort_order, created_at limit 1)
+      and not exists (select 1 from public.character_images where character_id = old.character_id and is_primary);
+  end if;
+  return null;
+end $$;
+
+drop trigger if exists character_images_insert on public.character_images;
+create trigger character_images_insert before insert on public.character_images
+  for each row execute function public.character_image_insert();
+drop trigger if exists character_images_deleted on public.character_images;
+create trigger character_images_deleted after delete on public.character_images
+  for each row execute function public.character_image_deleted();
 
 drop trigger if exists chapters_touch on public.chapters;
 create trigger chapters_touch before update on public.chapters
@@ -210,12 +280,43 @@ begin
   where c.id = o.id and c.novel_id = p_novel;
 end $$;
 
+-- Imagen principal: quita la anterior y marca ésta, en una transacción.
+create or replace function public.set_primary_image(p_image uuid)
+returns void language plpgsql set search_path = '' as $$
+declare v_character uuid;
+begin
+  select character_id into v_character from public.character_images where id = p_image;
+  if v_character is null then
+    raise exception 'Imagen no encontrada' using errcode = 'P0002';
+  end if;
+  perform 1 from public.characters where id = v_character for update;
+  update public.character_images set is_primary = false where character_id = v_character and is_primary and id <> p_image;
+  update public.character_images set is_primary = true where id = p_image;
+end $$;
+
+-- Reordena la galería en una transacción. Exige la lista completa de imágenes de ese personaje.
+create or replace function public.reorder_character_images(p_character uuid, p_ids uuid[])
+returns void language plpgsql set search_path = '' as $$
+begin
+  if (select count(*) from public.character_images where character_id = p_character) <> cardinality(p_ids)
+     or (select count(*) from public.character_images where character_id = p_character and id = any(p_ids)) <> cardinality(p_ids)
+     or (select count(distinct x) from unnest(p_ids) x) <> cardinality(p_ids) then
+    raise exception 'La lista de imágenes no coincide con la galería' using errcode = '22023';
+  end if;
+  update public.character_images i set sort_order = o.ord
+  from unnest(p_ids) with ordinality as o(id, ord)
+  where i.id = o.id and i.character_id = p_character;
+end $$;
+
 -- Copia completa de una novela (capítulos y memoria) con ids nuevos, en una transacción.
+-- Devuelve el id nuevo y los archivos de imagen que el servidor debe copiar en Storage.
+drop function if exists public.duplicate_novel(uuid, text);
 create or replace function public.duplicate_novel(p_novel uuid, p_title text)
-returns uuid language plpgsql set search_path = '' as $$
+returns jsonb language plpgsql set search_path = '' as $$
 declare
   v_new uuid := gen_random_uuid();
-  m_chap jsonb; m_char jsonb; m_place jsonb; m_fact jsonb;
+  m_chap jsonb; m_char jsonb; m_place jsonb; m_fact jsonb; m_img jsonb;
+  v_copies jsonb;
 begin
   insert into public.novels (id, title, synopsis, notes, guide)
   select v_new, p_title, synopsis, notes, guide from public.novels where id = p_novel;
@@ -251,7 +352,25 @@ begin
   select (m_fact ->> fc.fact_id::text)::uuid, (m_char ->> fc.character_id::text)::uuid, v_new
   from public.fact_characters fc where fc.novel_id = p_novel;
 
-  return v_new;
+  -- Las rutas cambian de novela, personaje e id; el trigger de inserción no debe reordenar ni elegir principal.
+  select coalesce(jsonb_object_agg(id, gen_random_uuid()), '{}') into m_img from public.character_images where novel_id = p_novel;
+  perform set_config('procesador.copying_images', 'on', true);
+  insert into public.character_images (id, novel_id, character_id, storage_path, thumb_path, content_type, version,
+    caption, stage_label, is_primary, sort_order, width, height, bytes)
+  select (m_img ->> i.id::text)::uuid, v_new, (m_char ->> i.character_id::text)::uuid,
+    concat_ws('/', v_new, m_char ->> i.character_id::text, (m_img ->> i.id::text) || '-v' || i.version || substring(i.storage_path from '\.[a-z]+$')),
+    concat_ws('/', v_new, m_char ->> i.character_id::text, (m_img ->> i.id::text) || '-v' || i.version || '.thumb' || substring(i.thumb_path from '\.[a-z]+$')),
+    i.content_type, i.version, i.caption, i.stage_label, i.is_primary, i.sort_order, i.width, i.height, i.bytes
+  from public.character_images i where i.novel_id = p_novel;
+  perform set_config('procesador.copying_images', 'off', true);
+
+  select coalesce(jsonb_agg(jsonb_build_array(p.old_path, p.new_path)), '[]') into v_copies
+  from public.character_images oi
+  join public.character_images ni on ni.id = (m_img ->> oi.id::text)::uuid
+  cross join lateral (values (oi.storage_path, ni.storage_path), (oi.thumb_path, ni.thumb_path)) as p(old_path, new_path)
+  where oi.novel_id = p_novel;
+
+  return jsonb_build_object('id', v_new, 'copies', v_copies);
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -262,7 +381,8 @@ end $$;
 do $$
 declare t text;
 begin
-  foreach t in array array['novels', 'chapters', 'characters', 'relationships', 'places', 'facts', 'fact_characters'] loop
+  foreach t in array array['novels', 'chapters', 'characters', 'relationships', 'places', 'facts', 'fact_characters',
+                           'character_images'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('revoke all on public.%I from anon, authenticated', t);
     execute format('grant all on public.%I to service_role', t);
@@ -276,5 +396,25 @@ revoke execute on function public.library() from public, anon, authenticated;
 revoke execute on function public.novel_outline(uuid) from public, anon, authenticated;
 revoke execute on function public.reorder_chapters(uuid, uuid[]) from public, anon, authenticated;
 revoke execute on function public.duplicate_novel(uuid, text) from public, anon, authenticated;
+revoke execute on function public.character_image_insert() from public, anon, authenticated;
+revoke execute on function public.character_image_deleted() from public, anon, authenticated;
+revoke execute on function public.set_primary_image(uuid) from public, anon, authenticated;
+revoke execute on function public.reorder_character_images(uuid, uuid[]) from public, anon, authenticated;
 grant execute on function public.word_count(text), public.library(), public.novel_outline(uuid),
-  public.reorder_chapters(uuid, uuid[]), public.duplicate_novel(uuid, text) to service_role;
+  public.reorder_chapters(uuid, uuid[]), public.duplicate_novel(uuid, text),
+  public.set_primary_image(uuid), public.reorder_character_images(uuid, uuid[]) to service_role;
+
+-- ---------------------------------------------------------------------------
+-- Storage: bucket privado para las imágenes de personajes.
+-- Sin políticas en storage.objects: sólo la service_role (el servidor) lee y escribe.
+-- Se omite donde no existe el esquema storage (p. ej. el Postgres de las pruebas E2E).
+-- ---------------------------------------------------------------------------
+do $$ begin
+  if to_regclass('storage.buckets') is not null then
+    insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+    values ('character-images', 'character-images', false, 4194304, array['image/webp', 'image/jpeg', 'image/png'])
+    on conflict (id) do update set public = false,
+                                   file_size_limit = excluded.file_size_limit,
+                                   allowed_mime_types = excluded.allowed_mime_types;
+  end if;
+end $$;

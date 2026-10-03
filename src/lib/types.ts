@@ -106,6 +106,24 @@ export interface Fact {
   character_ids: string[];
 }
 
+/** One image of a character's visual memory. Files live in private Storage; this is metadata only. */
+export interface CharacterImage {
+  id: string;
+  novel_id: string;
+  character_id: string;
+  content_type: "image/webp" | "image/jpeg" | "image/png";
+  version: number;
+  caption: string;
+  /** Descriptive label ("1982", "tras la cárcel"). Not chronological data: the app never interprets it. */
+  stage_label: string;
+  is_primary: boolean;
+  sort_order: number;
+  width: number;
+  height: number;
+  bytes: number;
+  created_at: string;
+}
+
 export interface Memory {
   characters: Character[];
   relationships: Relationship[];

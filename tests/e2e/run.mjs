@@ -3,6 +3,7 @@
 // and tears everything down. Nothing external is created and no real keys are used.
 //
 //   Postgres (temporary cluster) ← PostgREST ← gateway at /rest/v1 (like Supabase)
+//   In-memory Storage (tests/mock-storage.mjs) at /storage/v1, private buckets only
 //   Mock Anthropic / OpenAI / xAI APIs (tests/mock-ai.mjs) on the same gateway
 //   The app: `next build` + two `next start` servers
 //     - main:   APP_PASSWORD set, all three providers pointing at the mocks
@@ -24,6 +25,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { handleAI } from "../mock-ai.mjs";
+import { createStorage } from "../mock-storage.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const POSTGREST_VERSION = "v12.2.3";
@@ -178,15 +180,18 @@ async function postgrestBin() {
 }
 
 // ---------------------------------------------------------------------------
-// Gateway: /rest/v1 → PostgREST (like Supabase), AI mocks, request log
+// Gateway: /rest/v1 → PostgREST (like Supabase), /storage/v1 → mock Storage, AI mocks, request log
 // ---------------------------------------------------------------------------
 
 function startGateway(port, postgrestPort) {
   const aiLog = [];
+  const storage = createStorage(JWT_SECRET);
   const server = http.createServer((req, res) => {
-    let body = "";
-    req.on("data", (c) => (body += c));
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
     req.on("end", () => {
+      const raw = Buffer.concat(chunks);
+      const body = raw.toString();
       if (req.url.startsWith("/rest/v1/")) {
         const up = http.request(
           {
@@ -202,8 +207,9 @@ function startGateway(port, postgrestPort) {
           },
         );
         up.on("error", () => (res.writeHead(502), res.end()));
-        return up.end(body);
+        return up.end(raw);
       }
+      if (storage.handle(req, res, raw)) return;
       if (req.url === "/__log") return res.end(JSON.stringify(aiLog));
       if (req.url === "/__log/clear") {
         aiLog.length = 0;
