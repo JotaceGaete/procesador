@@ -17,6 +17,7 @@ Procesador de textos personal para escribir novelas con asistencia de IA. Tú im
   - *Editar selección*: Redacción, Diálogo, Expandir, Acortar, Consistencia, Personaje, Evolución. Es conservador: preserva hechos, intención, voz y regionalismos. Las propuestas se muestran como **Original / Propuesta**.
   - *Escribir escena*: escribes el argumento y pulsas **Desarrollar escena**. Puedes marcar quién está en escena, el lugar y la extensión. Tu argumento es la autoridad sobre lo que ocurre; la IA sólo decide cómo contarlo. La escena se puede **insertar en el cursor**.
   - Nada se escribe en el manuscrito sin tu clic. Cada propuesta ofrece *Otra versión*, *Copiar*, *Descartar* y *Probar con* otro proveedor. Reemplazar e insertar se deshacen con `Ctrl/⌘+Z`.
+- **Imágenes del manuscrito** (contenido del libro): botón *Imágenes*, pegar o arrastrar una imagen sobre el texto. Cada imagen es un párrafo marcador `[[imagen:…]]`; al poner el cursor encima aparece su tarjeta: texto alternativo (o *decorativa*), pie, crédito, disposición (en el texto o página propia), alineación, ancho y aviso de resolución calculado con el original. *Quitar del capítulo* la deja *sin colocar*, conservada. *Lectura* muestra el capítulo con sus imágenes. Una imagen de una galería se inserta sin copiar el archivo. El asistente sólo ve `[Imagen: …]`, y una reescritura que pierde una imagen no se aplica sin avisar.
 - **Concentración** (`Ctrl/⌘ + .`, `Esc` para salir): sólo el texto y el cursor.
 - **Guardado**: automático, por capítulo.
   - Si un capítulo cambió en otra pestaña o dispositivo, no se pisa: eliges *Cargar esa versión* o *Conservar la mía*.
@@ -83,11 +84,14 @@ npm run test:all    # ambas
 | `tests/unit/auth.test.ts` | Sesión firmada y caducidad, cierre por defecto sin `APP_PASSWORD` |
 | `tests/unit/providers.test.ts` | Claude, GPT y Grok: streaming, caché del manuscrito, rechazos, errores, cancelación |
 | `tests/e2e/api.test.mjs` | Biblioteca, capítulos, revisiones y conflictos, memoria, aislamiento entre novelas, duplicar, borrar, construcción de contexto y cada proveedor |
-| `tests/e2e/security.test.mjs` | Las 25 rutas sin sesión, cookies falsificadas, 503 sin contraseña, clave pública sin acceso a tablas, funciones ni al bucket, claves fuera del bundle, manuscrito fuera de los logs |
+| `tests/e2e/security.test.mjs` | Las 31 rutas sin sesión, cookies falsificadas, 503 sin contraseña, clave pública sin acceso a tablas, funciones ni al bucket, claves fuera del bundle, manuscrito fuera de los logs |
 | `tests/unit/images.test.ts` | Formato y tamaño de imagen leídos de los bytes (JPEG, PNG, WebP, AVIF), rutas y URLs versionadas |
 | `tests/e2e/assets-reuse.test.mjs` | Archivos repetidos (antes de subir y al terminar, sólo dentro de la novela) y reemplazar: sólo esta imagen o todos los usos, conservando pie, etiqueta, orden y principal, sin tocar otros usos |
 | `tests/e2e/assets.test.mjs` | Archivos: subida firmada de un solo uso, original conservado, derivados, caché versionada, galería (principal única, orden, límite), archivos compartidos sin duplicar, borrado seguro, aislamiento entre novelas, limpieza, duplicar novela, nada llega a la IA |
 | `tests/e2e/gallery-ui.test.mjs` | Galería en el navegador: tarjetas con iniciales sin imagen, subir con selector y arrastrando, imagen principal, visor con pie y etapa, ordenar, eliminar, Escape, límite de 40, sólo miniaturas y versiones reducidas, móvil |
+| `tests/unit/manuscript.test.ts` | Formato del marcador (línea propia, dentro de un párrafo, repetidos), recuento de palabras, sustitución y restauración en el asistente, resolución de impresión |
+| `tests/e2e/manuscript.test.mjs` | Imágenes del manuscrito: insertar, editar, mover, quitar y recuperar, sin colocar, borrar capítulo, reutilización y archivo compartido con galerías, reemplazar, borrado seguro, orientación EXIF, asistente, duplicar novela reescribiendo marcadores, aislamiento |
+| `tests/e2e/manuscript-ui.test.mjs` | Insertar con botón, pegar y arrastrar; tarjeta; escribir sobre la imagen; quitar y recuperar; vista de lectura; desde una galería; reemplazo compartido; protección en el asistente; móvil |
 | `tests/e2e/ui.test.mjs` | Flujo completo en el navegador: autoguardado, memoria, guía, capítulos, retomar posición, Desarrollar escena e insertar con deshacer, Original/Propuesta, cambio de proveedor, conflicto, concentración, móvil, capítulo de 1 MB |
 
 Requisitos de la E2E:

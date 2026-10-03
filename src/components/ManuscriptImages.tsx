@@ -74,6 +74,13 @@ export function ImageCard({
   const [alt, setAlt] = useState(image?.alt ?? "");
   const [caption, setCaption] = useState(image?.caption ?? "");
   const [credit, setCredit] = useState(image?.credit ?? "");
+  // Choices show at once and save in the background (back to the saved value if that fails).
+  const [choice, setChoice] = useState({
+    decorative: image?.decorative ?? false,
+    layout: image?.layout ?? "inline",
+    align: image?.align ?? "center",
+    width_pct: image?.width_pct ?? 100,
+  });
   const [status, setStatus] = useState({ text: "", error: false });
   const [busy, setBusy] = useState(false);
   const [choosing, setChoosing] = useState(false);
@@ -84,10 +91,16 @@ export function ImageCard({
     setAlt(image?.alt ?? "");
     setCaption(image?.caption ?? "");
     setCredit(image?.credit ?? "");
+    setChoice({
+      decorative: image?.decorative ?? false,
+      layout: image?.layout ?? "inline",
+      align: image?.align ?? "center",
+      width_pct: image?.width_pct ?? 100,
+    });
     setStatus({ text: "", error: false });
     setChoosing(false);
-    // Only when another image is shown: keep the confirmation of this one's saves.
-  }, [id, image?.asset_id]);
+    // Only when another image is shown: a save or a replacement of this one keeps its confirmation.
+  }, [id]);
 
   async function run(fn: () => Promise<unknown>, done = "Guardado") {
     setBusy(true);
@@ -101,6 +114,18 @@ export function ImageCard({
       setBusy(false);
     }
   }
+  const choose = (fields: Partial<typeof choice>) => {
+    const previous = choice;
+    setChoice({ ...choice, ...fields });
+    run(async () => {
+      try {
+        await onPatch(fields);
+      } catch (e) {
+        setChoice(previous);
+        throw e;
+      }
+    });
+  };
   const saveText = () => {
     if (!image) return;
     const fields: Fields = {};
@@ -160,10 +185,10 @@ export function ImageCard({
         <img className="image-card-thumb" src={assetUrl(image.asset, "thumb")} alt="" width={image.asset.width} height={image.asset.height} />
         <div className="image-card-fields">
           <label>
-            <span>Texto alternativo {image.decorative ? "(no necesario: decorativa)" : ""}</span>
+            <span>Texto alternativo {choice.decorative ? "(no necesario: decorativa)" : ""}</span>
             <input
               value={alt}
-              disabled={image.decorative}
+              disabled={choice.decorative}
               onChange={(e) => setAlt(e.target.value)}
               onBlur={saveText}
               onKeyDown={enter}
@@ -173,8 +198,8 @@ export function ImageCard({
           <label className="check">
             <input
               type="checkbox"
-              checked={image.decorative}
-              onChange={(e) => run(() => onPatch({ decorative: e.target.checked }))}
+              checked={choice.decorative}
+              onChange={(e) => choose({ decorative: e.target.checked })}
             />
             Decorativa (sin contenido informativo)
           </label>
@@ -189,7 +214,7 @@ export function ImageCard({
           <div className="image-card-row">
             <label>
               <span>Disposición</span>
-              <select value={image.layout} onChange={(e) => run(() => onPatch({ layout: e.target.value as "inline" | "page" }))}>
+              <select value={choice.layout} onChange={(e) => choose({ layout: e.target.value as "inline" | "page" })}>
                 <option value="inline">En el texto</option>
                 <option value="page">Página propia</option>
               </select>
@@ -197,9 +222,9 @@ export function ImageCard({
             <label>
               <span>Alineación</span>
               <select
-                value={image.align}
-                disabled={image.layout === "page"}
-                onChange={(e) => run(() => onPatch({ align: e.target.value as Fields["align"] }))}
+                value={choice.align}
+                disabled={choice.layout === "page"}
+                onChange={(e) => choose({ align: e.target.value as ManuscriptImage["align"] })}
               >
                 <option value="center">Centrada</option>
                 <option value="left">Izquierda</option>
@@ -209,9 +234,9 @@ export function ImageCard({
             <label>
               <span>Ancho</span>
               <select
-                value={image.width_pct}
-                disabled={image.layout === "page"}
-                onChange={(e) => run(() => onPatch({ width_pct: Number(e.target.value) as Fields["width_pct"] }))}
+                value={choice.width_pct}
+                disabled={choice.layout === "page"}
+                onChange={(e) => choose({ width_pct: Number(e.target.value) as ManuscriptImage["width_pct"] })}
               >
                 {[25, 50, 75, 100].map((w) => (
                   <option key={w} value={w}>
@@ -223,7 +248,7 @@ export function ImageCard({
           </div>
         </div>
       </div>
-      <ResolutionNote image={image} />
+      <ResolutionNote image={{ ...image, ...choice }} />
       {repeated && <p className="error small">Esta imagen aparece más de una vez en el capítulo. Para otra copia independiente, usa Duplicar.</p>}
       {choosing && (
         <div className="replace-choice" role="group" aria-label="Qué reemplazar">

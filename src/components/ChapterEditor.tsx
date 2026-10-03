@@ -166,6 +166,28 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
 
   const imageFiles = (list: FileList | null | undefined) => [...(list ?? [])].filter((f) => f.type.startsWith("image/"));
 
+  // Typing on an image's line would turn its marker into plain text: the text starts a new
+  // paragraph below the image instead. `beforeinput` sees every way of typing (keyboards,
+  // phone keyboards, dictation), unlike keydown.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const onBeforeInput = (e: InputEvent) => {
+      if (e.inputType !== "insertText" || !e.data || el.selectionStart !== el.selectionEnd) return;
+      const img = imageAt(el.value, el.selectionStart);
+      if (!img) return;
+      e.preventDefault();
+      el.setSelectionRange(img.end, img.end);
+      // One undoable step: the new paragraph and what was typed.
+      if (!document.execCommand("insertText", false, `\n\n${e.data}`)) {
+        const v = el.value;
+        setContent(`${v.slice(0, img.end)}\n\n${e.data}${v.slice(img.end)}`);
+      }
+    };
+    el.addEventListener("beforeinput", onBeforeInput);
+    return () => el.removeEventListener("beforeinput", onBeforeInput);
+  }, []);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -192,7 +214,8 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
       },
       insertImages(ids) {
         if (!ids.length) return;
-        insertParagraphs(ids.map(marker).join("\n\n"), cursorRef.current);
+        // The textarea keeps its selection while something else has the focus (a panel, a button).
+        insertParagraphs(ids.map(marker).join("\n\n"), textareaRef.current?.selectionEnd ?? cursorRef.current);
       },
       insertImageAfter(existingId, id) {
         const block = imageBlock(existingId);
@@ -247,21 +270,6 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
       onKeyUp={updateSelection}
       onBlur={savePosition}
       hidden={hidden}
-      onKeyDown={(e) => {
-        // Typing on an image's line would turn its marker into plain text: start a new
-        // paragraph below the image instead, and let the key land there.
-        const el = e.currentTarget;
-        if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey || el.selectionStart !== el.selectionEnd) return;
-        const img = imageAt(el.value, el.selectionStart);
-        if (!img) return;
-        el.setSelectionRange(img.end, img.end);
-        if (!document.execCommand("insertText", false, "\n\n")) {
-          e.preventDefault();
-          const v = el.value;
-          setContent(`${v.slice(0, img.end)}\n\n${e.key}${v.slice(img.end)}`);
-          requestAnimationFrame(() => el.setSelectionRange(img.end + 3, img.end + 3));
-        }
-      }}
       onPaste={(e) => {
         const files = imageFiles(e.clipboardData?.files);
         if (!files.length || !onImageFiles) return;

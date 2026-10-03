@@ -1,6 +1,6 @@
 # Imágenes del manuscrito (Prioridad 2b)
 
-> Estado: **propuesta final, revisada para publicación. Sin implementar.**
+> Estado: **implementada (Prioridad 2b).** La exportación (PDF, EPUB, DOCX) queda fuera: este modelo deja los datos listos para ella.
 > Usa la [arquitectura común de archivos](archivos.md), ya implementada con la galería de Personajes. No es un editor gráfico: una imagen se comporta como un bloque más del capítulo, igual que un párrafo.
 
 ## Qué es
@@ -70,7 +70,7 @@ Un editor de bloques futuro (por ejemplo ProseMirror/TipTap) dibujaría cada mar
 
 Reglas del formato, documentadas en `src/lib/manuscript.ts`, que leen tanto el editor como la futura exportación:
 
-1. Un marcador es `[[imagen:<uuid>]]` **solo en su propio párrafo**, con líneas en blanco antes y después o al principio o final del capítulo.
+1. Un marcador es `[[imagen:<uuid>]]` **solo en su propia línea** (se ignoran espacios alrededor). El editor lo inserta siempre como párrafo propio, con líneas en blanco antes y después.
 2. Un marcador dentro de un párrafo con texto no es una imagen: el editor lo señala ("marcador dentro de un párrafo") y la exportación lo trata como texto.
 3. La sintaxis `[[…]]` queda reservada para bloques futuros del formato, como un separador de escena `[[separador]]`.
 
@@ -219,6 +219,13 @@ Nada de esto exige decidir hoy formato de página, tipografía ni motor de maque
   - el panel de imágenes del capítulo y las sin colocar;
   - la vista de lectura con disposición, alineación y ancho;
   - móvil.
+
+## Comportamiento del editor (implementado)
+
+- **Escribir sobre la línea de una imagen** no rompe el marcador: el texto empieza un párrafo nuevo debajo de la imagen. Se intercepta `beforeinput`, así que funciona también con teclados de móvil y dictado.
+- **Al insertar,** el marcador entra en el cursor al instante y la imagen se sube en segundo plano. El servidor la coloca en su capítulo al terminar, sin esperar a otro guardado.
+- **Las opciones de la tarjeta** (decorativa, disposición, alineación, ancho) se ven al momento y se guardan en segundo plano. Si el guardado falla, vuelven a su valor.
+- **Imágenes existentes en la base de datos:** las subidas antes de 2b tienen `orientation = 1` y sus dimensiones sin orientar. Si alguna foto vertical aparece apaisada, basta con reemplazar su archivo para que se lea su orientación.
 
 ## Orden de implementación propuesto
 

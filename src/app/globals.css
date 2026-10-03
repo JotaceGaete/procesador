@@ -1411,7 +1411,7 @@ details.group > p {
 }
 .image-card-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 0.8fr);
   gap: 8px;
 }
 .image-card-actions {

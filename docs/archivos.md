@@ -189,7 +189,7 @@ Como el archivo nuevo tiene otro id, su URL es otra. Con eso la caché del naveg
 
 **Pendiente:**
 
-- `manuscript_images` (Prioridad 2b). Al añadirla, se incluye en `asset_in_use`, `replace_asset_uses`, `assetUses` y `duplicate_novel`.
+- Lugares e Investigación. Cada nueva tabla de uso se incluye en `asset_in_use`, `replace_asset_uses`, `assetUses` y `duplicate_novel`, como ya están `character_images` y `manuscript_images` (Prioridad 2b, implementada).
 
 ## Orden de implementación propuesto
 
