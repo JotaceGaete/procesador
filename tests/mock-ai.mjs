@@ -58,6 +58,31 @@ function readingReply(system, user) {
   });
 }
 
+/**
+ * The Consejero's answer: Markdown, then <observaciones> with one card quoting the open
+ * chapter, one with an invented quote, one attributed to the wrong chapter, and for
+ * "¿Cómo seguir?" three alternatives. "OBS-ROTAS" in the request breaks the JSON.
+ */
+function adviceReply(system, user) {
+  if (!system.includes("<consejero>")) return null;
+  const m = user.match(/<capitulo-actual numero="(\d+)"[^>]*>\n([\s\S]*?)\n<\/capitulo-actual>/);
+  const n = m ? Number(m[1]) : 1;
+  const text = m ? m[2] : "";
+  const quote = text.split(/(?<=[.!?])\s/)[0].split(/\s+/).slice(0, 6).join(" ").replace(/[.,;:!?]+$/, "");
+  const task = (user.match(/<tarea>\n([^\n]+)/) ?? [])[1] ?? "";
+  const cards = [
+    { kind: "pacing", title: "Arranque lento", body: "El capítulo tarda en entrar en conflicto.", confidence: "medium", refs: [{ chapter: n, quote }] },
+    { kind: "problem", title: "Una impresión", body: "Algo no termina de encajar.", confidence: "high", refs: [{ chapter: n, quote: "una cita que el modelo inventó" }] },
+    { kind: "opportunity", title: "Mal atribuida", body: "Cita del capítulo abierto, con otro número.", confidence: "low", refs: [{ chapter: n === 1 ? 2 : 1, quote }] },
+  ];
+  if (task.includes("caminos razonables")) {
+    for (const t of ["Seguir el conflicto", "Recuperar un cabo", "Cambiar de personaje"])
+      cards.push({ kind: "alternative", title: t, body: `${t}: qué aprovecha de lo escrito.`, confidence: "medium", refs: [{ chapter: n, quote }] });
+  }
+  const json = user.includes("OBS-ROTAS") ? "[{ roto" : JSON.stringify(cards, null, 1);
+  return `## Lectura del Consejero\n\n${task.split(":")[0]}.\n\n<observaciones>\n${json}\n</observaciones>`;
+}
+
 const sse = (res, events) => {
   res.writeHead(200, { "content-type": "text/event-stream" });
   for (const [event, data] of events) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -75,6 +100,7 @@ export function handleAI(req, res, body, log) {
     const system = JSON.stringify(json.system ?? "");
     const text =
       readingReply((json.system ?? []).map?.((b) => b.text).join("\n") ?? String(json.system ?? ""), json.messages?.[0]?.content ?? "") ??
+      adviceReply((json.system ?? []).map?.((b) => b.text).join("\n") ?? "", json.messages?.[0]?.content ?? "") ??
       (system.includes("<escena>") ? SCENE : body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : EDIT);
     sse(res, [
       [
@@ -115,6 +141,7 @@ export function handleAI(req, res, body, log) {
     const instructions = json.instructions ?? "";
     const text =
       readingReply(instructions, String(json.input ?? "")) ??
+      adviceReply(instructions, String(json.input ?? "")) ??
       (instructions.includes("<escena>") ? SCENE : body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : EDIT);
     const half = Math.floor(text.length / 2);
     let n = 0;
@@ -185,7 +212,7 @@ export function handleAI(req, res, body, log) {
   res.writeHead(200, { "content-type": "text/event-stream" });
   const finish = system.includes("REFUSE-ME") ? "content_filter" : "stop";
   res.write(
-    `data: ${JSON.stringify({ choices: [{ delta: { content: readingReply(system, json.messages?.[1]?.content ?? "") ?? (system.includes("<escena>") ? SCENE : EDIT) }, finish_reason: finish }] })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ delta: { content: readingReply(system, json.messages?.[1]?.content ?? "") ?? adviceReply(system, json.messages?.[1]?.content ?? "") ?? (system.includes("<escena>") ? SCENE : EDIT) }, finish_reason: finish }] })}\n\n`,
   );
   res.write(
     `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 1200, completion_tokens: 30, prompt_tokens_details: { cached_tokens: 1000 } } })}\n\n`,

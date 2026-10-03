@@ -1724,3 +1724,101 @@ details.group > p {
   font-size: 14px;
   padding: 2px 0;
 }
+
+/* ---------- Consejero: Consultar ---------- */
+.panel .tabs {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+.consult {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.advisor-actions button {
+  font-size: 13px;
+}
+.ask textarea {
+  width: 100%;
+  border: 1px solid var(--faint);
+  background: transparent;
+  border-radius: 4px;
+  padding: 8px;
+  resize: vertical;
+}
+.ask textarea:focus {
+  outline: none;
+  border-color: var(--muted);
+}
+.ask-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.advisor-result .plan {
+  margin: 0;
+}
+.observations {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.observation {
+  border: 1px solid var(--faint);
+  border-left: 3px solid var(--muted);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+.observation p {
+  margin: 0 0 4px;
+}
+.observation.unverified {
+  border-style: dashed;
+  border-left-style: solid;
+}
+.obs-kind {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.obs-title {
+  font-weight: 600;
+}
+.obs-body {
+  font-size: 14px;
+}
+.obs-refs {
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+  font-family: var(--serif);
+  font-size: 14px;
+}
+.obs-refs li.unverified {
+  color: var(--muted);
+}
+.obs-problem,
+.obs-contradiction {
+  border-left-color: var(--danger);
+}
+.obs-problem .obs-kind,
+.obs-contradiction .obs-kind {
+  color: var(--danger);
+}
+.obs-opportunity,
+.obs-alternative {
+  border-left-color: var(--accent);
+}
+.obs-opportunity .obs-kind,
+.obs-alternative .obs-kind {
+  color: var(--accent);
+}
+.obs-repetition,
+.obs-pacing,
+.obs-thread {
+  border-left-color: #8a8a5c;
+}

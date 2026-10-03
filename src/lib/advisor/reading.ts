@@ -35,7 +35,7 @@ interface ChapterRow {
   revision: number;
 }
 
-async function chapterRows(novelId: string): Promise<ChapterRow[]> {
+export async function chapterRows(novelId: string): Promise<ChapterRow[]> {
   const { data, error } = await db()
     .from("chapters")
     .select("id, title, content, revision")
@@ -46,26 +46,26 @@ async function chapterRows(novelId: string): Promise<ChapterRow[]> {
   return data;
 }
 
-async function digestRows(novelId: string): Promise<ChapterDigest[]> {
+export async function digestRows(novelId: string): Promise<ChapterDigest[]> {
   const { data, error } = await db().from("chapter_digests").select("*").eq("novel_id", novelId);
   if (error) throw error;
   return data as ChapterDigest[];
 }
 
-async function threadRows(novelId: string): Promise<StoryThread[]> {
+export async function threadRows(novelId: string): Promise<StoryThread[]> {
   const { data, error } = await db().from("story_threads").select("*").eq("novel_id", novelId).order("created_at");
   if (error) throw error;
   return data as StoryThread[];
 }
 
-async function novelDigestRow(novelId: string): Promise<NovelDigest | null> {
+export async function novelDigestRow(novelId: string): Promise<NovelDigest | null> {
   const { data, error } = await db().from("novel_digests").select("*").eq("novel_id", novelId).maybeSingle();
   if (error) throw error;
   return data as NovelDigest | null;
 }
 
 /** The chapter as the model reads it: image markers become their description. */
-async function readableText(novelId: string, text: string): Promise<string> {
+export async function readableText(novelId: string, text: string): Promise<string> {
   if (!text.includes("[[imagen:")) return text;
   const { data, error } = await db().from("manuscript_images").select("id, alt, caption, decorative").eq("novel_id", novelId);
   if (error) throw error;
@@ -73,7 +73,7 @@ async function readableText(novelId: string, text: string): Promise<string> {
   return describeImages(text, (id) => d.get(id) ?? "");
 }
 
-const digestEstimate = (content: string) => estimateTokens(DIGEST_INSTRUCTIONS.length + content.length + 1500);
+export const digestEstimate = (content: string) => estimateTokens(DIGEST_INSTRUCTIONS.length + content.length + 1500);
 
 // ---------------------------------------------------------------------------
 // State for the panel

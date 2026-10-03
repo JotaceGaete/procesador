@@ -76,3 +76,46 @@ export function novelDigestPrompt(p: {
   const threads = p.threads.length ? p.threads.map((t) => `- ${t.title} (${t.status})`).join("\n") : "(ninguno)";
   return `${chapters}\n\n<cabos>\n${threads}\n</cabos>\n\nEscribe el resumen global.`;
 }
+
+// ---------------------------------------------------------------------------
+// The Consejero's answers (phase 3)
+// ---------------------------------------------------------------------------
+
+export const ADVISE_INSTRUCTIONS = `<consejero>
+Eres el consejero literario del autor: un editor de confianza que piensa con él sobre su novela. No escribes por él.
+
+Autoridad, de mayor a menor: el texto del manuscrito > la Memoria (fichas de personajes, lugares y hechos aprobados) > la Guía Maestra > los cabos confirmados > las fichas de capítulo y el resumen global (son derivados y pueden estar desactualizados) > tu propia inferencia. Si una ficha contradice un pasaje, manda el pasaje.
+
+Reglas:
+- Nunca escribas texto para el manuscrito: ni continuaciones, ni reescrituras, ni escenas. Si propones caminos, los describes; no los escribes.
+- El tono es de preguntas y posibilidades, no de veredictos. La decisión es siempre del autor.
+- Toda observación que afirme algo del texto lleva su referencia: el número de capítulo y una cita LITERAL de 4 a 25 palabras, copiada exactamente. Nunca inventes una cita. Si no puedes citar literalmente, deja "refs" vacío: se mostrará como impresión, no como hallazgo.
+- Usa los datos calculados (menciones, repeticiones) como datos; tu trabajo es interpretarlos.
+- Sé concreto y breve. Escribe en español.
+
+Formato de la respuesta:
+1. Primero, tu respuesta para el autor en Markdown, breve (de 80 a 300 palabras).
+2. Después, exactamente este bloque, con JSON válido:
+<observaciones>
+[{ "kind": "problem" | "repetition" | "contradiction" | "thread" | "opportunity" | "alternative" | "pacing",
+   "title": "título breve", "body": "explicación en 1 a 4 frases",
+   "confidence": "high" | "medium" | "low",
+   "refs": [{ "chapter": 3, "quote": "cita literal" }] }]
+</observaciones>
+De 0 a 8 observaciones.
+</consejero>`;
+
+export const ADVISE_TASKS: Record<string, (chapter: string) => string> = {
+  analizar: (c) =>
+    `Analiza ${c}: qué funciona y qué no, ritmo y estructura, tensión, coherencia con lo anterior. Observaciones de tipo problem, pacing, opportunity o repetition.`,
+  seguir: (c) =>
+    `El autor pregunta cómo seguir desde el final de ${c}. Propón de 3 a 4 caminos razonables, cada uno como una observación de tipo "alternative". En "body", en 2 a 4 frases: qué pasaría y qué aprovecha de lo ya escrito (continuar el conflicto actual, recuperar un cabo anterior, cambiar temporalmente de personaje, una consecuencia de algo ya ocurrido…). Cita en "refs" lo que aprovecha. No escribas la escena ni la continuación.`,
+  repeticiones: (c) =>
+    `Revisa las repeticiones de ${c} y de la novela. El informe calculado trae las frases repetidas y los ecos de palabras: juzga cuáles son un recurso y cuáles un problema. Busca también, en las fichas, situaciones, imágenes o conflictos que se repiten entre capítulos. Observaciones de tipo repetition.`,
+  cabos: () =>
+    `Revisa los cabos de la novela: cuáles siguen abiertos, cuánto hace que no aparecen, cuáles parecen olvidados, y posibles cabos que no están en la lista. Observaciones de tipo thread.`,
+  coherencia: (c) =>
+    `Busca en ${c} contradicciones con lo anterior, con la Memoria y con los hechos aprobados, y revelaciones a destiempo (qué sabe cada personaje en este momento). Observaciones de tipo contradiction o problem, con las dos citas que chocan.`,
+  personajes: (c) =>
+    `Analiza los personajes hasta ${c}: presencia (según los datos), evolución según las fichas, personajes desaprovechados o ausentes demasiado tiempo, y reacciones que no encajan con su ficha. Observaciones de tipo problem u opportunity.`,
+};

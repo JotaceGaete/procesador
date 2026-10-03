@@ -8,6 +8,7 @@ import {
   SCENE_LENGTHS,
   type AIPanelSection,
   type AssistEvent,
+  type ChapterInfo,
   type ContextPart,
   type EditAction,
   type Memory,
@@ -21,7 +22,9 @@ import { appendImages, protectImages, restoreImages } from "@/lib/manuscript";
 import type { Selection } from "./ChapterEditor";
 import AdvisorOverview from "./AdvisorOverview";
 import AdvisorReading from "./AdvisorReading";
-import { formatTokens, formatUsd } from "./format";
+import AdvisorConsult from "./AdvisorConsult";
+import { formatTokens } from "./format";
+import UsageLine from "./UsageLine";
 
 interface Props {
   hidden: boolean;
@@ -34,6 +37,7 @@ interface Props {
   /** Saves the open chapter (a reading is of the saved text). */
   flush(): Promise<boolean>;
   onAutoDigest(on: boolean): void;
+  chapters: ChapterInfo[];
   onClose(): void;
   novelId: string;
   chapterId: string;
@@ -114,6 +118,7 @@ function AssistantPanel(props: Props) {
     onGoTo,
     flush,
     onAutoDigest,
+    chapters,
     onClose,
     novelId,
     chapterId,
@@ -130,7 +135,7 @@ function AssistantPanel(props: Props) {
   } = props;
 
   const [assistantMode, setMode] = useState<Mode>("edit");
-  const [advisorView, setAdvisorView] = useState<"selection" | "overview" | "reading">("selection");
+  const [advisorView, setAdvisorView] = useState<"consult" | "selection" | "overview" | "reading">("consult");
   // Each section remembers its own action.
   const [actions, setActions] = useState<Record<AIPanelSection, EditAction>>({
     assistant: "redaccion",
@@ -428,7 +433,10 @@ function AssistantPanel(props: Props) {
         </nav>
       ) : (
         <nav className="tabs" aria-label="Vista">
-          <button className={!overview ? "on" : undefined} onClick={() => setAdvisorView("selection")}>
+          <button className={advisorView === "consult" ? "on" : undefined} onClick={() => setAdvisorView("consult")}>
+            Consultar
+          </button>
+          <button className={advisorView === "selection" ? "on" : undefined} onClick={() => setAdvisorView("selection")}>
             Sobre la selección
           </button>
           <button className={advisorView === "overview" ? "on" : undefined} onClick={() => setAdvisorView("overview")}>
@@ -441,7 +449,32 @@ function AssistantPanel(props: Props) {
       )}
 
       {overview ? (
-        hidden ? null : advisorView === "overview" ? (
+        hidden ? null : advisorView === "consult" ? (
+          <>
+            {providerSelect && <div className="controls">{providerSelect}</div>}
+            <AdvisorConsult
+              novelId={novelId}
+              chapterId={chapterId}
+              chapters={chapters}
+              provider={provider}
+              providers={providers}
+              onProvider={(x) => {
+                setProvider(x);
+                writePref("provider", x);
+              }}
+              selection={selection}
+              confirmTokens={confirmTokens}
+              getContent={getContent}
+              onGoTo={onGoTo}
+              onSendToAssistant={(text) => {
+                // The author chose a path: the Asistente gets it as the argument of a scene.
+                setArgument(text);
+                setMode("scene");
+                onSection("assistant");
+              }}
+            />
+          </>
+        ) : advisorView === "overview" ? (
           <AdvisorOverview novelId={novelId} chapterId={chapterId} memory={memory} getContent={getContent} onGoTo={onGoTo} />
         ) : (
           <>
@@ -705,26 +738,6 @@ function AssistantPanel(props: Props) {
         </section>
       )}
     </aside>
-  );
-}
-
-/** Discreet: what the AI read (estimated) and what the provider reported it used. */
-function UsageLine({ parts, usage }: { parts: ContextPart[] | null; usage: Usage | null }) {
-  const read = parts
-    ?.filter((p) => p.tokens > 0)
-    .map((p) => `${p.label.toLowerCase()} ≈${formatTokens(p.tokens)}`)
-    .join(" · ");
-  return (
-    <p className="usage-line muted small">
-      {read && <span>Leyó: {read}.</span>}{" "}
-      {usage && (
-        <span title={usage.model}>
-          {formatTokens(usage.input)} tokens de entrada
-          {usage.cached > 0 && ` (${formatTokens(usage.cached)} en caché)`} → {formatTokens(usage.output)} de salida
-          {usage.costUsd != null && ` · ≈ ${formatUsd(usage.costUsd)}`}
-        </span>
-      )}
-    </p>
   );
 }
 

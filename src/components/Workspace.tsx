@@ -489,6 +489,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
         onGoTo={goTo}
         flush={flush}
         onAutoDigest={onAutoDigest}
+        chapters={chapters}
         onClose={() => toggle("panelOpen", setPanelOpen)}
         novelId={novel.id}
         chapterId={chapter.id}

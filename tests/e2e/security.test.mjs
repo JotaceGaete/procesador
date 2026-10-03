@@ -24,6 +24,7 @@ const ROUTES = [
   ["DELETE", `/api/memory/facts/${U}`],
   ["POST", "/api/assist"],
   ["POST", `/api/novels/${U}/advisor`],
+  ["POST", "/api/advisor"],
   ["GET", `/api/novels/${U}/reading`],
   ["POST", `/api/novels/${U}/digest`],
   ["POST", `/api/novels/${U}/threads`],

@@ -20,9 +20,13 @@ export interface CompletionRequest {
   signal: AbortSignal;
   /** Which configured model answers: writing (default), advice or the cheaper analysis one. */
   role?: AIRole;
+  /** Output cap (default 16000). Quick advice is short. */
+  maxOutputTokens?: number;
+  /** `project` is a stable frame reused across requests: cache it where the API allows. */
+  cacheProject?: boolean;
 }
 
-type ProviderEvent = Exclude<AssistEvent, { type: "error" } | { type: "context" }>;
+type ProviderEvent = Exclude<AssistEvent, { type: "error" } | { type: "context" } | { type: "plan" } | { type: "observations" }>;
 
 /** The usage event every provider yields once, before a refusal or truncation. */
 function usage(model: string, input: number, cached: number, output: number): ProviderEvent {
@@ -96,13 +100,19 @@ async function* streamAnthropic(req: CompletionRequest): AsyncGenerator<Provider
     // in a row over the same text are billed at the cached rate.
     system.push({ type: "text", text: req.manuscript, cache_control: { type: "ephemeral" } });
   }
-  system.push({ type: "text", text: req.project });
+  if (req.project) {
+    system.push(
+      req.cacheProject
+        ? { type: "text", text: req.project, cache_control: { type: "ephemeral" } }
+        : { type: "text", text: req.project },
+    );
+  }
 
   const model = modelFor("anthropic", req.role);
   const stream = anthropic.messages.stream(
     {
       model,
-      max_tokens: 16000,
+      max_tokens: req.maxOutputTokens ?? 16000,
       output_config: { effort: (process.env.ANTHROPIC_EFFORT as Effort) || "medium" },
       system,
       messages: [{ role: "user", content: req.prompt }],
@@ -141,7 +151,7 @@ async function* streamOpenAI(req: CompletionRequest): AsyncGenerator<ProviderEve
       model,
       instructions: [req.instructions, req.manuscript, req.project].filter(Boolean).join("\n\n"),
       input: req.prompt,
-      max_output_tokens: 16000,
+      max_output_tokens: req.maxOutputTokens ?? 16000,
       stream: true,
     },
     { signal: req.signal },
@@ -187,7 +197,7 @@ async function* streamXai(req: CompletionRequest): AsyncGenerator<ProviderEvent>
         model,
         stream: true,
         stream_options: { include_usage: true },
-        max_tokens: 16000,
+        max_tokens: req.maxOutputTokens ?? 16000,
         messages: [
           { role: "system", content: system },
           { role: "user", content: req.prompt },

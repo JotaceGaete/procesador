@@ -1,6 +1,6 @@
 # Consejero literario
 
-> Estado: **diseño aprobado. Fases 1 y 2 implementadas** (ver "Estado de la implementación", al final). Decisiones del autor en "Decisiones tomadas", al final; prevalecen sobre el resto del documento.
+> Estado: **diseño aprobado. Fases 1, 2 y 3 implementadas** (ver "Estado de la implementación", al final). Decisiones del autor en "Decisiones tomadas", al final; prevalecen sobre el resto del documento.
 
 ## Qué es, y qué no es
 
@@ -325,7 +325,7 @@ create table public.ai_usage (
 |---|---|---|
 | **1 · Base sin IA** | Índice de menciones y estadísticas (última aparición, presencia por capítulo), informe léxico de repeticiones, mapa de la novela. Pestañas *Asistente / Consejero* en el panel, con *Consistencia, Personaje y Evolución* ya en el Consejero. Proveedores con roles y registro de uso (`ai_usage`). **Hecha.** | Ninguna |
 | **2 · Lectura de la novela** | `chapter_digests`, `story_threads`, `novel_digests`; vigencia por revisión y hash de párrafos; generación perezosa con estimación; sección *Cabos y lecturas* editable. **Hecha.** | Fichas y global, con el modelo económico |
-| **3 · Acciones del Consejero** | Recetas de contexto y planificador determinista; *Analizar capítulo*, *¿Cómo seguir?*, *Repeticiones*, *Cabos pendientes*, *Coherencia*, *Personajes*; tarjetas tipificadas con citas verificadas e *Ir al texto*. | Respuestas del Consejero |
+| **3 · Acciones del Consejero** | Recetas de contexto y planificador determinista; *Analizar capítulo*, *¿Cómo seguir?*, *Repeticiones*, *Cabos pendientes*, *Coherencia*, *Personajes*; tarjetas tipificadas con citas verificadas e *Ir al texto*. **Hecha.** | Respuestas del Consejero |
 | **4 · Conversación** | Conversaciones persistentes con compactación; guardar y descartar observaciones; *Proponer hecho* (hecho `suggested`); acciones sobre cabos; *Volver a comprobar* tras editar. | — |
 | **5 · Lectura profunda** | Herramientas de sólo lectura para que el modelo pida fichas, pasajes o capítulos (con topes); análisis de la novela completa con caché; integración con la Cronología cuando exista. | Consultas con herramientas |
 
@@ -441,4 +441,45 @@ Cada fase es usable por sí misma. La 1 ya responde sin coste "¿hace cuánto qu
 - **Pruebas:**
   - unitarias de citas, vigencia (retoque, reescritura, inserción larga, cita perdida, capítulo breve y estimación en textos largos), validación del esquema y extracción del JSON;
   - E2E de `tests/e2e/reading.test.mjs`: fichas con el modelo económico, citas reales e inventadas, reintento y fallo sin guardar, vigencia, automatización, correcciones, cabos (incluida la fusión y el aislamiento entre novelas), resumen global, duplicado, borrado, la vista y la relectura al cambiar de capítulo.
+
+### Fase 3 · Acciones del Consejero (implementada)
+
+- **Vista *Consultar*** (la primera del Consejero):
+  - seis acciones: *Analizar capítulo*, *¿Cómo seguir?*, *Repeticiones*, *Cabos pendientes*, *Coherencia* y *Personajes*;
+  - un cuadro para preguntar libremente;
+  - con una selección en el editor, *Analizar* y *Coherencia* pueden trabajar sobre ella.
+
+  La respuesta es consejo: ninguna acción escribe en el manuscrito.
+- **Recetas de contexto por niveles** (`src/lib/advisor/advice.ts`, §4):
+  - **marco estable**: Guía, sinopsis del autor, mapa de la novela con una línea de cada ficha, resumen global y cabos. Es igual en todas las acciones y se marca como caché en Claude;
+  - **foco**: el capítulo abierto completo y vivo, con lo no guardado; o la selección y su entorno; o el final del capítulo para *¿Cómo seguir?* y *Cabos*;
+  - **Memoria pertinente** y **fichas** de los capítulos anteriores y de aquellos donde están los personajes implicados, con presupuesto. Las desactualizadas van marcadas como «versión anterior»;
+  - **pasajes** por personaje, por la cita ancla de cada cabo y por las palabras de la pregunta;
+  - **capítulos completos** cuando la pregunta los nombra;
+  - **datos calculados**: última aparición de cada personaje, informe de repeticiones y cabos abiertos con los capítulos que llevan sin aparecer.
+
+  Cada receta tiene su presupuesto de entrada, y la salida se limita a 4.000 tokens.
+- **Planificador determinista** (`src/lib/advisor/planner.ts`):
+  - reconoce personajes y lugares (con sus apodos), capítulos por número o título, cabos por título y palabras de intención;
+  - elige la receta más cercana. El panel muestra cómo entendió la pregunta («Entendí la pregunta como: Coherencia · personajes: Elena · capítulos: 1») antes de la respuesta.
+- **Fichas que faltan** («cuando el Consejero la necesite», decisión 2): si la receta usa capítulos sin ficha o con una desactualizada, el panel los lee primero, mostrando el progreso, y después responde. Sólo pide confirmación si el total supera `AI_CONFIRM_TOKENS`. Las fichas que el autor corrigió no se tocan.
+- **Respuesta y tarjetas** (`src/lib/advisor/observations.ts`):
+  - el texto llega en streaming, en Markdown, y al final el servidor valida las observaciones (bloque `<observaciones>` en JSON) y verifica cada referencia en el manuscrito;
+  - una cita que está en otro capítulo del que dijo el modelo se corrige;
+  - una que no está en ninguna parte se muestra como «no aparece en el texto» y baja la confianza un nivel;
+  - una tarjeta sin ninguna cita verificada se presenta como **impresión**, no como hallazgo (decisión 5);
+  - si el JSON llega roto, el texto se conserva y el panel lo indica;
+  - cada tarjeta lleva tipo (con color), título, explicación, confianza y referencias con *Ir*.
+- ***¿Cómo seguir?*** (decisión 6):
+  - propone de 3 a 4 caminos como tarjetas «Alternativa para continuar», cada uno con lo que aprovecha de lo escrito;
+  - las instrucciones prohíben escribir la continuación;
+  - *Enviar al Asistente* pone la alternativa como argumento de *Escribir escena*; el autor decide si la desarrolla.
+- **Proveedores:**
+  - `CompletionRequest` gana `maxOutputTokens` y `cacheProject`;
+  - en Claude ya no se envía un bloque de sistema vacío cuando no hay proyecto. Corrige las fichas de la fase 2, que lo enviaban;
+  - *Probar con* repite la consulta con otro proveedor.
+- **Aplazado a la fase 4:** guardar y descartar observaciones, *Proponer hecho* y *Volver a comprobar*. En esta fase las respuestas no se guardan; sólo su uso queda en `ai_usage`.
+- **Pruebas:**
+  - unitarias del planificador y de la verificación de observaciones;
+  - E2E de `tests/e2e/advice.test.mjs`: niveles del contexto, capítulos sin ficha, validación, modelo del Consejero y caché del marco, texto vivo, fichas en orden, datos calculados, pasajes de cabos, preguntas libres con capítulos nombrados, selección, JSON roto, la vista con *Ir*, la pregunta libre, *Enviar al Asistente* y la lectura previa de fichas.
 

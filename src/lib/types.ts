@@ -293,7 +293,10 @@ export type AssistEvent =
   /** First event: what the request reads. */
   | { type: "context"; parts: ContextPart[] }
   /** Last event before refusal/truncated: tokens and cost. */
-  | ({ type: "usage" } & Usage);
+  | ({ type: "usage" } & Usage)
+  /** Consejero: how a free question was understood, and the verified cards at the end. */
+  | { type: "plan"; action: string; label: string; detail: string }
+  | { type: "observations"; items: Observation[]; invalid?: boolean };
 
 // ---------------------------------------------------------------------------
 // Consejero: the reading of the novel (docs/consejero.md, phase 2)
@@ -376,4 +379,49 @@ export interface NovelDigest {
   based_on: Record<string, number>;
   model: string;
   updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Consejero: actions and observations (docs/consejero.md, phase 3)
+// ---------------------------------------------------------------------------
+
+export type AdvisorAction = "analizar" | "seguir" | "repeticiones" | "cabos" | "coherencia" | "personajes";
+
+export const ADVISOR_ACTIONS: { id: AdvisorAction; label: string; hint: string }[] = [
+  { id: "analizar", label: "Analizar capítulo", hint: "Qué funciona y qué no en el capítulo abierto" },
+  { id: "seguir", label: "¿Cómo seguir?", hint: "Varios caminos posibles; no escribe la continuación" },
+  { id: "repeticiones", label: "Repeticiones", hint: "Expresiones, imágenes o situaciones que se repiten" },
+  { id: "cabos", label: "Cabos pendientes", hint: "Qué quedó abierto y cuánto hace que no aparece" },
+  { id: "coherencia", label: "Coherencia", hint: "Contradicciones y revelaciones a destiempo" },
+  { id: "personajes", label: "Personajes", hint: "Presencia, evolución y personajes desaprovechados" },
+];
+
+export type ObservationKind = "problem" | "repetition" | "contradiction" | "thread" | "opportunity" | "alternative" | "pacing";
+
+export const OBSERVATION_LABELS: Record<ObservationKind, string> = {
+  problem: "Posible problema",
+  repetition: "Repetición",
+  contradiction: "Posible contradicción",
+  thread: "Cabo pendiente",
+  opportunity: "Oportunidad narrativa",
+  alternative: "Alternativa para continuar",
+  pacing: "Ritmo y estructura",
+};
+
+export interface ObservationRef {
+  chapterId: string;
+  /** Exactly as in the text when verified; as the model wrote it otherwise. */
+  quote: string;
+  verified: boolean;
+  at: { start: number; end: number } | null;
+}
+
+export interface Observation {
+  kind: ObservationKind;
+  title: string;
+  body: string;
+  confidence: "high" | "medium" | "low";
+  refs: ObservationRef[];
+  /** False when none of its references could be found in the manuscript: an impression. */
+  verified: boolean;
 }
