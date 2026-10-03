@@ -25,6 +25,12 @@ Procesador de textos personal para escribir novelas con asistencia de IA. Tú im
     - frases repetidas y ecos de palabras, en el capítulo o entre capítulos, cada aparición con *Ir* al fragmento;
     - mapa de la novela;
     - uso de la IA en el mes.
+  - *Cabos y lecturas*: la lectura de la novela con el modelo económico.
+    - Una ficha por capítulo, con resumen, acontecimientos con citas verificadas e *Ir*, quién está en escena, revelaciones y cabos.
+    - Los cabos de la novela: confirmar, renombrar, cerrar, fusionar o añadir.
+    - Un resumen global hecho a partir de las fichas.
+    - Cada ficha indica si está al día, con retoques o desactualizada.
+    - Si está activado, un capítulo se relee al dejarlo sólo cuando cambió de forma sustancial; nunca mientras escribes.
 - **Imágenes del manuscrito** (contenido del libro): botón *Imágenes*, pegar o arrastrar una imagen sobre el texto. Cada imagen es un párrafo marcador `[[imagen:…]]`; al poner el cursor encima aparece su tarjeta: texto alternativo (o *decorativa*), pie, crédito, disposición (en el texto o página propia), alineación, ancho y aviso de resolución calculado con el original. *Quitar del capítulo* la deja *sin colocar*, conservada. *Lectura* muestra el capítulo con sus imágenes. Una imagen de una galería se inserta sin copiar el archivo. El asistente sólo ve `[Imagen: …]`, y una reescritura que pierde una imagen no se aplica sin avisar.
 - **Concentración** (`Ctrl/⌘ + .`, `Esc` para salir): sólo el texto y el cursor.
 - **Guardado**: automático, por capítulo.
@@ -68,6 +74,7 @@ Sólo lo relevante. El manuscrito completo nunca se envía por defecto.
 | `ANTHROPIC_MODEL_DIGEST` / `OPENAI_MODEL_DIGEST` / `XAI_MODEL_DIGEST` | no | Modelo económico de análisis y resúmenes. Por defecto, el de escritura |
 | `AI_PRICES` | no | JSON con los precios en US$ por millón de tokens, para mostrar el coste. Ej.: `{"claude-opus-5-5":{"input":5,"cached":0.5,"output":25}}` |
 | `AI_CONFIRM_TOKENS` | no | Umbral para pedir confirmación antes de enviar. Por defecto `150000` |
+| `DIGEST_CHANGE_PCT` / `DIGEST_CHANGE_MIN_WORDS` / `DIGEST_CHANGE_WORDS` | no | Cuándo un cambio es sustancial y desactualiza una ficha: `15` % del texto con al menos `40` palabras, o `300` palabras nuevas |
 
 3. **Local**: `npm install`, `npm run dev`, `npm run typecheck`, `npm run build`.
 4. **Vercel**: importa el repositorio y añade las variables. `/api/assist` declara `maxDuration = 300` s.
@@ -112,7 +119,7 @@ Requisitos de la E2E:
 - **PostgREST**: se descarga una vez en Linux x64. En otros sistemas, define `POSTGREST_BIN`.
 - **Chromium**: si falta, `npx playwright install chromium`.
 
-Opciones: `E2E_SKIP_BUILD=1` reutiliza el build; `E2E_KEEP=1` deja el entorno en marcha para inspeccionarlo.
+Opciones: `E2E_SKIP_BUILD=1` reutiliza el build; `E2E_ONLY=reading` ejecuta sólo los archivos cuyo nombre lo contiene; `E2E_KEEP=1` deja el entorno en marcha para inspeccionarlo.
 
 ## Privacidad y seguridad
 

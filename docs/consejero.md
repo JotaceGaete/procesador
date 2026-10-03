@@ -1,6 +1,6 @@
 # Consejero literario
 
-> Estado: **diseño aprobado. Fase 1 implementada** (ver "Estado de la implementación", al final). Decisiones del autor en "Decisiones tomadas", al final; prevalecen sobre el resto del documento.
+> Estado: **diseño aprobado. Fases 1 y 2 implementadas** (ver "Estado de la implementación", al final). Decisiones del autor en "Decisiones tomadas", al final; prevalecen sobre el resto del documento.
 
 ## Qué es, y qué no es
 
@@ -324,7 +324,7 @@ create table public.ai_usage (
 | Fase | Contenido | IA nueva |
 |---|---|---|
 | **1 · Base sin IA** | Índice de menciones y estadísticas (última aparición, presencia por capítulo), informe léxico de repeticiones, mapa de la novela. Pestañas *Asistente / Consejero* en el panel, con *Consistencia, Personaje y Evolución* ya en el Consejero. Proveedores con roles y registro de uso (`ai_usage`). **Hecha.** | Ninguna |
-| **2 · Lectura de la novela** | `chapter_digests`, `story_threads`, `novel_digests`; vigencia por revisión y hash de párrafos; generación perezosa con estimación; sección *Cabos y lecturas* editable. | Fichas y global, con el modelo económico |
+| **2 · Lectura de la novela** | `chapter_digests`, `story_threads`, `novel_digests`; vigencia por revisión y hash de párrafos; generación perezosa con estimación; sección *Cabos y lecturas* editable. **Hecha.** | Fichas y global, con el modelo económico |
 | **3 · Acciones del Consejero** | Recetas de contexto y planificador determinista; *Analizar capítulo*, *¿Cómo seguir?*, *Repeticiones*, *Cabos pendientes*, *Coherencia*, *Personajes*; tarjetas tipificadas con citas verificadas e *Ir al texto*. | Respuestas del Consejero |
 | **4 · Conversación** | Conversaciones persistentes con compactación; guardar y descartar observaciones; *Proponer hecho* (hecho `suggested`); acciones sobre cabos; *Volver a comprobar* tras editar. | — |
 | **5 · Lectura profunda** | Herramientas de sólo lectura para que el modelo pida fichas, pasajes o capítulos (con topes); análisis de la novela completa con caché; integración con la Cronología cuando exista. | Consultas con herramientas |
@@ -389,3 +389,56 @@ Cada fase es usable por sí misma. La 1 ya responde sin coste "¿hace cuánto qu
 - **Pruebas:**
   - unitarias de estadísticas, repeticiones, modelos por función, precios y uso por proveedor;
   - E2E de `tests/e2e/advisor.test.mjs`: Panorama, eventos de contexto y uso, filas de `ai_usage`, aislamiento, interfaz e *Ir* entre capítulos.
+
+### Fase 2 · Lectura de la novela (implementada)
+
+- **Tablas nuevas** (`supabase/schema.sql`):
+  - `chapter_digests`, `story_threads` y `novel_digests`, con el patrón habitual: aislamiento por novela, RLS y sin acceso público;
+  - `novels.auto_digest`, el interruptor.
+
+  Todo es derivado: el manuscrito manda, y las fichas citan a los personajes por id sin copiar nada de la Memoria (decisión 7). Al duplicar una novela se copian fichas, cabos y resumen con ids nuevos; las referencias internas se reescriben y la vigencia se conserva.
+- **Ficha de capítulo** (`POST /api/chapters/{id}/digest`):
+  - la hace el modelo económico (`role: "digest"`) leyendo el texto guardado;
+  - contiene resumen, acontecimientos, presencia (en escena o nombrado), revelaciones, cabos que abre, hace avanzar o cierra, y una nota de ritmo;
+  - cada consulta se registra en `ai_usage` con `purpose = 'digest'`.
+- **Salida estructurada validada** (`src/lib/ai/structured.ts`, `src/lib/advisor/digest-schema.ts`):
+  - el modelo responde en JSON y el servidor lo valida siempre;
+  - si la estructura es inválida, reintenta una vez indicando el error; si vuelve a fallar, responde 502 y **no guarda nada** (la ficha anterior se conserva);
+  - es el mismo mecanismo para los tres proveedores, así que *Probar con* sigue funcionando. El modo JSON nativo de cada API queda como mejora posible.
+- **Citas verificadas** (`src/lib/advisor/quotes.ts`, decisión 5):
+  - cada cita se busca en el texto real; la comparación ignora mayúsculas, espacios, tipo de comillas y guiones, y puntos suspensivos;
+  - se guarda tal como está en el texto. Una cita que no aparece **nunca se guarda como cita**: el panel muestra «sin cita verificable»;
+  - las citas encontradas llevan *Ir*, que abre el capítulo y selecciona el fragmento. Si el texto cambió y la cita ya no está, el panel lo dice y la ficha pasa a desactualizada.
+- **Vigencia sin IA** (`src/lib/advisor/freshness.ts`):
+  - estados: *al día*, *con retoques*, *desactualizada* y *sin leer*;
+  - en vez de un hash por párrafo, la ficha guarda una **huella del texto**: las secuencias de tres palabras, de las que se conservan los 256 hashes menores (estimación *bottom-k*). Así una errata en un párrafo largo, o en un capítulo de un solo párrafo, no cuenta como reescritura. Hasta unas 250 palabras la medida es exacta;
+  - un cambio es **sustancial** si supera el 15 % del texto y toca al menos 40 palabras, o si añade más de 300 palabras;
+  - variables: `DIGEST_CHANGE_PCT`, `DIGEST_CHANGE_MIN_WORDS` y `DIGEST_CHANGE_WORDS`.
+- **Automatización** (decisión 2):
+  - al **dejar un capítulo en el que se escribió**, el navegador avisa al servidor en segundo plano, y el servidor decide;
+  - lee el capítulo sólo si el cambio fue sustancial, o si el capítulo nunca se leyó y tiene al menos 300 palabras;
+  - nunca relee sobre una corrección del autor ni por encima del umbral de confirmación;
+  - mientras se escribe no hay ninguna llamada, y los retoques no llegan a la IA;
+  - el interruptor está en *Cabos y lecturas*.
+- **Cabos** (`story_threads`):
+  - los que propone la lectura aparecen como *posible cabo* hasta que el autor los confirma;
+  - apertura, última aparición y cierre se **derivan de las fichas**, en orden de capítulos. Si un capítulo releído ya no cierra un cabo, el cabo vuelve a *abierto*;
+  - un posible cabo que ya no menciona ninguna ficha desaparece;
+  - el autor puede confirmar, renombrar, cerrar, abandonar, reabrir, devolver el estado a la lectura (*Según la lectura*), fusionar (las referencias pasan al otro cabo), eliminar y añadir;
+  - un estado que fija el autor no lo cambia una relectura.
+- **Correcciones del autor:**
+  - el resumen de una ficha se puede corregir; la corrección prevalece y la automatización no la pisa;
+  - releer a mano pide confirmación;
+  - si el capítulo cambia, el panel avisa: «tu corrección puede haber quedado vieja».
+- **Resumen global** (`POST /api/novels/{id}/digest`):
+  - se hace con las fichas, no con el texto;
+  - queda desactualizado cuando alguna ficha cambia;
+  - las fichas desactualizadas se le envían marcadas como «versión anterior».
+- **Vista *Cabos y lecturas*** (Consejero):
+  - cuántos capítulos están al día;
+  - *Actualizar la lectura*, con la estimación de tokens: lee uno a uno lo pendiente y después rehace el resumen global. Muestra el progreso, se puede detener y sólo pide confirmación por encima de `AI_CONFIRM_TOKENS`;
+  - el resumen global, los cabos y la ficha de cada capítulo con su estado.
+- **Pruebas:**
+  - unitarias de citas, vigencia (retoque, reescritura, inserción larga, cita perdida, capítulo breve y estimación en textos largos), validación del esquema y extracción del JSON;
+  - E2E de `tests/e2e/reading.test.mjs`: fichas con el modelo económico, citas reales e inventadas, reintento y fallo sin guardar, vigencia, automatización, correcciones, cabos (incluida la fusión y el aislamiento entre novelas), resumen global, duplicado, borrado, la vista y la relectura al cambiar de capítulo.
+

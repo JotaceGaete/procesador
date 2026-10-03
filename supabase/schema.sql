@@ -243,6 +243,76 @@ create table if not exists public.ai_usage (
 );
 create index if not exists ai_usage_novel_idx on public.ai_usage(novel_id, created_at);
 
+-- Consejero, fase 2 (docs/consejero.md): la lectura de la novela. Todo es derivado y
+-- regenerable: el manuscrito (chapters.content) es siempre la fuente de verdad, y nada
+-- de esto repite lo que guarda la Memoria (los personajes se citan por id).
+
+-- Interruptor: rehacer la ficha de un capítulo al dejarlo tras un cambio sustancial.
+alter table public.novels add column if not exists auto_digest boolean not null default true;
+
+-- Cabos y conflictos. Los propone el Consejero al leer (origin 'advisor', sin confirmar:
+-- "posible cabo") o los crea el autor. Capítulo de apertura, última aparición y cierre se
+-- derivan de las fichas; status_by indica si el estado lo decidió el autor (y entonces manda).
+create table if not exists public.story_threads (
+  id                 uuid primary key default gen_random_uuid(),
+  novel_id           uuid not null references public.novels(id) on delete cascade,
+  title              text not null check (length(title) between 1 and 200),
+  description        text not null default '',
+  kind               text not null default 'other' check (kind in ('conflict', 'mystery', 'promise', 'relationship', 'other')),
+  status             text not null default 'open' check (status in ('open', 'closed', 'abandoned')),
+  status_by          text not null default 'advisor' check (status_by in ('advisor', 'author')),
+  origin             text not null default 'advisor' check (origin in ('advisor', 'author')),
+  confirmed          boolean not null default false,
+  opened_chapter_id  uuid,
+  last_chapter_id    uuid,
+  closed_chapter_id  uuid,
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now(),
+  unique (id, novel_id),
+  foreign key (opened_chapter_id, novel_id) references public.chapters(id, novel_id) on delete set null (opened_chapter_id),
+  foreign key (last_chapter_id, novel_id) references public.chapters(id, novel_id) on delete set null (last_chapter_id),
+  foreign key (closed_chapter_id, novel_id) references public.chapters(id, novel_id) on delete set null (closed_chapter_id)
+);
+create index if not exists story_threads_novel_idx on public.story_threads(novel_id);
+
+-- Ficha de lectura de cada capítulo. source_revision es la revisión del capítulo leída;
+-- text_sketch, una huella numérica del texto leído (secuencias de tres palabras, bottom-k),
+-- distingue un retoque de una reescritura sin guardar el texto. Las citas (quote) son literales
+-- y cortas: lo único del texto que se guarda fuera de chapters, y se verifican contra él.
+--   events       [{ text, characters: [character_id], quote }]
+--   presence     [{ character: character_id, kind: 'present' | 'mentioned' }]
+--   revelations  [{ text, to: 'lector' | character_id, quote }]
+--   threads      [{ thread: story_thread_id, change: 'opened' | 'advanced' | 'closed', quote }]
+create table if not exists public.chapter_digests (
+  chapter_id        uuid primary key,
+  novel_id          uuid not null references public.novels(id) on delete cascade,
+  source_revision   integer not null,
+  text_sketch       jsonb not null default '{"n": 0, "h": []}'::jsonb,
+  summary           text not null default '',
+  events            jsonb not null default '[]'::jsonb,
+  presence          jsonb not null default '[]'::jsonb,
+  revelations       jsonb not null default '[]'::jsonb,
+  threads           jsonb not null default '[]'::jsonb,
+  notes             text not null default '',
+  -- Corregida a mano: no se pisa al regenerar automáticamente.
+  author_edited     boolean not null default false,
+  model             text not null default '',
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now(),
+  foreign key (chapter_id, novel_id) references public.chapters(id, novel_id) on delete cascade
+);
+create index if not exists chapter_digests_novel_idx on public.chapter_digests(novel_id);
+
+-- Resumen global, derivado de las fichas (no del texto). based_on: { chapter_id: revision }.
+create table if not exists public.novel_digests (
+  novel_id    uuid primary key references public.novels(id) on delete cascade,
+  summary     text not null default '',
+  based_on    jsonb not null default '{}'::jsonb,
+  model       text not null default '',
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
 -- ---------------------------------------------------------------------------
 -- Triggers
 -- ---------------------------------------------------------------------------
@@ -269,7 +339,7 @@ do $$
 declare t text;
 begin
   foreach t in array array['novels', 'characters', 'relationships', 'places', 'facts', 'assets', 'character_images',
-                           'manuscript_images'] loop
+                           'manuscript_images', 'story_threads', 'chapter_digests', 'novel_digests'] loop
     execute format('drop trigger if exists %I_touch on public.%I', t, t);
     execute format('create trigger %I_touch before update on public.%I for each row execute function public.touch_row()', t, t);
   end loop;
@@ -518,11 +588,12 @@ create or replace function public.duplicate_novel(p_novel uuid, p_title text)
 returns jsonb language plpgsql set search_path = '' as $$
 declare
   v_new uuid := gen_random_uuid();
-  m_chap jsonb; m_char jsonb; m_place jsonb; m_fact jsonb; m_asset jsonb; m_mimg jsonb; r record;
+  m_chap jsonb; m_char jsonb; m_place jsonb; m_fact jsonb; m_asset jsonb; m_mimg jsonb; m_thread jsonb; r record;
+  v_ids jsonb; v_text text; r2 record;
   v_copies jsonb;
 begin
-  insert into public.novels (id, title, synopsis, notes, guide)
-  select v_new, p_title, synopsis, notes, guide from public.novels where id = p_novel;
+  insert into public.novels (id, title, synopsis, notes, guide, auto_digest)
+  select v_new, p_title, synopsis, notes, guide, auto_digest from public.novels where id = p_novel;
   if not found then return null; end if;
 
   select coalesce(jsonb_object_agg(id, gen_random_uuid()), '{}') into m_chap from public.chapters where novel_id = p_novel;
@@ -593,6 +664,42 @@ begin
     where novel_id = v_new and content ~* ('\[\[imagen:' || r.old_id || '\]\]');
   end loop;
 
+  -- Lectura del Consejero: fichas, cabos y resumen global se copian (son caros de rehacer)
+  -- con sus ids reasignados. Una ficha al día de la original lo está en la copia (cuya
+  -- revisión empieza en 0); una desactualizada sigue desactualizada (-1).
+  -- El uso de la IA (ai_usage) no se copia: es el historial de esa novela.
+  select coalesce(jsonb_object_agg(id, gen_random_uuid()), '{}') into m_thread from public.story_threads where novel_id = p_novel;
+  insert into public.story_threads (id, novel_id, title, description, kind, status, status_by, origin, confirmed,
+    opened_chapter_id, last_chapter_id, closed_chapter_id)
+  select (m_thread ->> t.id::text)::uuid, v_new, t.title, t.description, t.kind, t.status, t.status_by, t.origin, t.confirmed,
+    (m_chap ->> t.opened_chapter_id::text)::uuid, (m_chap ->> t.last_chapter_id::text)::uuid,
+    (m_chap ->> t.closed_chapter_id::text)::uuid
+  from public.story_threads t where t.novel_id = p_novel;
+
+  -- Los ids de personajes y cabos dentro de las fichas, reescritos como texto (son uuid únicos).
+  v_ids := m_char || m_thread;
+  for r in select d.*, c.revision as chapter_revision from public.chapter_digests d
+           join public.chapters c on c.id = d.chapter_id where d.novel_id = p_novel loop
+    v_text := jsonb_build_array(r.events, r.presence, r.revelations, r.threads)::text;
+    for r2 in select key as old_id, value #>> '{}' as new_id from jsonb_each(v_ids) loop
+      v_text := replace(v_text, r2.old_id, r2.new_id);
+    end loop;
+    insert into public.chapter_digests (chapter_id, novel_id, source_revision, text_sketch, summary, events,
+      presence, revelations, threads, notes, author_edited, model)
+    values ((m_chap ->> r.chapter_id::text)::uuid, v_new,
+      case when r.source_revision = r.chapter_revision then 0 else -1 end, r.text_sketch, r.summary,
+      v_text::jsonb -> 0, v_text::jsonb -> 1, v_text::jsonb -> 2, v_text::jsonb -> 3, r.notes, r.author_edited, r.model);
+  end loop;
+
+  insert into public.novel_digests (novel_id, summary, based_on, model)
+  select v_new, nd.summary,
+    coalesce((select jsonb_object_agg(m_chap ->> b.key,
+                case when (b.value #>> '{}')::int = c.revision then 0 else -1 end)
+              from jsonb_each(nd.based_on) b join public.chapters c on c.id = b.key::uuid
+              where m_chap ? b.key), '{}'),
+    nd.model
+  from public.novel_digests nd where nd.novel_id = p_novel;
+
   select coalesce(jsonb_agg(jsonb_build_array(p.old_path, p.new_path)), '[]') into v_copies
   from public.assets oa
   join public.assets na on na.id = (m_asset ->> oa.id::text)::uuid
@@ -612,7 +719,8 @@ do $$
 declare t text;
 begin
   foreach t in array array['novels', 'chapters', 'characters', 'relationships', 'places', 'facts', 'fact_characters',
-                           'assets', 'character_images', 'manuscript_images', 'ai_usage'] loop
+                           'assets', 'character_images', 'manuscript_images', 'ai_usage',
+                           'story_threads', 'chapter_digests', 'novel_digests'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('revoke all on public.%I from anon, authenticated', t);
     execute format('grant all on public.%I to service_role', t);

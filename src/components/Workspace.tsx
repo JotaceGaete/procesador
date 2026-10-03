@@ -80,6 +80,8 @@ export default function Workspace({ novelId }: { novelId: string }) {
   const [section, setSection] = useState<AIPanelSection>("assistant");
   // A Consejero "Ir" into another chapter: applied once that chapter's editor is mounted.
   const pendingGoTo = useRef<{ chapterId: string; start: number; end: number; text: string } | null>(null);
+  // Chapters written in during this visit: leaving one may re-read it (Consejero, auto_digest).
+  const edited = useRef(new Set<string>());
   const [focusMode, setFocusMode] = useState(false);
   const [modal, setModal] = useState<"novel" | "memory" | "images" | null>(null);
   const editorRef = useRef<EditorHandle>(null);
@@ -124,9 +126,31 @@ export default function Workspace({ novelId }: { novelId: string }) {
 
   /** Never leaves a chapter with text that didn't reach the server without asking. */
   const leaveChapter = useCallback(async () => {
-    if (!editorRef.current || (await editorRef.current.flush())) return true;
+    if (!editorRef.current || (await editorRef.current.flush())) {
+      if (chapter) rereadLater(chapter.id);
+      return true;
+    }
     return confirm("Los últimos cambios de este capítulo no se pudieron guardar. Si continúas, se perderán. ¿Continuar?");
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- rereadLater reads refs and current state
+  }, [chapter?.id, novel?.auto_digest, loaded]);
+
+  /**
+   * The switch's moment to re-read (decision 2): on leaving a chapter that was written in,
+   * in the background, never while typing. The server decides whether the change was
+   * substantial; small edits never reach the AI.
+   */
+  function rereadLater(id: string) {
+    if (!edited.current.delete(id) || !novel?.auto_digest || !loaded) return;
+    const saved = readPref("provider") as ProviderId | null;
+    const provider = saved && loaded.providers.includes(saved) ? saved : loaded.defaultProvider;
+    if (!provider) return;
+    fetch(`/api/chapters/${id}/digest`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, auto: true }),
+      keepalive: true,
+    }).catch(() => {});
+  }
 
   const narrow = () => !window.matchMedia("(min-width: 1000px)").matches;
 
@@ -203,9 +227,14 @@ export default function Workspace({ novelId }: { novelId: string }) {
   }, [save, focusMode, modal]);
 
   const onSaveState = useCallback(
-    (state: SaveState, actions: { retry(): void; overwrite(): void }) => setSave({ state, ...actions }),
-    [],
+    (state: SaveState, actions: { retry(): void; overwrite(): void }) => {
+      if (state === "pending" && currentId) edited.current.add(currentId);
+      setSave({ state, ...actions });
+    },
+    [currentId],
   );
+  const flush = useCallback(async () => !editorRef.current || (await editorRef.current.flush()), []);
+  const onAutoDigest = useCallback((on: boolean) => setNovel((n) => (n ? { ...n, auto_digest: on } : n)), []);
   const getContent = useCallback(() => editorRef.current?.getContent() ?? "", []);
   const getCursor = useCallback(() => editorRef.current?.getCursor() ?? 0, []);
   const applyRewrite = useCallback(
@@ -458,6 +487,8 @@ export default function Workspace({ novelId }: { novelId: string }) {
         onSection={chooseSection}
         confirmTokens={loaded.confirmTokens}
         onGoTo={goTo}
+        flush={flush}
+        onAutoDigest={onAutoDigest}
         onClose={() => toggle("panelOpen", setPanelOpen)}
         novelId={novel.id}
         chapterId={chapter.id}

@@ -273,6 +273,7 @@ async function main() {
     AI_PROVIDER: "anthropic",
     // The Consejero answers with its own model; only the writing model has a price.
     ANTHROPIC_MODEL_ADVISE: "claude-consejero-e2e",
+    ANTHROPIC_MODEL_DIGEST: "claude-lector-e2e",
     AI_PRICES: JSON.stringify({ "claude-opus-5-5": { input: 5, cached: 0.5, output: 25 } }),
   };
   const mainPort = await freePort();
@@ -289,6 +290,8 @@ async function main() {
   const files = fs
     .readdirSync(path.join(ROOT, "tests/e2e"))
     .filter((f) => f.endsWith(".test.mjs"))
+    // E2E_ONLY=reading runs only the files whose name contains it.
+    .filter((f) => !process.env.E2E_ONLY || f.includes(process.env.E2E_ONLY))
     .sort()
     .map((f) => path.join("tests/e2e", f));
   const code = await new Promise((resolve) => {

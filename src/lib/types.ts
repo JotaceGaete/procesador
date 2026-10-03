@@ -12,6 +12,8 @@ export interface Novel {
   synopsis: string;
   notes: string;
   guide: Guide;
+  /** Re-read a chapter on leaving it after a substantial change (Consejero). */
+  auto_digest: boolean;
   updated_at: string;
 }
 
@@ -292,3 +294,86 @@ export type AssistEvent =
   | { type: "context"; parts: ContextPart[] }
   /** Last event before refusal/truncated: tokens and cost. */
   | ({ type: "usage" } & Usage);
+
+// ---------------------------------------------------------------------------
+// Consejero: the reading of the novel (docs/consejero.md, phase 2)
+// ---------------------------------------------------------------------------
+
+export type ThreadKind = "conflict" | "mystery" | "promise" | "relationship" | "other";
+export type ThreadStatus = "open" | "closed" | "abandoned";
+export type ThreadChange = "opened" | "advanced" | "closed";
+
+export const THREAD_KINDS: { id: ThreadKind; label: string }[] = [
+  { id: "conflict", label: "Conflicto" },
+  { id: "mystery", label: "Misterio" },
+  { id: "promise", label: "Promesa al lector" },
+  { id: "relationship", label: "Relación" },
+  { id: "other", label: "Otro" },
+];
+export const THREAD_STATUS_LABELS: Record<ThreadStatus, string> = {
+  open: "Abierto",
+  closed: "Cerrado",
+  abandoned: "Abandonado a propósito",
+};
+
+export interface DigestEvent {
+  text: string;
+  characters: string[];
+  /** Literal, short; "" when the model's quote wasn't in the text (never shown as a quote). */
+  quote: string;
+}
+export interface DigestPresence {
+  character: string;
+  kind: "present" | "mentioned";
+}
+export interface DigestRevelation {
+  text: string;
+  /** "lector" or a character id. */
+  to: string;
+  quote: string;
+}
+export interface DigestThread {
+  thread: string;
+  change: ThreadChange;
+  quote: string;
+}
+
+export interface ChapterDigest {
+  chapter_id: string;
+  novel_id: string;
+  source_revision: number;
+  /** Numeric sketch of the text read (see lib/advisor/freshness.ts). */
+  text_sketch: { n: number; h: number[] };
+  summary: string;
+  events: DigestEvent[];
+  presence: DigestPresence[];
+  revelations: DigestRevelation[];
+  threads: DigestThread[];
+  notes: string;
+  author_edited: boolean;
+  model: string;
+  updated_at: string;
+}
+
+export interface StoryThread {
+  id: string;
+  novel_id: string;
+  title: string;
+  description: string;
+  kind: ThreadKind;
+  status: ThreadStatus;
+  status_by: "advisor" | "author";
+  origin: "advisor" | "author";
+  confirmed: boolean;
+  opened_chapter_id: string | null;
+  last_chapter_id: string | null;
+  closed_chapter_id: string | null;
+}
+
+export interface NovelDigest {
+  novel_id: string;
+  summary: string;
+  based_on: Record<string, number>;
+  model: string;
+  updated_at: string;
+}

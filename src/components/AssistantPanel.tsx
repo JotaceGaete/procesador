@@ -20,6 +20,7 @@ import { readPref, writePref } from "@/lib/client";
 import { appendImages, protectImages, restoreImages } from "@/lib/manuscript";
 import type { Selection } from "./ChapterEditor";
 import AdvisorOverview from "./AdvisorOverview";
+import AdvisorReading from "./AdvisorReading";
 import { formatTokens, formatUsd } from "./format";
 
 interface Props {
@@ -30,6 +31,9 @@ interface Props {
   /** Requests above this many tokens ask before going out (AI_CONFIRM_TOKENS). */
   confirmTokens: number;
   onGoTo(chapterId: string, start: number, end: number, text: string): void;
+  /** Saves the open chapter (a reading is of the saved text). */
+  flush(): Promise<boolean>;
+  onAutoDigest(on: boolean): void;
   onClose(): void;
   novelId: string;
   chapterId: string;
@@ -108,6 +112,8 @@ function AssistantPanel(props: Props) {
     onSection,
     confirmTokens,
     onGoTo,
+    flush,
+    onAutoDigest,
     onClose,
     novelId,
     chapterId,
@@ -124,7 +130,7 @@ function AssistantPanel(props: Props) {
   } = props;
 
   const [assistantMode, setMode] = useState<Mode>("edit");
-  const [advisorView, setAdvisorView] = useState<"selection" | "overview">("selection");
+  const [advisorView, setAdvisorView] = useState<"selection" | "overview" | "reading">("selection");
   // Each section remembers its own action.
   const [actions, setActions] = useState<Record<AIPanelSection, EditAction>>({
     assistant: "redaccion",
@@ -222,7 +228,7 @@ function AssistantPanel(props: Props) {
 
   // Live estimate of what would be sent (dry run on the server, same context builder).
   useEffect(() => {
-    if (hidden || (section === "advisor" && advisorView === "overview")) return;
+    if (hidden || (section === "advisor" && advisorView !== "selection")) return;
     const req = buildRequest();
     if (!req) {
       setEstimate(null);
@@ -333,7 +339,8 @@ function AssistantPanel(props: Props) {
     setUsage(null);
   };
 
-  const overview = section === "advisor" && advisorView === "overview";
+  // Views of the Consejero that are not a request about the selection.
+  const overview = section === "advisor" && advisorView !== "selection";
   const showResult = !overview && last && last.section === section && last.mode === mode && (output || running || notice);
   const parsed = last ? parse(output, last.mode) : null;
   const others = providers.filter((p) => p !== last?.provider);
@@ -424,14 +431,32 @@ function AssistantPanel(props: Props) {
           <button className={!overview ? "on" : undefined} onClick={() => setAdvisorView("selection")}>
             Sobre la selección
           </button>
-          <button className={overview ? "on" : undefined} onClick={() => setAdvisorView("overview")}>
+          <button className={advisorView === "overview" ? "on" : undefined} onClick={() => setAdvisorView("overview")}>
             Panorama
+          </button>
+          <button className={advisorView === "reading" ? "on" : undefined} onClick={() => setAdvisorView("reading")}>
+            Cabos y lecturas
           </button>
         </nav>
       )}
 
       {overview ? (
-        !hidden && <AdvisorOverview novelId={novelId} chapterId={chapterId} memory={memory} getContent={getContent} onGoTo={onGoTo} />
+        hidden ? null : advisorView === "overview" ? (
+          <AdvisorOverview novelId={novelId} chapterId={chapterId} memory={memory} getContent={getContent} onGoTo={onGoTo} />
+        ) : (
+          <>
+            {providerSelect && <div className="controls">{providerSelect}</div>}
+            <AdvisorReading
+              novelId={novelId}
+              chapterId={chapterId}
+              memory={memory}
+              provider={provider}
+              flush={flush}
+              onAutoDigest={onAutoDigest}
+              onGoTo={onGoTo}
+            />
+          </>
+        )
       ) : mode === "edit" ? (
         <>
           <div className="actions" role="group" aria-label="Acción">

@@ -1595,3 +1595,132 @@ details.group > p {
     margin: 1.2em auto;
   }
 }
+
+/* ---------- Consejero: Cabos y lecturas ---------- */
+.advisor-reading {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.advisor-reading h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.advisor-reading h4 {
+  margin: 10px 0 2px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.advisor-reading ul,
+.advisor-reading ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.advisor-reading .reading-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.advisor-reading .reading-head p {
+  margin: 0;
+}
+.advisor-reading .check {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+.small-prose {
+  font-size: 14px;
+  line-height: 1.55;
+}
+.threads > li,
+.digests > li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--faint);
+}
+.thread p {
+  margin: 0 0 2px;
+}
+.thread.closed .thread-title,
+.thread.abandoned .thread-title {
+  color: var(--muted);
+}
+.thread-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+}
+.thread-actions select {
+  font-size: 12px;
+  max-width: 160px;
+}
+.inline-edit,
+.new-thread {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.inline-edit input,
+.new-thread input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--faint);
+  background: transparent;
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+.new-thread {
+  margin-top: 8px;
+}
+.tag {
+  margin-left: 6px;
+  font-size: 11px;
+  padding: 0 6px;
+  border: 1px dashed var(--muted);
+  border-radius: 8px;
+  color: var(--muted);
+}
+.digest-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.digest.open-chapter .map-title {
+  font-weight: 600;
+}
+.state-badge {
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 8px;
+  border: 1px solid var(--faint);
+  color: var(--muted);
+}
+.state-badge.stale {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.state-badge.missing {
+  border-style: dashed;
+}
+.digest textarea {
+  width: 100%;
+  border: 1px solid var(--faint);
+  background: transparent;
+  border-radius: 4px;
+  padding: 6px;
+  font-family: var(--serif);
+  font-size: 14px;
+}
+.digest ul li {
+  font-size: 14px;
+  padding: 2px 0;
+}

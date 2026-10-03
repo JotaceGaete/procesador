@@ -10,6 +10,54 @@ const EDIT = "Bien el ritmo.\n\n<reescritura>Texto propuesto por el modelo.</ree
 // "MANTEN-IMAGENES" in a request: a rewrite that keeps (and reorders) the image placeholders.
 const EDIT_KEEP = "Bien.\n\n<reescritura>Primero la imagen.\n\n[IMAGEN 1]\n\nY el texto reescrito.</reescritura>";
 
+/**
+ * The Consejero's reading (structured JSON). Built from the request itself, so quotes are
+ * real: the first words of the chapter. Hooks in the chapter text:
+ *   "CABO: <título>"      opens a thread (or advances it if it exists)
+ *   "CIERRA: <título>"    closes it
+ *   "CITA-INVENTADA"      adds an event whose quote is not in the text
+ *   "JSON-ROTO"           the first answer is not JSON (the retry is fine)
+ *   "JSON-SIEMPRE-ROTO"   never valid
+ */
+function readingReply(system, user) {
+  if (system.includes("<resumen-global>")) {
+    const n = (user.match(/<ficha /g) ?? []).length;
+    return JSON.stringify({ summary: `Resumen global a partir de ${n} fichas de capítulo, con sus cabos.` });
+  }
+  if (!system.includes("<ficha-capitulo>")) return null;
+  const retry = user.includes("no era válida");
+  if (user.includes("JSON-SIEMPRE-ROTO") || (user.includes("JSON-ROTO") && !retry)) return "Esto no es JSON.";
+  const text = (user.match(/<capitulo titulo="[^"]*">\n([\s\S]*?)\n<\/capitulo>/) ?? [])[1] ?? "";
+  const people = [...user.matchAll(/^- \[([^\]]+)\] ([^(\n]+)/gm)].map((m) => ({ id: m[1], name: m[2].trim() }));
+  const section = (tag) => (user.match(new RegExp(`<${tag}>\\n([\\s\\S]*?)\\n</${tag}>`)) ?? [])[1] ?? "";
+  const threads = [...section("cabos").matchAll(/^- \[([^\]]+)\] (.+?) · /gm)].map((m) => ({ id: m[1], title: m[2] }));
+  const characters = people.filter((p) => section("personajes").includes(p.id) && text.toLowerCase().includes(p.name.toLowerCase()));
+  const first = text.split(/(?<=[.!?])\s/)[0];
+  const quote = first.split(/\s+/).slice(0, 8).join(" ").replace(/[.,;:!?]+$/, "");
+  const events = [{ text: `Sucede: ${first}`, characters: characters.map((c) => c.id), quote }];
+  if (text.includes("CITA-INVENTADA")) events.push({ text: "Algo dudoso", characters: [], quote: "esta cita no aparece en el capítulo" });
+  const changes = [];
+  for (const [, verb, title] of text.matchAll(/(CABO|CIERRA): ([^.\n]+)/g)) {
+    // Like a model would: a thread renamed by the author is still recognised.
+    const known = threads.find((t) => title.trim().startsWith(t.title) || t.title.startsWith(title.trim()));
+    changes.push({
+      thread: known?.id ?? null,
+      title: title.trim(),
+      kind: "mystery",
+      change: verb === "CIERRA" ? "closed" : known ? "advanced" : "opened",
+      quote: `${verb}: ${title.trim()}`,
+    });
+  }
+  return JSON.stringify({
+    summary: `Resumen del capítulo: ${text.split(/\s+/).slice(0, 30).join(" ")}`,
+    events,
+    presence: characters.map((c) => ({ character: c.id, kind: "present" })),
+    revelations: [],
+    threads: changes,
+    notes: "Escena con diálogo.",
+  });
+}
+
 const sse = (res, events) => {
   res.writeHead(200, { "content-type": "text/event-stream" });
   for (const [event, data] of events) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -25,7 +73,9 @@ export function handleAI(req, res, body, log) {
   if (path === "/anthropic/v1/messages") {
     log.push({ provider: "anthropic", body: json });
     const system = JSON.stringify(json.system ?? "");
-    const text = system.includes("<escena>") ? SCENE : body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : EDIT;
+    const text =
+      readingReply((json.system ?? []).map?.((b) => b.text).join("\n") ?? String(json.system ?? ""), json.messages?.[0]?.content ?? "") ??
+      (system.includes("<escena>") ? SCENE : body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : EDIT);
     sse(res, [
       [
         "message_start",
@@ -63,7 +113,9 @@ export function handleAI(req, res, body, log) {
   if (path === "/openai/responses") {
     log.push({ provider: "openai", body: json });
     const instructions = json.instructions ?? "";
-    const text = instructions.includes("<escena>") ? SCENE : body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : EDIT;
+    const text =
+      readingReply(instructions, String(json.input ?? "")) ??
+      (instructions.includes("<escena>") ? SCENE : body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : EDIT);
     const half = Math.floor(text.length / 2);
     let n = 0;
     const refuse = instructions.includes("REFUSE-ME");
@@ -133,7 +185,7 @@ export function handleAI(req, res, body, log) {
   res.writeHead(200, { "content-type": "text/event-stream" });
   const finish = system.includes("REFUSE-ME") ? "content_filter" : "stop";
   res.write(
-    `data: ${JSON.stringify({ choices: [{ delta: { content: system.includes("<escena>") ? SCENE : EDIT }, finish_reason: finish }] })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ delta: { content: readingReply(system, json.messages?.[1]?.content ?? "") ?? (system.includes("<escena>") ? SCENE : EDIT) }, finish_reason: finish }] })}\n\n`,
   );
   res.write(
     `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 1200, completion_tokens: 30, prompt_tokens_details: { cached_tokens: 1000 } } })}\n\n`,

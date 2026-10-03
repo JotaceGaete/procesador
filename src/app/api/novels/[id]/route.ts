@@ -40,7 +40,7 @@ export const GET = handler<Ctx>(async (_request, { params }) => {
   );
 });
 
-/** Title, synopsis, notes and Guía Maestra. */
+/** Title, synopsis, notes, Guía Maestra and the Consejero's automatic reading switch. */
 export const PATCH = handler<Ctx>(async (request, { params }) => {
   const id = assertId((await params).id, "Novela");
   const body = await readJson(request);
@@ -52,13 +52,14 @@ export const PATCH = handler<Ctx>(async (request, { params }) => {
   if (typeof body.synopsis === "string") update.synopsis = body.synopsis.slice(0, 20_000);
   if (typeof body.notes === "string") update.notes = body.notes.slice(0, 20_000);
   if ("guide" in body) update.guide = cleanGuide(body.guide);
+  if (typeof body.auto_digest === "boolean") update.auto_digest = body.auto_digest;
   if (!Object.keys(update).length) throw new HttpError(400, "Nada que guardar");
 
   const { data, error } = await db()
     .from("novels")
     .update(update)
     .eq("id", id)
-    .select("id, title, synopsis, notes, guide, updated_at")
+    .select("id, title, synopsis, notes, guide, auto_digest, updated_at")
     .maybeSingle();
   if (error) throw error;
   if (!data) throw new HttpError(404, "Novela no encontrada");
