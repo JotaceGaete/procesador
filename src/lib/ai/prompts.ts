@@ -210,6 +210,8 @@ export function editPrompt(opts: {
   before: string;
   after: string;
   passages: string | null;
+  /** How many [IMAGEN n] placeholders the selection carries. */
+  images?: number;
 }): string {
   const parts: string[] = [];
   if (opts.passages) parts.push(`Pasajes anteriores relevantes:\n<pasajes>\n${opts.passages}\n</pasajes>`);
@@ -224,6 +226,11 @@ export function editPrompt(opts: {
       .join("\n"),
   );
   parts.push(`Tarea: ${EDIT_TASKS[opts.action](opts.character)}`);
+  if (opts.images) {
+    parts.push(
+      `La selección contiene ${opts.images === 1 ? "una imagen del libro, marcada como [IMAGEN 1]" : `${opts.images} imágenes del libro, marcadas como [IMAGEN 1] a [IMAGEN ${opts.images}]`}. Si reescribes, conserva cada marcador exactamente igual, solo en su propio párrafo y en el lugar que le corresponda; no los modifiques, no los elimines y no inventes otros.`,
+    );
+  }
   return parts.join("\n\n");
 }
 

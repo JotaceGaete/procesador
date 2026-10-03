@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { handler } from "@/lib/auth";
 import { assertId, db, getChapter } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
+import { imageIds } from "@/lib/manuscript";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -34,6 +35,15 @@ export const PATCH = handler<Ctx>(async (request, { params }) => {
   if (!data) {
     await getChapter(id); // 404 if it was deleted
     return NextResponse.json({ error: "Este capítulo se modificó en otra pestaña o dispositivo." }, { status: 409 });
+  }
+  if ("content" in update) {
+    // Images whose markers are in the text are now in this chapter; the ones that left it
+    // stay "not placed" (never deleted). The text itself is the source of truth.
+    const { error: syncError } = await db().rpc("sync_chapter_images", {
+      p_chapter: id,
+      p_ids: [...new Set(imageIds(update.content))],
+    });
+    if (syncError) throw syncError;
   }
   return NextResponse.json(data);
 });

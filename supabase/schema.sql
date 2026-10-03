@@ -149,8 +149,11 @@ create table if not exists public.assets (
   original_path  text not null unique,
   original_type  text not null check (original_type in ('image/jpeg', 'image/png', 'image/webp', 'image/avif')),
   original_bytes bigint not null check (original_bytes > 0),
+  -- Tamaño en píxeles tal como se ve la imagen (orientación EXIF ya aplicada).
   width          integer check (width > 0),
   height         integer check (height > 0),
+  -- Orientación EXIF del original (1 = tal cual; 5–8 = girada un cuarto de vuelta).
+  orientation    smallint not null default 1 check (orientation between 1 and 8),
   -- Huella del original, calculada por el servidor al terminar la subida. Dentro de una
   -- novela no hay dos archivos listos con el mismo contenido (ver finalize_asset).
   sha256         text,
@@ -164,6 +167,8 @@ create table if not exists public.assets (
                                  and thumb_path is not null and derived_type is not null))
 );
 create index if not exists assets_novel_idx on public.assets(novel_id);
+alter table public.assets add column if not exists orientation smallint not null default 1
+  check (orientation between 1 and 8);
 create index if not exists assets_novel_sha_idx on public.assets(novel_id, sha256) where status = 'ready';
 
 -- Uso: galería de un personaje (imágenes de referencia).
@@ -190,6 +195,36 @@ create index if not exists character_images_asset_idx on public.character_images
 create unique index if not exists character_images_one_primary
   on public.character_images(character_id) where is_primary;
 
+-- Uso: imagen del manuscrito (contenido editorial del libro; docs/manuscrito-imagenes.md).
+-- Su posición es el marcador [[imagen:<id>]] en el texto del capítulo. chapter_id es un
+-- índice que el servidor sincroniza al guardar; null = sin colocar (sigue siendo un uso).
+create table if not exists public.manuscript_images (
+  id          uuid primary key default gen_random_uuid(),
+  novel_id    uuid not null references public.novels(id) on delete cascade,
+  asset_id    uuid not null,
+  chapter_id  uuid,
+  -- Texto alternativo (accesibilidad), independiente del pie. No hace falta si es decorativa.
+  alt         text not null default '',
+  decorative  boolean not null default false,
+  -- Pie editorial y crédito/atribución: conceptos distintos, tratados aparte al exportar.
+  caption     text not null default '',
+  credit      text not null default '',
+  -- 'inline': en el flujo del texto; 'page': en página propia (mapas, láminas).
+  layout      text not null default 'inline' check (layout in ('inline', 'page')),
+  align       text not null default 'center' check (align in ('center', 'left', 'right')),
+  -- Ancho relativo a la caja de texto: sirve igual para PDF, EPUB y DOCX.
+  width_pct   integer not null default 100 check (width_pct in (25, 50, 75, 100)),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  unique (id, novel_id),
+  -- Sin cascada: el archivo no se puede borrar mientras esta imagen exista, colocada o no.
+  foreign key (asset_id, novel_id) references public.assets(id, novel_id),
+  foreign key (chapter_id, novel_id) references public.chapters(id, novel_id) on delete set null (chapter_id)
+);
+create index if not exists manuscript_images_novel_idx on public.manuscript_images(novel_id);
+create index if not exists manuscript_images_asset_idx on public.manuscript_images(asset_id);
+create index if not exists manuscript_images_chapter_idx on public.manuscript_images(chapter_id);
+
 -- ---------------------------------------------------------------------------
 -- Triggers
 -- ---------------------------------------------------------------------------
@@ -215,7 +250,8 @@ end $$;
 do $$
 declare t text;
 begin
-  foreach t in array array['novels', 'characters', 'relationships', 'places', 'facts', 'assets', 'character_images'] loop
+  foreach t in array array['novels', 'characters', 'relationships', 'places', 'facts', 'assets', 'character_images',
+                           'manuscript_images'] loop
     execute format('drop trigger if exists %I_touch on public.%I', t, t);
     execute format('create trigger %I_touch before update on public.%I for each row execute function public.touch_row()', t, t);
   end loop;
@@ -269,10 +305,12 @@ create trigger chapters_touch before update on public.chapters
 -- ---------------------------------------------------------------------------
 -- Funciones usadas por el servidor
 -- ---------------------------------------------------------------------------
+-- Palabras de la prosa: los marcadores de imagen no cuentan (como countWords en src/lib/manuscript.ts).
 create or replace function public.word_count(t text) returns integer
 language sql immutable set search_path = '' as $$
-  select case when btrim(t) = '' then 0
-              else coalesce(array_length(regexp_split_to_array(btrim(t), '\s+'), 1), 0) end
+  select case when btrim(c) = '' then 0
+              else coalesce(array_length(regexp_split_to_array(btrim(c), '\s+'), 1), 0) end
+  from (select regexp_replace(t, '\[\[imagen:[0-9a-fA-F-]{36}\]\]', ' ', 'g') as c) x
 $$;
 
 -- Biblioteca: novelas con número de capítulos y palabras.
@@ -317,6 +355,7 @@ end $$;
 create or replace function public.asset_in_use(p_asset uuid) returns boolean
 language sql stable set search_path = '' as $$
   select exists (select 1 from public.character_images where asset_id = p_asset)
+      or exists (select 1 from public.manuscript_images where asset_id = p_asset)
 $$;
 
 -- Borra los archivos indicados que ya no tienen ningún uso y devuelve sus rutas para
@@ -354,8 +393,9 @@ end $$;
 -- Último paso de una subida. Bajo un bloqueo por novela, si ya existe un archivo listo con
 -- el mismo contenido devuelve ése (el servidor descarta la copia nueva); si no, marca éste
 -- como listo. Así una novela nunca guarda dos veces el mismo archivo, ni con subidas simultáneas.
+drop function if exists public.finalize_asset(uuid, text, text, bigint, integer, integer, text, text, text);
 create or replace function public.finalize_asset(
-  p_asset uuid, p_sha256 text, p_type text, p_bytes bigint, p_width integer, p_height integer,
+  p_asset uuid, p_sha256 text, p_type text, p_bytes bigint, p_width integer, p_height integer, p_orientation smallint,
   p_display text, p_thumb text, p_derived text)
 returns uuid language plpgsql set search_path = '' as $$
 declare v_novel uuid; v_existing uuid;
@@ -373,20 +413,26 @@ begin
   end if;
   update public.assets
   set status = 'ready', sha256 = p_sha256, original_type = p_type, original_bytes = p_bytes,
-      width = p_width, height = p_height, display_path = p_display, thumb_path = p_thumb, derived_type = p_derived
+      width = p_width, height = p_height, orientation = p_orientation, display_path = p_display, thumb_path = p_thumb, derived_type = p_derived
   where id = p_asset;
   return p_asset;
 end $$;
 
 -- Reemplazar un archivo: los usos pasan a apuntar a otro archivo y conservan todo lo demás
--- (id, pie, etiqueta, orden, principal). Con p_all = false sólo cambia ese uso; con true,
--- todos los usos del archivo anterior (al añadir otras tablas de uso, se incluyen aquí).
--- Devuelve el archivo anterior, que el servidor borra si se quedó sin usos.
-create or replace function public.replace_asset_uses(p_use uuid, p_new uuid, p_all boolean)
+-- (id, textos, orden, principal, posición en el capítulo). p_kind es 'character' o
+-- 'manuscript'. Con p_all = false sólo cambia ese uso; con true, todos los usos del archivo
+-- anterior, en cualquier tabla de uso. Devuelve el archivo anterior, que el servidor borra
+-- si se quedó sin usos.
+drop function if exists public.replace_asset_uses(uuid, uuid, boolean);
+create or replace function public.replace_asset_uses(p_kind text, p_use uuid, p_new uuid, p_all boolean)
 returns uuid language plpgsql set search_path = '' as $$
 declare v_old uuid;
 begin
-  select asset_id into v_old from public.character_images where id = p_use;
+  if p_kind = 'character' then
+    select asset_id into v_old from public.character_images where id = p_use;
+  elsif p_kind = 'manuscript' then
+    select asset_id into v_old from public.manuscript_images where id = p_use;
+  end if;
   if v_old is null then
     raise exception 'Imagen no encontrada' using errcode = 'P0002';
   end if;
@@ -395,10 +441,28 @@ begin
   end if;
   if p_all then
     update public.character_images set asset_id = p_new where asset_id = v_old;
-  else
+    update public.manuscript_images set asset_id = p_new where asset_id = v_old;
+  elsif p_kind = 'character' then
     update public.character_images set asset_id = p_new where id = p_use;
+  else
+    update public.manuscript_images set asset_id = p_new where id = p_use;
   end if;
   return v_old;
+end $$;
+
+-- Al guardar un capítulo: las imágenes cuyos marcadores están en su texto pasan a estar en
+-- él; las que estaban en él y ya no aparecen quedan sin colocar (nunca se borran). Sólo
+-- toca imágenes de la misma novela: un marcador ajeno no se resuelve.
+create or replace function public.sync_chapter_images(p_chapter uuid, p_ids uuid[])
+returns void language plpgsql set search_path = '' as $$
+declare v_novel uuid;
+begin
+  select novel_id into v_novel from public.chapters where id = p_chapter;
+  if v_novel is null then return; end if;
+  update public.manuscript_images set chapter_id = null
+  where chapter_id = p_chapter and not (id = any(p_ids));
+  update public.manuscript_images set chapter_id = p_chapter
+  where novel_id = v_novel and id = any(p_ids) and chapter_id is distinct from p_chapter;
 end $$;
 
 -- Imagen principal: quita la anterior y marca ésta, en una transacción.
@@ -436,7 +500,7 @@ create or replace function public.duplicate_novel(p_novel uuid, p_title text)
 returns jsonb language plpgsql set search_path = '' as $$
 declare
   v_new uuid := gen_random_uuid();
-  m_chap jsonb; m_char jsonb; m_place jsonb; m_fact jsonb; m_asset jsonb;
+  m_chap jsonb; m_char jsonb; m_place jsonb; m_fact jsonb; m_asset jsonb; m_mimg jsonb; r record;
   v_copies jsonb;
 begin
   insert into public.novels (id, title, synopsis, notes, guide)
@@ -479,10 +543,10 @@ begin
   select coalesce(jsonb_object_agg(id, gen_random_uuid()), '{}') into m_asset
   from public.assets where novel_id = p_novel and status = 'ready';
   insert into public.assets (id, novel_id, status, version, file_name, original_path, original_type, original_bytes,
-    width, height, sha256, display_path, thumb_path, derived_type)
+    width, height, orientation, sha256, display_path, thumb_path, derived_type)
   select (m_asset ->> a.id::text)::uuid, v_new, 'ready', a.version, a.file_name,
     regexp_replace(a.original_path, '^[^/]+/[^/]+/', v_new || '/' || (m_asset ->> a.id::text) || '/'),
-    a.original_type, a.original_bytes, a.width, a.height, a.sha256,
+    a.original_type, a.original_bytes, a.width, a.height, a.orientation, a.sha256,
     regexp_replace(a.display_path, '^[^/]+/[^/]+/', v_new || '/' || (m_asset ->> a.id::text) || '/'),
     regexp_replace(a.thumb_path, '^[^/]+/[^/]+/', v_new || '/' || (m_asset ->> a.id::text) || '/'),
     a.derived_type
@@ -495,6 +559,21 @@ begin
          i.caption, i.stage_label, i.is_primary, i.sort_order
   from public.character_images i where i.novel_id = p_novel;
   perform set_config('procesador.copying', 'off', true);
+
+  -- Imágenes del manuscrito con ids nuevos, y sus marcadores reescritos en el texto copiado:
+  -- cada capítulo de la copia apunta a sus propias imágenes, nunca a las de la original.
+  select coalesce(jsonb_object_agg(id, gen_random_uuid()), '{}') into m_mimg
+  from public.manuscript_images where novel_id = p_novel;
+  insert into public.manuscript_images (id, novel_id, asset_id, chapter_id, alt, decorative, caption, credit,
+    layout, align, width_pct)
+  select (m_mimg ->> m.id::text)::uuid, v_new, (m_asset ->> m.asset_id::text)::uuid,
+    (m_chap ->> m.chapter_id::text)::uuid, m.alt, m.decorative, m.caption, m.credit, m.layout, m.align, m.width_pct
+  from public.manuscript_images m where m.novel_id = p_novel;
+  for r in select key as old_id, value #>> '{}' as new_id from jsonb_each(m_mimg) loop
+    update public.chapters
+    set content = regexp_replace(content, '\[\[imagen:' || r.old_id || '\]\]', '[[imagen:' || r.new_id || ']]', 'gi')
+    where novel_id = v_new and content ~* ('\[\[imagen:' || r.old_id || '\]\]');
+  end loop;
 
   select coalesce(jsonb_agg(jsonb_build_array(p.old_path, p.new_path)), '[]') into v_copies
   from public.assets oa
@@ -515,7 +594,7 @@ do $$
 declare t text;
 begin
   foreach t in array array['novels', 'chapters', 'characters', 'relationships', 'places', 'facts', 'fact_characters',
-                           'assets', 'character_images'] loop
+                           'assets', 'character_images', 'manuscript_images'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('revoke all on public.%I from anon, authenticated', t);
     execute format('grant all on public.%I to service_role', t);
@@ -536,15 +615,16 @@ revoke execute on function public.reorder_character_images(uuid, uuid[]) from pu
 revoke execute on function public.asset_in_use(uuid) from public, anon, authenticated;
 revoke execute on function public.delete_unused_assets(uuid[]) from public, anon, authenticated;
 revoke execute on function public.sweep_assets(uuid) from public, anon, authenticated;
-revoke execute on function public.finalize_asset(uuid, text, text, bigint, integer, integer, text, text, text)
+revoke execute on function public.finalize_asset(uuid, text, text, bigint, integer, integer, smallint, text, text, text)
   from public, anon, authenticated;
-revoke execute on function public.replace_asset_uses(uuid, uuid, boolean) from public, anon, authenticated;
+revoke execute on function public.replace_asset_uses(text, uuid, uuid, boolean) from public, anon, authenticated;
+revoke execute on function public.sync_chapter_images(uuid, uuid[]) from public, anon, authenticated;
 grant execute on function public.word_count(text), public.library(), public.novel_outline(uuid),
   public.reorder_chapters(uuid, uuid[]), public.duplicate_novel(uuid, text),
   public.set_primary_image(uuid), public.reorder_character_images(uuid, uuid[]),
   public.asset_in_use(uuid), public.delete_unused_assets(uuid[]), public.sweep_assets(uuid),
-  public.finalize_asset(uuid, text, text, bigint, integer, integer, text, text, text),
-  public.replace_asset_uses(uuid, uuid, boolean) to service_role;
+  public.finalize_asset(uuid, text, text, bigint, integer, integer, smallint, text, text, text),
+  public.replace_asset_uses(text, uuid, uuid, boolean), public.sync_chapter_images(uuid, uuid[]) to service_role;
 
 -- ---------------------------------------------------------------------------
 -- Storage: un bucket privado para todos los archivos de las novelas (docs/archivos.md).

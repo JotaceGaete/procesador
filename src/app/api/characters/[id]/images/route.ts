@@ -18,11 +18,11 @@ export const POST = handler<Ctx>(async (request, { params }) => {
   const body = await readJson(request);
   const assetId = typeof body.asset_id === "string" && UUID.test(body.asset_id) ? body.asset_id : null;
   if (!assetId) throw new HttpError(400, "Archivo inválido");
-  const { data: asset, error } = await db().from("assets").select("status").eq("id", assetId).maybeSingle();
+  const { data: asset, error } = await db().from("assets").select("status, novel_id").eq("id", assetId).maybeSingle();
   if (error) throw error;
   if (!asset || asset.status !== "ready") throw new HttpError(404, "Archivo no encontrado");
   const use = readUse({ ...body, kind: "character", character_id: characterId });
-  return NextResponse.json(await applyUse(use, assetId), { status: 201 });
+  return NextResponse.json((await applyUse(use, assetId, asset.novel_id)).images, { status: 201 });
 });
 
 /** New gallery order: the complete list of the character's image ids. */

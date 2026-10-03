@@ -151,12 +151,12 @@ test("replace with a file the novel already has: nothing uploaded, the image jus
   assert.equal(dup.data.duplicate.asset.id, s.aW);
   const r = await call(`/api/character-images/${s.e1}/replace`, "POST", { asset_id: s.aW, scope: "use" });
   assert.equal(r.status, 200);
-  assert.equal(r.data.find((i) => i.id === s.e1).asset_id, s.aW);
+  assert.equal(r.data.images.find((i) => i.id === s.e1).asset_id, s.aW);
   assert.ok(!(await assetRows(s.A)).some((a) => a.id === s.aZ), "Z had no other use");
   assert.equal((await filesOf(s.A)).length, before - 3);
   // Same file again: nothing changes.
   const again = await call(`/api/character-images/${s.e1}/replace`, "POST", { asset_id: s.aW, scope: "use" });
-  assert.equal(again.data.find((i) => i.id === s.e1).asset_id, s.aW);
+  assert.equal(again.data.images.find((i) => i.id === s.e1).asset_id, s.aW);
   assert.equal((await filesOf(s.A)).length, before - 3);
 });
 

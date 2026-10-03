@@ -114,6 +114,7 @@ export const POST = handler<Ctx>(async (request, { params }) => {
         p_bytes: stored.total,
         p_width: info.width,
         p_height: info.height,
+        p_orientation: info.orientation,
         p_display: paths.display_path,
         p_thumb: paths.thumb_path,
         p_derived: display.type,
@@ -128,8 +129,8 @@ export const POST = handler<Ctx>(async (request, { params }) => {
   }
 
   try {
-    const images = await applyUse(use, fileId);
-    return NextResponse.json({ asset_id: fileId, reused: fileId !== id, images }, { status: 201 });
+    const result = await applyUse(use, fileId, asset.novel_id);
+    return NextResponse.json({ asset_id: fileId, reused: fileId !== id, ...result }, { status: 201 });
   } catch (e) {
     // The use failed (unknown character, another novel, gallery full): a new file is left without use.
     if (fileId === id) await deleteUnusedAssets([id]);

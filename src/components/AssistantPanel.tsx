@@ -14,6 +14,7 @@ import {
 } from "@/lib/types";
 import { estimateTokens } from "@/lib/ai/context";
 import { readPref, writePref } from "@/lib/client";
+import { appendImages, protectImages, restoreImages } from "@/lib/manuscript";
 import type { Selection } from "./ChapterEditor";
 
 interface Props {
@@ -130,6 +131,8 @@ function AssistantPanel(props: Props) {
   const [running, setRunning] = useState(false);
   const [last, setLast] = useState<(Request & { provider: ProviderId }) | null>(null);
   const [applied, setApplied] = useState<"" | "ok" | "missing" | "inserted">("");
+  // A rewrite that dropped images of the book: never applied without asking.
+  const [lostImages, setLostImages] = useState<{ text: string; missing: string[] } | null>(null);
   const [estimate, setEstimate] = useState<{ total: number; manuscript: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -248,6 +251,7 @@ function AssistantPanel(props: Props) {
     setOutput("");
     setNotice(null);
     setApplied("");
+    setLostImages(null);
     setLast({ ...req, provider: using });
     setRunning(true);
 
@@ -297,6 +301,7 @@ function AssistantPanel(props: Props) {
     setNotice(null);
     setLast(null);
     setApplied("");
+    setLostImages(null);
   };
 
   const showResult = last && last.mode === mode && (output || running || notice);
@@ -529,7 +534,12 @@ function AssistantPanel(props: Props) {
                 <button
                   className="btn primary"
                   disabled={applied === "ok"}
-                  onClick={() => setApplied(onApply(last.target!, parsed.proposal!) ? "ok" : "missing")}
+                  onClick={() => {
+                    // The model saw [IMAGEN n]; put the real markers back before touching the text.
+                    const restored = restoreImages(parsed.proposal!, protectImages(last.target!.text).ids);
+                    if (restored.missing.length) return setLostImages(restored);
+                    setApplied(onApply(last.target!, restored.text) ? "ok" : "missing");
+                  }}
                 >
                   {applied === "ok" ? "Reemplazado · Ctrl/⌘+Z deshace" : "Reemplazar selección"}
                 </button>
@@ -577,6 +587,28 @@ function AssistantPanel(props: Props) {
                 </span>
               ))}
             </p>
+          )}
+          {lostImages && (
+            <div className="notice lost-images" role="alert">
+              <p>
+                La propuesta quitó {lostImages.missing.length === 1 ? "una imagen" : `${lostImages.missing.length} imágenes`} del
+                fragmento. No se ha aplicado.
+              </p>
+              <div className="compare-actions">
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setApplied(onApply(last.target!, appendImages(lostImages.text, lostImages.missing)) ? "ok" : "missing");
+                    setLostImages(null);
+                  }}
+                >
+                  Aplicar y colocar la imagen al final
+                </button>
+                <button className="btn ghost" onClick={() => setLostImages(null)}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
           )}
           {applied === "missing" && (
             <p className="error small">El fragmento original ya no está en el texto. Copia la propuesta y pégala a mano.</p>

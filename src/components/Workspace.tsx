@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Chapter, ChapterInfo, CharacterImage, Memory, Novel, ProviderId } from "@/lib/types";
+import type { Chapter, ChapterInfo, CharacterImage, ManuscriptImage, Memory, Novel, ProviderId } from "@/lib/types";
 import { api, readPref, writePref } from "@/lib/client";
 import { chapterLabel } from "@/lib/ai/context";
 import type { SaveState } from "./useAutosave";
@@ -11,12 +11,16 @@ import ChapterNav from "./ChapterNav";
 import NovelModal from "./NovelModal";
 import MemoryModal from "./MemoryModal";
 import AssistantPanel from "./AssistantPanel";
+import { ChapterImagesModal, ImageCard, ReadingView, type Pending } from "./ManuscriptImages";
+import { addManuscriptImage, rejectReason, replaceImage } from "@/lib/upload";
+import { imageAt, imageIds } from "@/lib/manuscript";
 
 interface Loaded {
   novel: Novel;
   chapters: ChapterInfo[];
   memory: Memory;
   images: CharacterImage[];
+  manuscriptImages: ManuscriptImage[];
   providers: ProviderId[];
   defaultProvider: ProviderId | null;
 }
@@ -44,6 +48,24 @@ export default function Workspace({ novelId }: { novelId: string }) {
   );
   const [chapter, setChapter] = useState<Chapter | null>(null);
 
+  // Images of the book: their markers live in the chapter text, their data here.
+  const [manuscriptImages, setManuscriptImages] = useState<ManuscriptImage[]>([]);
+  const [pending, setPending] = useState<Pending>({});
+  const [activeImage, setActiveImage] = useState<string | null>(null);
+  const [reading, setReading] = useState<string | null>(null); // the text shown in the reading view
+  const [notice, setNotice] = useState("");
+  const setAll = useCallback((all: { images: CharacterImage[]; manuscriptImages: ManuscriptImage[] }) => {
+    setImages(all.images);
+    setManuscriptImages(all.manuscriptImages);
+  }, []);
+  const upsertImage = useCallback(
+    (img: ManuscriptImage) => setManuscriptImages((list) => [...list.filter((x) => x.id !== img.id), img]),
+    [],
+  );
+  const onCaret = useCallback((position: number, text: string) => setActiveImage(imageAt(text, position)?.id ?? null), []);
+  /** Shows a just-inserted image's card without moving the cursor onto its marker (after the editor's own caret update). */
+  const showCard = useCallback((id: string) => requestAnimationFrame(() => requestAnimationFrame(() => setActiveImage(id))), []);
+
   const [selection, setSelection] = useState<Selection | null>(null);
   const [stats, setStats] = useState({ words: 0, chars: 0 });
   const [save, setSave] = useState<{ state: SaveState; retry(): void; overwrite(): void }>({
@@ -55,12 +77,14 @@ export default function Workspace({ novelId }: { novelId: string }) {
   const [navOpen, setNavOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
-  const [modal, setModal] = useState<"novel" | "memory" | null>(null);
+  const [modal, setModal] = useState<"novel" | "memory" | "images" | null>(null);
   const editorRef = useRef<EditorHandle>(null);
 
   const openChapter = useCallback(async (id: string) => {
     const data = await api<Chapter>(`/api/chapters/${id}`);
     setSelection(null);
+    setActiveImage(null);
+    setReading(null);
     setChapter(data);
     writePref(`chapter:${data.novel_id}`, id);
   }, []);
@@ -73,6 +97,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
         setChapters(data.chapters);
         setMemory(data.memory);
         setImages(data.images);
+        setManuscriptImages(data.manuscriptImages);
         writePref("lastNovel", novelId);
         // Continue where the author left off in this novel.
         const last = readPref(`chapter:${novelId}`);
@@ -149,6 +174,69 @@ export default function Workspace({ novelId }: { novelId: string }) {
   const insertAtCursor = useCallback((text: string) => editorRef.current?.insertAtCursor(text), []);
   const clearSelection = useCallback(() => editorRef.current?.clearSelection(), []);
 
+  /**
+   * Pasted, dropped or chosen image files: each gets its marker at the cursor right
+   * away (so it keeps its place and undo works), then uploads in the background.
+   */
+  const insertFiles = useCallback(
+    async (files: File[]) => {
+      const ok = files.filter((f) => {
+        const reason = rejectReason(f);
+        if (reason) setNotice(`${f.name}: ${reason}`);
+        return !reason;
+      });
+      if (!ok.length) return;
+      const items = ok.map((file) => ({ id: crypto.randomUUID(), file }));
+      setPending((p) => ({ ...p, ...Object.fromEntries(items.map((i) => [i.id, { name: i.file.name, stage: "preparing" as const }])) }));
+      setReading(null);
+      editorRef.current?.insertImages(items.map((i) => i.id));
+      showCard(items[items.length - 1].id);
+      for (const item of items) {
+        const update = (patch: Partial<Pending[string]>) => setPending((p) => ({ ...p, [item.id]: { ...p[item.id], ...patch } }));
+        try {
+          const r = await addManuscriptImage({
+            novelId,
+            id: item.id,
+            file: item.file,
+            onProgress: (stage, fraction) => update({ stage, fraction }),
+          });
+          upsertImage(r.image);
+          setPending((p) => Object.fromEntries(Object.entries(p).filter(([k]) => k !== item.id)));
+          if (r.notice) setNotice(r.notice);
+        } catch (e) {
+          update({ stage: "error", error: (e as Error).message });
+        }
+      }
+    },
+    [novelId, upsertImage],
+  );
+
+  /** A file the novel already has (from a gallery): a new image of the book, same file, not copied. */
+  const insertFromAsset = useCallback(
+    async (assetId: string) => {
+      try {
+        const img = await api<ManuscriptImage>(`/api/novels/${novelId}/manuscript-images`, {
+          method: "POST",
+          json: { asset_id: assetId, id: crypto.randomUUID() },
+        });
+        upsertImage(img);
+        setModal(null);
+        setReading(null);
+        editorRef.current?.insertImages([img.id]);
+        showCard(img.id);
+        setNotice("Imagen insertada con el mismo archivo de la galería, sin guardar otra copia.");
+      } catch (e) {
+        setNotice((e as Error).message);
+      }
+    },
+    [novelId, upsertImage],
+  );
+
+  const refreshManuscriptImages = useCallback(
+    () => api<ManuscriptImage[]>(`/api/novels/${novelId}/manuscript-images`).then(setManuscriptImages).catch(() => {}),
+    [novelId],
+  );
+
   if (loadError) {
     return (
       <main className="fatal">
@@ -212,6 +300,23 @@ export default function Workspace({ novelId }: { novelId: string }) {
           <span className="spacer" />
           <span className="meta words">{stats.words.toLocaleString("es")} palabras</span>
           <SaveStatus state={save.state} onRetry={save.retry} onOverwrite={save.overwrite} />
+          <button
+            className="link"
+            onClick={() => {
+              refreshManuscriptImages();
+              setModal("images");
+            }}
+          >
+            Imágenes
+          </button>
+          <button
+            className={`link${reading !== null ? " on" : ""}`}
+            aria-pressed={reading !== null}
+            onClick={() => setReading((r) => (r === null ? (editorRef.current?.getContent() ?? "") : null))}
+            title="Ver el capítulo con sus imágenes"
+          >
+            Lectura
+          </button>
           <button className="link" onClick={() => setModal("memory")}>
             Memoria
           </button>
@@ -235,7 +340,68 @@ export default function Workspace({ novelId }: { novelId: string }) {
           onSelection={setSelection}
           onStats={setStats}
           onSaveState={onSaveState}
+          onCaret={onCaret}
+          onImageFiles={insertFiles}
+          hidden={reading !== null}
         />
+        {reading !== null && (
+          <ReadingView
+            text={reading}
+            images={manuscriptImages}
+            pending={pending}
+            onOpen={(id) => {
+              setReading(null);
+              requestAnimationFrame(() => editorRef.current?.selectImage(id));
+            }}
+          />
+        )}
+        {notice && (
+          <p className="editor-notice" role="status">
+            {notice}{" "}
+            <button className="link" onClick={() => setNotice("")}>
+              Cerrar
+            </button>
+          </p>
+        )}
+        {activeImage && reading === null && !modal && (
+          <ImageCard
+            key={activeImage}
+            id={activeImage}
+            image={manuscriptImages.find((i) => i.id === activeImage)}
+            pending={pending[activeImage]}
+            repeated={imageIds(editorRef.current?.getContent() ?? "").filter((x) => x === activeImage).length > 1}
+            otherUses={(() => {
+              const img = manuscriptImages.find((i) => i.id === activeImage);
+              if (!img) return [];
+              const names = new Map(memory.characters.map((c) => [c.id, c.name]));
+              return [
+                ...images.filter((g) => g.asset_id === img.asset_id).map((g) => `Galería de ${names.get(g.character_id) ?? ""}`),
+                ...manuscriptImages.filter((m) => m.asset_id === img.asset_id && m.id !== img.id).map(() => "otra imagen del manuscrito"),
+              ];
+            })()}
+            onPatch={async (fields) => {
+              upsertImage(await api<ManuscriptImage>(`/api/manuscript-images/${activeImage}`, { method: "PATCH", json: fields }));
+            }}
+            onReplace={async (scope, file) => {
+              const r = await replaceImage({ novelId, target: "manuscript", imageId: activeImage, scope, file, onProgress: () => {} });
+              setAll(r);
+              return r.notice;
+            }}
+            onDuplicate={async () => {
+              const copy = await api<ManuscriptImage>(`/api/manuscript-images/${activeImage}/duplicate`, { method: "POST" });
+              upsertImage(copy);
+              editorRef.current?.insertImageAfter(activeImage, copy.id);
+            }}
+            onRemove={() => editorRef.current?.removeImage(activeImage)}
+            onDelete={async () => {
+              await api(`/api/manuscript-images/${activeImage}`, { method: "DELETE" });
+              const id = activeImage;
+              editorRef.current?.removeImage(id);
+              setManuscriptImages((list) => list.filter((i) => i.id !== id));
+            }}
+            onClose={() => setActiveImage(null)}
+          />
+        )}
       </main>
 
       <AssistantPanel
@@ -265,6 +431,41 @@ export default function Workspace({ novelId }: { novelId: string }) {
           }}
         />
       )}
+      {modal === "images" && (
+        <ChapterImagesModal
+          text={editorRef.current?.getContent() ?? chapter.content}
+          chapterId={chapter.id}
+          images={manuscriptImages}
+          gallery={images.filter((g, i, all) => all.findIndex((x) => x.asset_id === g.asset_id) === i)}
+          names={new Map(memory.characters.map((c) => [c.id, c.name]))}
+          pending={pending}
+          onGo={(id) => {
+            setModal(null);
+            setReading(null);
+            requestAnimationFrame(() => editorRef.current?.selectImage(id));
+          }}
+          onInsertExisting={(id) => {
+            setModal(null);
+            setReading(null);
+            editorRef.current?.insertImages([id]);
+            showCard(id);
+          }}
+          onInsertFromAsset={insertFromAsset}
+          onDelete={async (id) => {
+            try {
+              await api(`/api/manuscript-images/${id}`, { method: "DELETE" });
+              setManuscriptImages((list) => list.filter((i) => i.id !== id));
+            } catch (e) {
+              setNotice((e as Error).message);
+            }
+          }}
+          onFiles={(files) => {
+            setModal(null);
+            insertFiles(files);
+          }}
+          onClose={() => setModal(null)}
+        />
+      )}
       {modal === "memory" && (
         <MemoryModal
           novelId={novel.id}
@@ -273,7 +474,9 @@ export default function Workspace({ novelId }: { novelId: string }) {
           images={images}
           onChange={setMemory}
           onImagesChange={onImagesChange}
-          onAllImagesChange={setImages}
+          manuscriptImages={manuscriptImages}
+          onAllImagesChange={setAll}
+          onInsertInChapter={insertFromAsset}
           onClose={() => setModal(null)}
         />
       )}

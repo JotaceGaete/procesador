@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { handler } from "@/lib/auth";
-import { getChapterTexts, getMemory, getNovel, getOutline } from "@/lib/supabase";
+import { db, getChapterTexts, getMemory, getNovel, getOutline } from "@/lib/supabase";
+import { describeImages, protectImages } from "@/lib/manuscript";
 import { HttpError, readJson } from "@/lib/http";
 import { compileGuide } from "@/lib/guide";
 import {
@@ -71,19 +72,32 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
   let ms: Manuscript | null = null;
   const manuscript = async () => (ms ??= buildManuscript(await getChapterTexts(novel.id), { id: chapter.id, content }));
 
+  // The assistant never receives images: each marker in the text it reads becomes a
+  // neutral line, applied to each piece as it is cut (offsets stay those of the real text).
+  let descriptions: Map<string, string> | null = null;
+  const plain = async <T extends string | null>(t: T): Promise<T> => {
+    if (!t || !t.includes("[[imagen:")) return t;
+    if (!descriptions) {
+      const { data, error } = await db().from("manuscript_images").select("id, alt, caption, decorative").eq("novel_id", novel.id);
+      if (error) throw error;
+      descriptions = new Map(data.map((i) => [i.id, i.decorative ? "decorativa" : i.alt || i.caption]));
+    }
+    return describeImages(t, (id) => descriptions!.get(id) ?? "") as T;
+  };
+
   if (body.mode === "scene") {
     const argument = typeof body.argument === "string" ? body.argument.trim() : "";
     if (!argument) throw new HttpError(400, "Escribe el argumento de la escena.");
     if (argument.length > MAX_ARGUMENT_CHARS) throw new HttpError(400, "El argumento es demasiado largo.");
     const cursor = clamp(Number(body.cursor), 0, content.length);
     const near = nearbyRange(content, { start: cursor, end: cursor }, SCENE_BEFORE_CHARS, SCENE_AFTER_CHARS);
-    const before = content.slice(near.start, cursor);
-    const after = content.slice(cursor, near.end);
+    const before = await plain(content.slice(near.start, cursor));
+    const after = await plain(content.slice(cursor, near.end));
 
     let previousChapterTail: string | null = null;
     if (before.trim().length < 1500 && chapterIndex > 0) {
       const prev = (await manuscript()).chapters[chapterIndex - 1];
-      previousChapterTail = prev.content.slice(-PREVIOUS_CHAPTER_CHARS).trim() || null;
+      previousChapterTail = (await plain(prev.content.slice(-PREVIOUS_CHAPTER_CHARS).trim())) || null;
     }
     const length = (SCENE_LENGTHS.some((l) => l.id === body.length) ? body.length : "media") as SceneLength;
     const selected = selectMemory(memory, {
@@ -96,7 +110,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
     });
     return {
       instructions: WRITE_INSTRUCTIONS,
-      manuscript: includeManuscript ? (await manuscript()).text : null,
+      manuscript: includeManuscript ? await plain((await manuscript()).text) : null,
       project: project(selected),
       prompt: scenePrompt({
         argument,
@@ -145,20 +159,23 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
     // The chosen character, or (for a general check) up to three people named in the selection itself.
     const who = character ? [character] : relevantCharacters(memory.characters, [], selection).slice(0, 3);
     const found = who.map((c) => excerpts(ms, c, exclude, Math.floor(PASSAGE_BUDGET / Math.max(1, who.length)))).filter(Boolean);
-    passages = found.length ? found.join("\n\n---\n\n") : null;
+    passages = found.length ? await plain(found.join("\n\n---\n\n")) : null;
   }
 
+  // Images in the selection travel as [IMAGEN n]; the panel puts the real markers back.
+  const protectedSelection = protectImages(selection);
   return {
     instructions: EDIT_INSTRUCTIONS,
-    manuscript: includeManuscript ? (await manuscript()).text : null,
+    manuscript: includeManuscript ? await plain((await manuscript()).text) : null,
     project: project(selected),
     prompt: editPrompt({
       action: action.id,
       character,
-      selection,
-      before: content.slice(near.start, start),
-      after: content.slice(end, near.end),
+      selection: protectedSelection.text,
+      before: await plain(content.slice(near.start, start)),
+      after: await plain(content.slice(end, near.end)),
       passages,
+      images: protectedSelection.ids.length,
     }),
     signal,
   };

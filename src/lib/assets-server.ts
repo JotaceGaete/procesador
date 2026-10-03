@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { db } from "./supabase";
-import type { AssetUse, CharacterImage } from "./types";
+import type { AssetUse, CharacterImage, ManuscriptImage } from "./types";
 
 /**
  * Novel files on the server (see docs/archivos.md). One private bucket for every
@@ -12,12 +12,30 @@ export const BUCKET = "novel-files";
 export const bucket = () => db().storage.from(BUCKET);
 
 /** Asset columns the browser may see (no storage paths). */
-export const ASSET_INFO = "id, version, file_name, original_type, original_bytes, width, height, derived_type";
+export const ASSET_INFO = "id, version, file_name, original_type, original_bytes, width, height, orientation, derived_type";
 
 const CHARACTER_IMAGE = `id, novel_id, character_id, asset_id, caption, stage_label, is_primary, sort_order, created_at, asset:assets(${ASSET_INFO})`;
 
 const gallery = (column: "novel_id" | "character_id", value: string) =>
   db().from("character_images").select(CHARACTER_IMAGE).eq(column, value).order("sort_order").order("created_at");
+
+const MANUSCRIPT_IMAGE = `id, novel_id, asset_id, chapter_id, alt, decorative, caption, credit, layout, align, width_pct, created_at, asset:assets(${ASSET_INFO})`;
+
+export async function getManuscriptImages(novelId: string): Promise<ManuscriptImage[]> {
+  const { data, error } = await db()
+    .from("manuscript_images")
+    .select(MANUSCRIPT_IMAGE)
+    .eq("novel_id", novelId)
+    .order("created_at");
+  if (error) throw error;
+  return data as unknown as ManuscriptImage[];
+}
+
+export async function getManuscriptImage(id: string): Promise<ManuscriptImage | null> {
+  const { data, error } = await db().from("manuscript_images").select(MANUSCRIPT_IMAGE).eq("id", id).maybeSingle();
+  if (error) throw error;
+  return data as unknown as ManuscriptImage | null;
+}
 
 export async function getNovelImages(novelId: string): Promise<CharacterImage[]> {
   const { data, error } = await gallery("novel_id", novelId);
@@ -66,9 +84,16 @@ export async function inspectStored(path: string): Promise<{ head: Uint8Array; t
 
 /** Where a file is used (shown when an upload turns out to be a file the novel already has). */
 export async function assetUses(assetId: string): Promise<AssetUse[]> {
-  const { data, error } = await db().from("character_images").select("id, character_id").eq("asset_id", assetId);
-  if (error) throw error;
-  return data.map((u) => ({ kind: "character", character_id: u.character_id, character_image_id: u.id }));
+  const [gallery, manuscript] = await Promise.all([
+    db().from("character_images").select("id, character_id").eq("asset_id", assetId),
+    db().from("manuscript_images").select("id, chapter_id").eq("asset_id", assetId),
+  ]);
+  if (gallery.error) throw gallery.error;
+  if (manuscript.error) throw manuscript.error;
+  return [
+    ...gallery.data.map((u): AssetUse => ({ kind: "character", character_id: u.character_id, character_image_id: u.id })),
+    ...manuscript.data.map((u): AssetUse => ({ kind: "manuscript", manuscript_image_id: u.id, chapter_id: u.chapter_id })),
+  ];
 }
 
 /**

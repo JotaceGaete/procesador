@@ -33,6 +33,12 @@ const ROUTES = [
   ["DELETE", `/api/character-images/${U}`],
   ["POST", `/api/character-images/${U}/primary`],
   ["POST", `/api/character-images/${U}/replace`],
+  ["GET", `/api/novels/${U}/manuscript-images`],
+  ["POST", `/api/novels/${U}/manuscript-images`],
+  ["PATCH", `/api/manuscript-images/${U}`],
+  ["DELETE", `/api/manuscript-images/${U}`],
+  ["POST", `/api/manuscript-images/${U}/duplicate`],
+  ["POST", `/api/manuscript-images/${U}/replace`],
 ];
 const hit = (base, method, route, headers = {}) =>
   fetch(base + route, {
@@ -108,6 +114,7 @@ test("the public (anon) key can't read tables or call functions", async () => {
     "fact_characters",
     "assets",
     "character_images",
+    "manuscript_images",
   ]) {
     const res = await fetch(`${STACK}/rest/v1/${table}`, { headers });
     assert.ok([401, 403].includes(res.status), `${table}: ${res.status}`);
@@ -118,7 +125,15 @@ test("the public (anon) key can't read tables or call functions", async () => {
     body: "{}",
   });
   assert.ok([401, 403].includes(rpc.status), `rpc: ${rpc.status}`);
-  for (const fn of ["delete_unused_assets", "sweep_assets", "set_primary_image", "reorder_character_images"]) {
+  for (const fn of [
+    "delete_unused_assets",
+    "sweep_assets",
+    "set_primary_image",
+    "reorder_character_images",
+    "replace_asset_uses",
+    "sync_chapter_images",
+    "finalize_asset",
+  ]) {
     const res = await fetch(`${STACK}/rest/v1/rpc/${fn}`, {
       method: "POST",
       headers: { ...headers, "content-type": "application/json" },

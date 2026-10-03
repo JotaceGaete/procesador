@@ -3,6 +3,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { readPref, writePref } from "@/lib/client";
 import { useAutosave, type SaveState } from "./useAutosave";
+import { blocks, countWords, imageAt, marker } from "@/lib/manuscript";
 
 export interface Selection {
   start: number;
@@ -19,6 +20,14 @@ export interface EditorHandle {
   insertAtCursor(text: string): void;
   /** Collapses the selection to its end, so nothing is selected. */
   clearSelection(): void;
+  /** Inserts image markers at the cursor, each in its own paragraph (undoable). */
+  insertImages(ids: string[]): void;
+  /** Inserts an image marker right after another one's paragraph (undoable). */
+  insertImageAfter(existingId: string, id: string): void;
+  /** Removes an image's marker from the text (undoable). The image itself stays, not placed. */
+  removeImage(id: string): void;
+  /** Puts the cursor on an image's marker (shows its card). */
+  selectImage(id: string): boolean;
   /** Saves and waits; true when nothing is left unsaved. */
   flush(): Promise<boolean>;
 }
@@ -30,13 +39,19 @@ interface Props {
   onSelection(sel: Selection | null): void;
   onStats(stats: { words: number; chars: number }): void;
   onSaveState(state: SaveState, actions: { retry(): void; overwrite(): void }): void;
+  /** Cursor position after every move or edit, with the current text. */
+  onCaret?(position: number, text: string): void;
+  /** Image files pasted or dropped on the text. */
+  onImageFiles?(files: File[]): void;
+  /** Reading view: the text stays mounted (and keeps its undo history) but isn't shown. */
+  hidden?: boolean;
 }
 
 const SAVE_POSITION_MS = 600;
 
 /** One chapter's text. Remounted for each chapter (key = chapter id). */
 const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(props, ref) {
-  const { chapterId, initial, focusMode, onSelection, onStats, onSaveState } = props;
+  const { chapterId, initial, focusMode, onSelection, onStats, onSaveState, onCaret, onImageFiles, hidden } = props;
   const [content, setContent] = useState(initial.content);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef(content);
@@ -52,7 +67,7 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
   const firstCount = useRef(true);
   useEffect(() => {
     const t = setTimeout(
-      () => onStats({ words: (content.match(/\S+/g) ?? []).length, chars: content.length }),
+      () => onStats({ words: countWords(content), chars: content.length }),
       firstCount.current ? 0 : 400,
     );
     firstCount.current = false;
@@ -101,6 +116,7 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
     if (!el) return;
     const { selectionStart: start, selectionEnd: end } = el;
     cursorRef.current = end;
+    onCaret?.(end, el.value);
     const prev = lastSel.current;
     const next =
       end > start
@@ -112,7 +128,7 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
       lastSel.current = next;
       onSelection(next);
     }
-  }, [onSelection]);
+  }, [onSelection, onCaret]);
 
   /** insertText keeps the browser's undo history, so Ctrl/⌘+Z reverts it. */
   const replaceRange = useCallback(
@@ -131,6 +147,24 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
     },
     [updateSelection],
   );
+
+  /** Inserts text as its own paragraphs at a position (blank lines around it, undoable). */
+  const insertParagraphs = useCallback(
+    (text: string, position: number) => {
+      const current = contentRef.current;
+      const at = Math.min(position, current.length);
+      const before = current.slice(0, at);
+      const after = current.slice(at);
+      const lead = !before ? "" : before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+      const tail = !after ? "" : after.startsWith("\n\n") ? "" : after.startsWith("\n") ? "\n" : "\n\n";
+      replaceRange(at, at, `${lead}${text.trim()}${tail}`);
+    },
+    [replaceRange],
+  );
+  const imageBlock = (id: string) =>
+    blocks(contentRef.current).find((b) => b.kind === "image" && b.id === id) as { start: number; end: number } | undefined;
+
+  const imageFiles = (list: FileList | null | undefined) => [...(list ?? [])].filter((f) => f.type.startsWith("image/"));
 
   useImperativeHandle(
     ref,
@@ -154,13 +188,40 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
         return true;
       },
       insertAtCursor(text) {
-        const current = contentRef.current;
-        const at = Math.min(cursorRef.current, current.length);
-        const before = current.slice(0, at);
-        const after = current.slice(at);
-        const lead = !before ? "" : before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
-        const tail = !after ? "" : after.startsWith("\n\n") ? "" : after.startsWith("\n") ? "\n" : "\n\n";
-        replaceRange(at, at, `${lead}${text.trim()}${tail}`);
+        insertParagraphs(text, cursorRef.current);
+      },
+      insertImages(ids) {
+        if (!ids.length) return;
+        insertParagraphs(ids.map(marker).join("\n\n"), cursorRef.current);
+      },
+      insertImageAfter(existingId, id) {
+        const block = imageBlock(existingId);
+        if (block) replaceRange(block.end, block.end, `\n\n${marker(id)}`);
+        else insertParagraphs(marker(id), cursorRef.current);
+      },
+      removeImage(id) {
+        const block = imageBlock(id);
+        if (!block) return;
+        const text = contentRef.current;
+        // Take the line and one of the blank lines around it, so paragraphs stay tidy.
+        let start = block.start;
+        let end = block.end;
+        if (text[end] === "\n") end++;
+        if (text.slice(start - 2, start) === "\n\n") start--;
+        else if (text[end] === "\n") end++;
+        replaceRange(start, end, "");
+      },
+      selectImage(id) {
+        const block = imageBlock(id);
+        const el = textareaRef.current;
+        if (!block || !el) return false;
+        el.focus();
+        el.setSelectionRange(block.start, block.start);
+        // Bring it into view: a rough line height from the font size.
+        const lines = contentRef.current.slice(0, block.start).split("\n").length;
+        el.scrollTop = Math.max(0, lines * parseFloat(getComputedStyle(el).lineHeight || "28") - el.clientHeight / 3);
+        updateSelection();
+        return true;
       },
       clearSelection() {
         const el = textareaRef.current;
@@ -169,7 +230,7 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
         updateSelection();
       },
     }),
-    [flush, replaceRange, updateSelection],
+    [flush, replaceRange, updateSelection, insertParagraphs],
   );
 
   return (
@@ -185,6 +246,37 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
       onMouseUp={updateSelection}
       onKeyUp={updateSelection}
       onBlur={savePosition}
+      hidden={hidden}
+      onKeyDown={(e) => {
+        // Typing on an image's line would turn its marker into plain text: start a new
+        // paragraph below the image instead, and let the key land there.
+        const el = e.currentTarget;
+        if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey || el.selectionStart !== el.selectionEnd) return;
+        const img = imageAt(el.value, el.selectionStart);
+        if (!img) return;
+        el.setSelectionRange(img.end, img.end);
+        if (!document.execCommand("insertText", false, "\n\n")) {
+          e.preventDefault();
+          const v = el.value;
+          setContent(`${v.slice(0, img.end)}\n\n${e.key}${v.slice(img.end)}`);
+          requestAnimationFrame(() => el.setSelectionRange(img.end + 3, img.end + 3));
+        }
+      }}
+      onPaste={(e) => {
+        const files = imageFiles(e.clipboardData?.files);
+        if (!files.length || !onImageFiles) return;
+        e.preventDefault();
+        onImageFiles(files);
+      }}
+      onDragOver={(e) => {
+        if (onImageFiles && [...e.dataTransfer.types].includes("Files")) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        const files = imageFiles(e.dataTransfer?.files);
+        if (!files.length || !onImageFiles) return;
+        e.preventDefault();
+        onImageFiles(files);
+      }}
       placeholder="Empieza a escribir…"
       spellCheck
       aria-label="Texto del capítulo"

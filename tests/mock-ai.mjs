@@ -7,6 +7,8 @@
 
 const SCENE = "<escena>Juan dejó las llaves sobre la mesa. Elena no levantó la vista.\n\n—¿Café? —dijo él.</escena>";
 const EDIT = "Bien el ritmo.\n\n<reescritura>Texto propuesto por el modelo.</reescritura>";
+// "MANTEN-IMAGENES" in a request: a rewrite that keeps (and reorders) the image placeholders.
+const EDIT_KEEP = "Bien.\n\n<reescritura>Primero la imagen.\n\n[IMAGEN 1]\n\nY el texto reescrito.</reescritura>";
 
 const sse = (res, events) => {
   res.writeHead(200, { "content-type": "text/event-stream" });
@@ -23,7 +25,7 @@ export function handleAI(req, res, body, log) {
   if (path === "/anthropic/v1/messages") {
     log.push({ provider: "anthropic", body: json });
     const system = JSON.stringify(json.system ?? "");
-    const text = system.includes("<escena>") ? SCENE : EDIT;
+    const text = system.includes("<escena>") ? SCENE : body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : EDIT;
     sse(res, [
       [
         "message_start",
@@ -60,7 +62,7 @@ export function handleAI(req, res, body, log) {
   if (path === "/openai/responses") {
     log.push({ provider: "openai", body: json });
     const instructions = json.instructions ?? "";
-    const text = instructions.includes("<escena>") ? SCENE : EDIT;
+    const text = instructions.includes("<escena>") ? SCENE : body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : EDIT;
     const half = Math.floor(text.length / 2);
     let n = 0;
     const refuse = instructions.includes("REFUSE-ME");

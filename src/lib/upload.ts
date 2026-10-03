@@ -8,7 +8,7 @@ import {
   THUMB_MAX_SIDE,
   type OriginalType,
 } from "./images";
-import type { AssetInfo, AssetUse, CharacterImage } from "./types";
+import type { AssetInfo, AssetUse, CharacterImage, ManuscriptImage } from "./types";
 
 /**
  * Browser side of an upload (docs/archivos.md):
@@ -96,16 +96,25 @@ function put(url: string, file: File, onProgress: (fraction: number) => void): P
   });
 }
 
+/** What a completed upload's use returns (see applyUse on the server). */
+interface UseResult {
+  images?: CharacterImage[];
+  manuscriptImages?: ManuscriptImage[];
+  manuscriptImage?: ManuscriptImage;
+}
+
 type StoreResult =
   | { kind: "duplicate"; asset: AssetInfo; uses: AssetUse[] }
-  | { kind: "stored"; assetId: string; reused: boolean; images: CharacterImage[] };
+  | ({ kind: "stored"; assetId: string; reused: boolean } & UseResult);
+
+type OnProgress = CharacterUpload["onProgress"];
 
 /**
  * Stores a file for a use. The hash goes first: if the novel already has this
  * exact file, nothing is processed or uploaded and the existing file comes back
  * (the server double-checks with its own hash when an upload completes).
  */
-async function storeFile(novelId: string, file: File, use: object, onProgress: CharacterUpload["onProgress"]): Promise<StoreResult> {
+async function storeFile(novelId: string, file: File, use: object, onProgress: OnProgress): Promise<StoreResult> {
   const reason = rejectReason(file);
   if (reason) throw new Error(reason);
 
@@ -130,11 +139,11 @@ async function storeFile(novelId: string, file: File, use: object, onProgress: C
   form.append("display", display, "display");
   form.append("thumb", thumb, "thumb");
   form.append("use", JSON.stringify(use));
-  const done = await api<{ asset_id: string; reused: boolean; images: CharacterImage[] }>(`/api/assets/${start.asset_id}/complete`, {
+  const done = await api<{ asset_id: string; reused: boolean } & UseResult>(`/api/assets/${start.asset_id}/complete`, {
     method: "POST",
     body: form,
   });
-  return { kind: "stored", assetId: done.asset_id, reused: done.reused, images: done.images };
+  return { kind: "stored", ...done, assetId: done.asset_id };
 }
 
 export const REUSED = "Ya estaba en la novela: se usa el mismo archivo, sin guardar otra copia.";
@@ -151,8 +160,8 @@ export async function addCharacterImage({
   onProgress,
 }: CharacterUpload): Promise<{ images: CharacterImage[] | null; notice: string }> {
   const r = await storeFile(novelId, file, { kind: "character", character_id: characterId }, onProgress);
-  if (r.kind === "stored") return { images: r.images, notice: r.reused ? REUSED : "" };
-  if (r.uses.some((u) => u.character_id === characterId)) {
+  if (r.kind === "stored") return { images: r.images!, notice: r.reused ? REUSED : "" };
+  if (r.uses.some((u) => u.kind === "character" && u.character_id === characterId)) {
     return { images: null, notice: `«${file.name}» ya está en esta galería.` };
   }
   const images = await api<CharacterImage[]>(`/api/characters/${characterId}/images`, {
@@ -163,28 +172,57 @@ export async function addCharacterImage({
 }
 
 /**
- * Replaces the file of a gallery image, keeping its caption, stage label, order and
- * main-image status. `scope: "use"` changes this image only; `"all"` every use of
- * its current file. Returns the whole novel's gallery images.
+ * A new image of the book. `id` is the marker the editor already placed in the
+ * text, so the image keeps its position while it uploads. A file the novel
+ * already has is reused, never stored again.
  */
-export async function replaceCharacterImage({
+export async function addManuscriptImage({
   novelId,
+  id,
+  file,
+  onProgress,
+}: {
+  novelId: string;
+  id: string;
+  file: File;
+  onProgress: OnProgress;
+}): Promise<{ image: ManuscriptImage; notice: string }> {
+  const r = await storeFile(novelId, file, { kind: "manuscript", id }, onProgress);
+  if (r.kind === "stored") return { image: r.manuscriptImage!, notice: r.reused ? REUSED : "" };
+  const image = await api<ManuscriptImage>(`/api/novels/${novelId}/manuscript-images`, {
+    method: "POST",
+    json: { asset_id: r.asset.id, id },
+  });
+  return { image, notice: REUSED };
+}
+
+/**
+ * Replaces the file of a gallery image or an image of the book, keeping its texts,
+ * order, main status and position. `scope: "use"` changes this image only; `"all"`
+ * every use of its current file. Returns the novel's gallery and manuscript images.
+ */
+export async function replaceImage({
+  novelId,
+  target,
   imageId,
   scope,
   file,
   onProgress,
 }: {
   novelId: string;
+  target: "character" | "manuscript";
   imageId: string;
   scope: "use" | "all";
   file: File;
-  onProgress: CharacterUpload["onProgress"];
-}): Promise<{ images: CharacterImage[]; notice: string }> {
-  const r = await storeFile(novelId, file, { kind: "replace", character_image_id: imageId, scope }, onProgress);
-  if (r.kind === "stored") return { images: r.images, notice: r.reused ? REUSED : "" };
-  const images = await api<CharacterImage[]>(`/api/character-images/${imageId}/replace`, {
+  onProgress: OnProgress;
+}): Promise<{ images: CharacterImage[]; manuscriptImages: ManuscriptImage[]; notice: string }> {
+  const key = target === "character" ? "character_image_id" : "manuscript_image_id";
+  const r = await storeFile(novelId, file, { kind: "replace", [key]: imageId, scope }, onProgress);
+  if (r.kind === "stored") return { images: r.images!, manuscriptImages: r.manuscriptImages!, notice: r.reused ? REUSED : "" };
+  const route = target === "character" ? "character-images" : "manuscript-images";
+  const both = await api<{ images: CharacterImage[]; manuscriptImages: ManuscriptImage[] }>(`/api/${route}/${imageId}/replace`, {
     method: "POST",
     json: { asset_id: r.asset.id, scope },
   });
-  return { images, notice: REUSED };
+  return { ...both, notice: REUSED };
 }

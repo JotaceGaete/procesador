@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Character, CharacterImage } from "@/lib/types";
+import type { Character, CharacterImage, ManuscriptImage } from "@/lib/types";
 import { MAX_IMAGES_PER_CHARACTER, ORIGINAL_TYPES, assetUrl } from "@/lib/images";
 import { api } from "@/lib/client";
-import { addCharacterImage, rejectReason, replaceCharacterImage, type UploadStage } from "@/lib/upload";
+import { addCharacterImage, rejectReason, replaceImage, type UploadStage } from "@/lib/upload";
 
 /**
  * Visual memory of a character (docs/personajes-galeria.md): reference images,
@@ -14,7 +14,8 @@ import { addCharacterImage, rejectReason, replaceCharacterImage, type UploadStag
  */
 
 type OnImages = (characterId: string, images: CharacterImage[]) => void;
-type OnAllImages = (images: CharacterImage[]) => void;
+/** After a replacement: the novel's gallery and manuscript images (with "all" uses, both can change). */
+type OnAllImages = (all: { images: CharacterImage[]; manuscriptImages: ManuscriptImage[] }) => void;
 
 export function initials(name: string) {
   const words = name.trim().split(/\s+/).filter(Boolean);
@@ -144,19 +145,24 @@ export function CharacterVisual({
   character,
   images,
   allImages,
+  manuscriptImages,
   names,
   onImages,
   onAllImages,
+  onInsertInChapter,
   children,
 }: {
   novelId: string;
   character: Pick<Character, "id" | "name" | "role">;
   images: CharacterImage[];
-  /** Every gallery image of the novel: to know where else a file is used. */
+  /** Every gallery and manuscript image of the novel: to know where else a file is used. */
   allImages: CharacterImage[];
+  manuscriptImages: ManuscriptImage[];
   names: Map<string, string>;
   onImages: OnImages;
   onAllImages: OnAllImages;
+  /** Inserts this image's file in the open chapter, at the cursor (same file, not copied). */
+  onInsertInChapter?: (assetId: string) => void;
   children?: React.ReactNode;
 }) {
   const uploads = useUploads(novelId, character.id, images.length, onImages);
@@ -300,10 +306,14 @@ export function CharacterVisual({
           name={character.name}
           otherUses={(() => {
             const current = images.find((i) => i.id === viewing)!;
-            return allImages
-              .filter((i) => i.asset_id === current.asset_id && i.id !== current.id)
-              .map((i) => (i.character_id === character.id ? `${character.name} (otra imagen)` : (names.get(i.character_id) ?? "")));
+            return [
+              ...allImages
+                .filter((i) => i.asset_id === current.asset_id && i.id !== current.id)
+                .map((i) => (i.character_id === character.id ? `${character.name} (otra imagen)` : (names.get(i.character_id) ?? ""))),
+              ...manuscriptImages.filter((m) => m.asset_id === current.asset_id).map(() => "el manuscrito"),
+            ];
           })()}
+          onInsertInChapter={onInsertInChapter}
           onMove={setViewing}
           onClose={() => setViewing(null)}
           onImages={(list) => onImages(character.id, list)}
@@ -325,6 +335,7 @@ function Viewer({
   onClose,
   onImages,
   onAllImages,
+  onInsertInChapter,
 }: {
   novelId: string;
   images: CharacterImage[];
@@ -336,6 +347,7 @@ function Viewer({
   onClose(): void;
   onImages(images: CharacterImage[]): void;
   onAllImages: OnAllImages;
+  onInsertInChapter?: (assetId: string) => void;
 }) {
   const index = images.findIndex((i) => i.id === id);
   const img = images[index];
@@ -422,15 +434,16 @@ function Viewer({
     setBusy(true);
     setState("Preparando…");
     try {
-      const r = await replaceCharacterImage({
+      const r = await replaceImage({
         novelId,
+        target: "character",
         imageId: img.id,
         scope: scopeRef.current,
         file,
         onProgress: (stage, fraction) =>
           setState(stage === "uploading" ? `Subiendo ${Math.round((fraction ?? 0) * 100)} %` : stage === "processing" ? "Guardando…" : "Preparando…"),
       });
-      onAllImages(r.images);
+      onAllImages(r);
       setState(r.notice || "Imagen reemplazada");
     } catch (e) {
       setState((e as Error).message, true);
@@ -533,6 +546,11 @@ function Viewer({
           <button type="button" className="link" disabled={busy} onClick={startReplace}>
             Reemplazar archivo…
           </button>
+          {onInsertInChapter && (
+            <button type="button" className="link" onClick={() => onInsertInChapter(img.asset_id)}>
+              Insertar en el capítulo
+            </button>
+          )}
           <a className="link" href={assetUrl(img.asset, "original")}>
             Descargar original
           </a>

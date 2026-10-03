@@ -7,11 +7,11 @@ import { applyUse, readUse } from "@/lib/asset-uses";
 type Ctx = { params: Promise<{ id: string }> };
 
 /**
- * Replaces a gallery image's file with one the novel already has (found by the
- * upload's duplicate check), without uploading anything. New files go through
- * the upload with `use: { kind: "replace", … }`. Body: { asset_id, scope: "use" | "all" }.
- * Returns the whole novel's gallery and manuscript images ({ images, manuscriptImages }):
- * with scope "all", images of the book that shared the file change too.
+ * Replaces an image of the book's file with one the novel already has, without
+ * uploading anything (new files go through the upload with `use: { kind: "replace",
+ * manuscript_image_id, scope }`). The marker, texts and position don't change, so
+ * the chapter's revision doesn't either. Body: { asset_id, scope: "use" | "all" }.
+ * Returns the novel's gallery and manuscript images.
  */
 export const POST = handler<Ctx>(async (request, { params }) => {
   const imageId = assertId((await params).id, "Imagen");
@@ -20,6 +20,6 @@ export const POST = handler<Ctx>(async (request, { params }) => {
   const { data: asset, error } = await db().from("assets").select("status, novel_id").eq("id", assetId).maybeSingle();
   if (error) throw error;
   if (!asset || asset.status !== "ready") throw new HttpError(404, "Archivo no encontrado");
-  const use = readUse({ kind: "replace", character_image_id: imageId, scope: body.scope });
+  const use = readUse({ kind: "replace", manuscript_image_id: imageId, scope: body.scope });
   return NextResponse.json(await applyUse(use, assetId, asset.novel_id));
 });

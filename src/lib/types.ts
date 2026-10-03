@@ -113,14 +113,42 @@ export interface AssetInfo {
   file_name: string;
   original_type: "image/jpeg" | "image/png" | "image/webp" | "image/avif";
   original_bytes: number;
-  /** Pixel size of the original. */
+  /** Pixel size of the original as it is seen (EXIF orientation applied). */
   width: number;
   height: number;
+  /** EXIF orientation of the original (1–8). Exporters apply it when embedding the original. */
+  orientation: number;
   derived_type: "image/webp" | "image/jpeg" | "image/png";
 }
 
-/** Where a file of the novel is used. Prioridad 2b adds the manuscript. */
-export type AssetUse = { kind: "character"; character_id: string; character_image_id: string };
+/** Where a file of the novel is used. */
+export type AssetUse =
+  | { kind: "character"; character_id: string; character_image_id: string }
+  | { kind: "manuscript"; manuscript_image_id: string; chapter_id: string | null };
+
+/**
+ * An image of the book, placed in a chapter by its marker [[imagen:<id>]]
+ * (docs/manuscrito-imagenes.md). Everything an exporter needs besides the original.
+ */
+export interface ManuscriptImage {
+  id: string;
+  novel_id: string;
+  asset_id: string;
+  /** Where its marker was at the last save; null = not placed (still kept). */
+  chapter_id: string | null;
+  /** Alternative text, independent of the caption. Not needed when decorative. */
+  alt: string;
+  decorative: boolean;
+  /** Editorial caption, and credit/attribution: separate concepts. */
+  caption: string;
+  credit: string;
+  layout: "inline" | "page";
+  align: "center" | "left" | "right";
+  /** Share of the text block width. */
+  width_pct: 25 | 50 | 75 | 100;
+  created_at: string;
+  asset: AssetInfo;
+}
 
 /** A use of a file: one image in a character's gallery (reference image, not part of the book). */
 export interface CharacterImage {

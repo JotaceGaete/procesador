@@ -4,7 +4,7 @@ import { assertId, db, getMemory, getNovel, getOutline } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { cleanGuide } from "@/lib/guide";
 import { availableProviders, defaultProvider } from "@/lib/ai/providers";
-import { getNovelImages, novelFiles, removeFiles } from "@/lib/assets-server";
+import { getManuscriptImages, getNovelImages, novelFiles, removeFiles } from "@/lib/assets-server";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -19,9 +19,13 @@ export const GET = handler<Ctx>(async (_request, { params }) => {
     chapters = await getOutline(novel.id);
   }
   // Images are kept apart from `memory`, which is what the assistant's context is built from.
-  const [memory, images] = await Promise.all([getMemory(novel.id), getNovelImages(novel.id)]);
+  const [memory, images, manuscriptImages] = await Promise.all([
+    getMemory(novel.id),
+    getNovelImages(novel.id),
+    getManuscriptImages(novel.id),
+  ]);
   return NextResponse.json(
-    { novel, chapters, memory, images, providers: availableProviders(), defaultProvider: defaultProvider() },
+    { novel, chapters, memory, images, manuscriptImages, providers: availableProviders(), defaultProvider: defaultProvider() },
     { headers: { "Cache-Control": "no-store" } },
   );
 });

@@ -6,6 +6,7 @@ import {
   type Character,
   type CharacterImage,
   type ChapterInfo,
+  type ManuscriptImage,
   type Fact,
   type Memory,
   type MemoryKind,
@@ -26,8 +27,12 @@ interface Props {
   onChange(memory: Memory): void;
   /** A character's gallery changed on the server (upload, delete, main image, order…). */
   onImagesChange(characterId: string, images: CharacterImage[]): void;
-  /** The whole novel's gallery images changed (a file replaced in every use). */
-  onAllImagesChange(images: CharacterImage[]): void;
+  /** Images of the book: to know when a gallery file is also used in the manuscript. */
+  manuscriptImages: ManuscriptImage[];
+  /** A file replaced in every use: the novel's gallery and manuscript images. */
+  onAllImagesChange(all: { images: CharacterImage[]; manuscriptImages: ManuscriptImage[] }): void;
+  /** Inserts a gallery file in the open chapter, at the cursor, without copying it. */
+  onInsertInChapter(assetId: string): void;
   onClose(): void;
 }
 
@@ -75,9 +80,11 @@ export default function MemoryModal({
   memory,
   chapters,
   images,
+  manuscriptImages,
   onChange,
   onImagesChange,
   onAllImagesChange,
+  onInsertInChapter,
   onClose,
 }: Props) {
   const [tab, setTab] = useState<MemoryKind>("characters");
@@ -244,7 +251,9 @@ export default function MemoryModal({
                     character={saved}
                     images={galleryOf(saved.id)}
                     allImages={images}
+                    manuscriptImages={manuscriptImages}
                     names={names}
+                    onInsertInChapter={onInsertInChapter}
                     onImages={onImagesChange}
                     onAllImages={onAllImagesChange}
                   >
