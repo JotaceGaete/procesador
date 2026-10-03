@@ -3,9 +3,9 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { BASE, PASSWORD, client, login, png, resetDb } from "./helpers.mjs";
+import { BASE, PASSWORD, STACK, client, login, png, resetDb } from "./helpers.mjs";
 
-let browser, ctx, page, call, novel, erika, juan;
+let browser, ctx, page, call, novel, erika, juan, elena;
 const assetRequests = [];
 const dialogs = [];
 
@@ -16,6 +16,7 @@ before(async () => {
   const character = async (json) => (await call(`/api/novels/${novel}/memory/characters`, "POST", json)).data.id;
   erika = await character({ name: "Erika Müller", role: "Protagonista", age: "31 años", aliases: "La Alemana, Eri" });
   juan = await character({ name: "Juan", role: "Secundario" });
+  elena = await character({ name: "Elena Marín", role: "Secundaria" });
 
   browser = await chromium.launch(
     process.env.PLAYWRIGHT_CHROMIUM_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } : {},
@@ -50,12 +51,15 @@ async function openCharacter(name) {
   await page.locator(".portrait").waitFor();
 }
 const file = (name, w, h) => ({ name, mimeType: "image/png", buffer: png(w, h) });
+const storedFiles = async () =>
+  (await (await fetch(`${STACK}/__storage`)).json()).keys.filter((k) => k.startsWith(`novel-files/${novel}/`)).length;
+const status = () => viewer().locator(".viewer-meta");
 
 // ---------------------------------------------------------------- without images
 
 test("no image: the cards show elegant initials, name, role and key facts; nothing is downloaded", async () => {
   await openMemory();
-  assert.equal(await page.locator(".character-card").count(), 2);
+  assert.equal(await page.locator(".character-card").count(), 3);
   const e = card("Erika Müller");
   assert.equal((await e.locator(".avatar.initials").textContent()).trim(), "EM");
   assert.equal((await card("Juan").locator(".avatar.initials").textContent()).trim(), "J");
@@ -190,6 +194,77 @@ test("viewer: Escape closes the viewer, not the character sheet", async () => {
     images.map((i) => i.asset_id),
   );
   assert.equal(await thumbs().nth(images.findIndex((i) => i.is_primary)).locator(".badge").count(), 1);
+});
+
+// ---------------------------------------------------------------- repeated files & replacing
+
+test("repeated file: the same image again in this gallery is not added, and says so", async () => {
+  const files = await storedFiles();
+  await fileInput().setInputFiles([file("retrato-copia.png", 1200, 1500)]);
+  await page.locator(".gallery-info").waitFor();
+  assert.match(await page.locator(".gallery-info").textContent(), /ya está en esta galería/);
+  assert.equal(await thumbs().count(), 3);
+  assert.equal(await storedFiles(), files);
+});
+
+test("repeated file in another character: reused, without storing a second copy", async () => {
+  const files = await storedFiles();
+  await page.getByRole("button", { name: "Volver" }).click();
+  await openCharacter("Elena Marín");
+  await fileInput().setInputFiles([file("vestido.png", 3000, 2000)]);
+  await page.locator(".gallery-info").waitFor();
+  assert.match(await page.locator(".gallery-info").textContent(), /sin guardar otra copia/);
+  assert.equal(await thumbs().count(), 1);
+  assert.equal(await storedFiles(), files);
+  const [mine] = await gallery(elena);
+  assert.ok((await gallery(erika)).some((i) => i.asset_id === mine.asset_id), "the same file as Erika's");
+  await page.getByRole("button", { name: "Volver" }).click();
+  await openCharacter("Erika Müller");
+});
+
+test("replace an image used only here: new file; caption, label, order and main status kept", async () => {
+  const before = await gallery(erika);
+  const shared = new Set((await gallery(elena)).map((i) => i.asset_id));
+  // An image not shared with Elena, given a caption and label first.
+  const index = before.findIndex((i) => !shared.has(i.asset_id));
+  const target = before[index];
+  assert.ok(index >= 0);
+  await call(`/api/character-images/${target.id}`, "PATCH", { caption: "Retrato", stage_label: "1979" });
+  await page.reload();
+  await page.locator("textarea.editor").waitFor();
+  await openMemory();
+  await openCharacter("Erika Müller");
+  await thumbs().nth(index).click();
+  await viewer().waitFor();
+  await viewer().getByRole("button", { name: "Reemplazar archivo…" }).click();
+  assert.equal(await viewer().locator(".replace-choice").count(), 0, "nothing to choose: used only here");
+  await page.locator('input[aria-label="Archivo de reemplazo"]').setInputFiles([file("vestido-nuevo.png", 900, 1200)]);
+  await status().getByText("Imagen reemplazada").waitFor({ timeout: 20_000 });
+  const after = (await gallery(erika)).find((i) => i.id === target.id);
+  assert.notEqual(after.asset_id, target.asset_id);
+  assert.deepEqual(
+    [after.caption, after.stage_label, after.is_primary, after.sort_order, after.asset.width],
+    ["Retrato", "1979", target.is_primary, target.sort_order, 900],
+  );
+  assert.match(await viewer().locator(".viewer-stage img").getAttribute("src"), new RegExp(`/api/assets/${after.asset_id}/display`));
+  await page.keyboard.press("Escape");
+});
+
+test("replace a shared image: asks first; 'only this image' leaves the other character untouched", async () => {
+  const shared = (await gallery(elena))[0].asset_id;
+  const index = (await gallery(erika)).findIndex((i) => i.asset_id === shared);
+  await thumbs().nth(index).click();
+  await viewer().getByRole("button", { name: "Reemplazar archivo…" }).click();
+  const choice = viewer().locator(".replace-choice");
+  await choice.waitFor();
+  assert.match(await choice.textContent(), /Elena Marín/);
+  assert.ok(await choice.getByRole("button", { name: "En todos sus usos (2)" }).isVisible());
+  await choice.getByRole("button", { name: "Sólo en esta imagen" }).click();
+  await page.locator('input[aria-label="Archivo de reemplazo"]').setInputFiles([file("puerto.png", 1000, 600)]);
+  await status().getByText("Imagen reemplazada").waitFor({ timeout: 20_000 });
+  assert.equal((await gallery(elena))[0].asset_id, shared, "Elena keeps the file");
+  assert.ok(!(await gallery(erika)).some((i) => i.asset_id === shared));
+  await page.keyboard.press("Escape");
 });
 
 test("viewer: delete with confirmation; the next image becomes the main one", async () => {

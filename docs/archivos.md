@@ -50,7 +50,7 @@ create table if not exists public.assets (
   original_bytes bigint,
   width          integer,                       -- píxeles del original
   height         integer,
-  sha256         text,                          -- detecta subidas repetidas
+  sha256         text,                          -- huella del original, calculada por el servidor
   -- Derivados para la app, generados en el navegador.
   display_path   text,                          -- lado mayor ≤ 2048 px
   thumb_path     text,                          -- lado mayor ≤ 480 px
@@ -64,7 +64,7 @@ create index if not exists assets_novel_idx on public.assets(novel_id);
 
 - **Revisión de la decisión anterior: se conserva siempre el original.** Para el libro es imprescindible: un mapa o una fotografía de 2048 px sólo da unos 17 cm a 300 ppp. Para una referencia es útil (ampliar un detalle) y el coste de almacenamiento es bajo. Un único flujo para todo es más simple que dos.
 - **Las rutas incluyen la versión:** `{novel_id}/{asset_id}/v{version}/original.{ext}`, `…/display.webp`, `…/thumb.webp`. Los bytes de una versión nunca cambian.
-- **Reemplazar** un archivo sube `v{n+1}`, actualiza la fila y borra la versión anterior. Los usos apuntan al `asset`, no a la versión, así que no hay que tocarlos. En el manuscrito eso significa que **el texto del capítulo no cambia** y su revisión tampoco.
+- **Reemplazar** (ver la sección propia, más abajo) no sobrescribe nada: el archivo nuevo es otro `asset` y los usos pasan a apuntar a él. `version` queda para transformaciones futuras del mismo archivo (girar, recortar), que subirían `v{n+1}`.
 - **`status = 'pending'`** mientras se sube el original (ver abajo). Los pendientes de más de 24 h se eliminan al iniciar la siguiente subida de esa novela.
 
 ## Bucket
@@ -121,7 +121,7 @@ Con esto, una imagen borrada o reemplazada deja de mostrarse en el acto en la ap
 - 50 MB por original y 4 MB entre derivado y miniatura.
 - 40 imágenes por personaje (se mantiene).
 - Por capítulo, sin límite propio; el límite práctico es el tamaño del capítulo.
-- Avisos (nunca bloqueos) cuando un original repite el `sha256` de otro de la novela: "Esta imagen ya está en la novela (Investigación › Mapa del puerto). ¿Usar la existente?".
+- Archivos repetidos: ver la sección propia. Nunca se bloquea reutilizar una imagen; lo que se evita es guardarla dos veces.
 
 ## Lo que cambia respecto al código en curso (sin publicar)
 
@@ -130,6 +130,39 @@ El código de la galería que estaba a medio hacer guarda las rutas en `characte
 - `character_images` pasa a tener `asset_id` en lugar de `storage_path`, `thumb_path`, `content_type`, `version`, `width`, `height` y `bytes`;
 - las rutas `/api/images/…` pasan a ser `/api/assets/…` (servir, reemplazar) y `/api/character-images/…` (pie, etapa, principal, orden, borrar);
 - se reutilizan sin cambios: `imageInfo()` (detección de formato por bytes), los triggers de principal única y orden, `reorder_character_images`, el Storage simulado de las pruebas (que añade la subida firmada, `info` y `Range`) y la estrategia de caché.
+
+## Archivos repetidos
+
+Objetivo: **no guardar físicamente dos veces el mismo archivo en una novela**, sin impedir usarlo en varios sitios.
+
+1. **Antes de subir:**
+   - el navegador calcula el SHA-256 del archivo y lo envía al pedir la subida;
+   - si la novela ya tiene un archivo listo con esa huella y ese tamaño, no se crea nada ni se sube nada: la respuesta trae el archivo existente y dónde se usa;
+   - la galería lo reutiliza como un uso más. Si ya está en la misma galería, no lo añade y lo dice ("ya está en esta galería").
+2. **Al terminar la subida:**
+   - el servidor lee el original guardado y calcula su propia huella. Las huellas guardadas son siempre las del servidor, nunca la del navegador;
+   - si coincide con un archivo existente, descarta la copia nueva antes de guardar derivados y usa el existente;
+   - `finalize_asset` repite la comprobación bajo un bloqueo por novela, de modo que dos subidas simultáneas del mismo archivo acaban en uno solo.
+3. **Ámbito: por novela.** Dos novelas nunca comparten un archivo, para conservar el aislamiento y que borrar una no afecte a la otra. Duplicar una novela copia sus archivos por la misma razón.
+4. **Aviso:** "Ya estaba en la novela: se usa el mismo archivo, sin guardar otra copia."
+
+## Reemplazar un archivo
+
+El original nunca se modifica. Reemplazar es subir otro archivo (que pasa por la detección de repetidos) y hacer que **uno o todos los usos** apunten a él, en una transacción (`replace_asset_uses`):
+
+- **Sólo esta imagen** (`scope: "use"`): cambia ese uso. Los demás usos del archivo anterior lo conservan, y el archivo sigue guardado.
+- **En todos sus usos** (`scope: "all"`): cambian todos los usos del archivo anterior.
+- Cada uso conserva su id, pie, etiqueta, orden y condición de principal.
+- El archivo anterior se borra (original y derivados) sólo si se quedó sin usos.
+- **En la interfaz:**
+  - si el archivo se usa sólo en esa imagen, se reemplaza directamente;
+  - si está compartido, el visor pregunta antes, nombrando dónde más se usa ("Este archivo también se usa en: Elena Marín"), con *Sólo en esta imagen* o *En todos sus usos (N)*;
+  - nunca hay efectos sobre otros usos sin esa elección explícita.
+- **Rutas:**
+  - archivo nuevo: subida normal con `use: { kind: "replace", character_image_id, scope }`;
+  - archivo que la novela ya tiene: `POST /api/character-images/{id}/replace` con `{ asset_id, scope }`, sin subir nada.
+
+Como el archivo nuevo tiene otro id, su URL es otra. Con eso la caché del navegador nunca muestra el anterior.
 
 ## Estado de implementación
 
@@ -152,11 +185,11 @@ El código de la galería que estaba a medio hacer guarda las rutas en `characte
 - Storage simulado (`tests/mock-storage.mjs`) con subida firmada de un solo uso ligada a su ruta, descarga firmada, `Range` y CORS.
 - Pruebas: `tests/unit/images.test.ts` y `tests/e2e/assets.test.mjs`, además de rutas y bucket en `security.test.mjs`.
 
+- Archivos repetidos y reemplazar (secciones anteriores), con pruebas en `tests/e2e/assets-reuse.test.mjs` y en la interfaz.
+
 **Pendiente:**
 
-- `POST /api/assets/{id}/replace` (nueva versión). El esquema y las rutas ya están versionados.
-- Aviso de archivos repetidos por `sha256`.
-- `manuscript_images` (Prioridad 2b).
+- `manuscript_images` (Prioridad 2b). Al añadirla, se incluye en `asset_in_use`, `replace_asset_uses`, `assetUses` y `duplicate_novel`.
 
 ## Orden de implementación propuesto
 

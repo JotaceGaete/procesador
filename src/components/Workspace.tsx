@@ -273,6 +273,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
           images={images}
           onChange={setMemory}
           onImagesChange={onImagesChange}
+          onAllImagesChange={setImages}
           onClose={() => setModal(null)}
         />
       )}

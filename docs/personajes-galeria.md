@@ -2,7 +2,7 @@
 
 > Estado: **implementada (Prioridad 2)**, servidor e interfaz, sobre la [arquitectura común de archivos](archivos.md), compartida con las [imágenes del manuscrito](manuscrito-imagenes.md).
 >
-> Pendiente de esta parte: reemplazar un archivo por una nueva versión, el aviso de archivos repetidos y, con la Cronología, `story_at`.
+> **Prioridad 2 cerrada**, incluidos reemplazar archivo y archivos repetidos (ver `archivos.md`). Queda para la Cronología: `story_at`.
 > Compatible con [Cronología · Tratamiento de edades](cronologia-edades.md): la asociación temporal usa el tiempo narrativo, nunca una edad fija.
 
 ## Objetivo
@@ -104,7 +104,7 @@ Todo esto es común y está en [Archivos · Arquitectura común](archivos.md):
 | `POST /api/character-images/{id}/primary` | La marca como principal. RPC `set_primary_image`: en una transacción quita la anterior y pone esta. |
 | `PUT /api/characters/{id}/images` | Reordena. RPC `reorder_character_images(p_character, p_ids)`, que exige la lista completa, como `reorder_chapters`. |
 | `DELETE /api/character-images/{id}` | Borra la fila. Si era la principal, promueve la siguiente. Si el archivo se queda sin usos, se borra. |
-| `POST /api/assets/{id}/replace` | Reemplaza el archivo (nueva versión). La fila de la galería no cambia. |
+| `POST /api/character-images/{id}/replace` | Reemplaza el archivo de esa imagen por uno que la novela ya tiene (`{ asset_id, scope: "use" \| "all" }`). Un archivo nuevo va por la subida con `use: { kind: "replace", … }`. Conserva pie, etiqueta, orden y principal. |
 | `GET /api/assets/{id}/{thumb\|display\|original}?v=` | Sirve el archivo (ver `archivos.md`). |
 
 Cambios en rutas existentes:

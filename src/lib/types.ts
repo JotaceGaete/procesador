@@ -119,6 +119,9 @@ export interface AssetInfo {
   derived_type: "image/webp" | "image/jpeg" | "image/png";
 }
 
+/** Where a file of the novel is used. Prioridad 2b adds the manuscript. */
+export type AssetUse = { kind: "character"; character_id: string; character_image_id: string };
+
 /** A use of a file: one image in a character's gallery (reference image, not part of the book). */
 export interface CharacterImage {
   id: string;

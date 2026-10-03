@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Character, CharacterImage } from "@/lib/types";
 import { MAX_IMAGES_PER_CHARACTER, ORIGINAL_TYPES, assetUrl } from "@/lib/images";
 import { api } from "@/lib/client";
-import { rejectReason, uploadCharacterImage, type UploadStage } from "@/lib/upload";
+import { addCharacterImage, rejectReason, replaceCharacterImage, type UploadStage } from "@/lib/upload";
 
 /**
  * Visual memory of a character (docs/personajes-galeria.md): reference images,
@@ -14,6 +14,7 @@ import { rejectReason, uploadCharacterImage, type UploadStage } from "@/lib/uplo
  */
 
 type OnImages = (characterId: string, images: CharacterImage[]) => void;
+type OnAllImages = (images: CharacterImage[]) => void;
 
 export function initials(name: string) {
   const words = name.trim().split(/\s+/).filter(Boolean);
@@ -80,6 +81,7 @@ export function CharacterCard({ character, images, onOpen }: { character: Charac
 function useUploads(novelId: string, characterId: string, count: number, onImages: OnImages) {
   const [queue, setQueue] = useState<{ id: number; name: string; stage: UploadStage | "error"; fraction?: number; error?: string }[]>([]);
   const [notice, setNotice] = useState("");
+  const [info, setInfo] = useState("");
   const seq = useRef(0);
   const chain = useRef(Promise.resolve());
   const room = useRef(MAX_IMAGES_PER_CHARACTER - count);
@@ -87,6 +89,7 @@ function useUploads(novelId: string, characterId: string, count: number, onImage
 
   function add(files: FileList | File[]) {
     setNotice("");
+    setInfo("");
     const list = [...files];
     const accepted: File[] = [];
     const problems: string[] = [];
@@ -104,13 +107,14 @@ function useUploads(novelId: string, characterId: string, count: number, onImage
       const update = (patch: object) => setQueue((q) => q.map((u) => (u.id === id ? { ...u, ...patch } : u)));
       chain.current = chain.current.then(async () => {
         try {
-          const images = await uploadCharacterImage({
+          const r = await addCharacterImage({
             novelId,
             characterId,
             file,
             onProgress: (stage, fraction) => update({ stage, fraction }),
           });
-          onImages(characterId, images);
+          if (r.images) onImages(characterId, r.images);
+          if (r.notice) setInfo(r.notice);
           setQueue((q) => q.filter((u) => u.id !== id));
         } catch (e) {
           update({ stage: "error", error: (e as Error).message });
@@ -119,7 +123,7 @@ function useUploads(novelId: string, characterId: string, count: number, onImage
     }
   }
   const dismiss = (id: number) => setQueue((q) => q.filter((u) => u.id !== id));
-  return { queue, notice, add, dismiss, full: room.current <= 0 };
+  return { queue, notice, info, add, dismiss, full: room.current <= 0 };
 }
 
 const ACCEPT = ORIGINAL_TYPES.join(",");
@@ -139,13 +143,20 @@ export function CharacterVisual({
   novelId,
   character,
   images,
+  allImages,
+  names,
   onImages,
+  onAllImages,
   children,
 }: {
   novelId: string;
   character: Pick<Character, "id" | "name" | "role">;
   images: CharacterImage[];
+  /** Every gallery image of the novel: to know where else a file is used. */
+  allImages: CharacterImage[];
+  names: Map<string, string>;
   onImages: OnImages;
+  onAllImages: OnAllImages;
   children?: React.ReactNode;
 }) {
   const uploads = useUploads(novelId, character.id, images.length, onImages);
@@ -277,17 +288,26 @@ export function CharacterVisual({
             </span>
           </div>
           {uploads.notice && <p className="error small">{uploads.notice}</p>}
+          {uploads.info && <p className="muted small gallery-info">{uploads.info}</p>}
         </div>
       </details>
 
       {viewing && images.some((i) => i.id === viewing) && (
         <Viewer
+          novelId={novelId}
           images={images}
           id={viewing}
           name={character.name}
+          otherUses={(() => {
+            const current = images.find((i) => i.id === viewing)!;
+            return allImages
+              .filter((i) => i.asset_id === current.asset_id && i.id !== current.id)
+              .map((i) => (i.character_id === character.id ? `${character.name} (otra imagen)` : (names.get(i.character_id) ?? "")));
+          })()}
           onMove={setViewing}
           onClose={() => setViewing(null)}
           onImages={(list) => onImages(character.id, list)}
+          onAllImages={onAllImages}
         />
       )}
     </>
@@ -296,27 +316,39 @@ export function CharacterVisual({
 
 /** Full-screen viewer: display version, caption and stage label, and the gallery's actions. */
 function Viewer({
+  novelId,
   images,
   id,
   name,
+  otherUses,
   onMove,
   onClose,
   onImages,
+  onAllImages,
 }: {
+  novelId: string;
   images: CharacterImage[];
   id: string;
   name: string;
+  /** Where else this image's file is used (other characters, or another image of this one). */
+  otherUses: string[];
   onMove(id: string): void;
   onClose(): void;
   onImages(images: CharacterImage[]): void;
+  onAllImages: OnAllImages;
 }) {
   const index = images.findIndex((i) => i.id === id);
   const img = images[index];
   const [caption, setCaption] = useState(img.caption);
   const [stage, setStage] = useState(img.stage_label);
   const [busy, setBusy] = useState(false);
-  const [state, setState] = useState("");
+  // Status line under the actions: progress and confirmations, or an error.
+  const [status, setStatus] = useState({ text: "", error: false });
+  const setState = (text: string, error = false) => setStatus({ text, error });
   const closeRef = useRef<HTMLButtonElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const scopeRef = useRef<"use" | "all">("use");
+  const [choosing, setChoosing] = useState(false);
 
   // Another image: its own texts, and no status carried over. (Not on every gallery
   // update, or "Guardado" would vanish the moment the save comes back.)
@@ -324,6 +356,7 @@ function Viewer({
     setCaption(img.caption);
     setStage(img.stage_label);
     setState("");
+    setChoosing(false);
   }, [img.id]);
 
   // Arrows and Escape belong to the viewer while it is open (Escape must not close the sheet behind).
@@ -356,7 +389,7 @@ function Viewer({
       onImages(list);
       done?.(list);
     } catch (e) {
-      setState((e as Error).message);
+      setState((e as Error).message, true);
     } finally {
       setBusy(false);
     }
@@ -375,6 +408,37 @@ function Viewer({
     ids.splice(index + delta, 0, moved);
     run(() => api(`/api/characters/${img.character_id}/images`, { method: "PUT", json: { ids } }));
   };
+  /**
+   * Replace: a file used only here is simply replaced. A shared one asks first:
+   * this image only (the others keep the current file) or every use.
+   */
+  const startReplace = () => (otherUses.length ? setChoosing(true) : pickReplacement("use"));
+  const pickReplacement = (scope: "use" | "all") => {
+    scopeRef.current = scope;
+    setChoosing(false);
+    fileRef.current?.click();
+  };
+  const replace = async (file: File) => {
+    setBusy(true);
+    setState("Preparando…");
+    try {
+      const r = await replaceCharacterImage({
+        novelId,
+        imageId: img.id,
+        scope: scopeRef.current,
+        file,
+        onProgress: (stage, fraction) =>
+          setState(stage === "uploading" ? `Subiendo ${Math.round((fraction ?? 0) * 100)} %` : stage === "processing" ? "Guardando…" : "Preparando…"),
+      });
+      onAllImages(r.images);
+      setState(r.notice || "Imagen reemplazada");
+    } catch (e) {
+      setState((e as Error).message, true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const remove = () => {
     if (!confirm("¿Eliminar esta imagen de la galería? No se puede deshacer.")) return;
     const next = images[index + 1] ?? images[index - 1];
@@ -466,6 +530,9 @@ function Viewer({
             Después →
           </button>
           <span className="spacer" />
+          <button type="button" className="link" disabled={busy} onClick={startReplace}>
+            Reemplazar archivo…
+          </button>
           <a className="link" href={assetUrl(img.asset, "original")}>
             Descargar original
           </a>
@@ -473,8 +540,38 @@ function Viewer({
             Eliminar
           </button>
         </div>
+        {choosing && (
+          <div className="replace-choice" role="group" aria-label="Qué reemplazar">
+            <p className="small">
+              Este archivo también se usa en: {otherUses.join(", ")}. ¿Dónde quieres reemplazarlo?
+            </p>
+            <div className="viewer-actions">
+              <button type="button" className="btn" onClick={() => pickReplacement("use")}>
+                Sólo en esta imagen
+              </button>
+              <button type="button" className="btn" onClick={() => pickReplacement("all")}>
+                En todos sus usos ({otherUses.length + 1})
+              </button>
+              <button type="button" className="link" onClick={() => setChoosing(false)}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+        <input
+          ref={fileRef}
+          type="file"
+          accept={ACCEPT}
+          hidden
+          aria-label="Archivo de reemplazo"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) replace(file);
+          }}
+        />
         <p className="muted small viewer-meta">
-          {state && <span className={state === "Guardado" ? undefined : "error"}>{state} · </span>}
+          {status.text && <span className={status.error ? "error" : "viewer-status"}>{status.text} · </span>}
           Original: {img.asset.width} × {img.asset.height} px · {formatBytes(img.asset.original_bytes)}
         </p>
       </div>

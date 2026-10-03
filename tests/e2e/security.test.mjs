@@ -32,6 +32,7 @@ const ROUTES = [
   ["PATCH", `/api/character-images/${U}`],
   ["DELETE", `/api/character-images/${U}`],
   ["POST", `/api/character-images/${U}/primary`],
+  ["POST", `/api/character-images/${U}/replace`],
 ];
 const hit = (base, method, route, headers = {}) =>
   fetch(base + route, {

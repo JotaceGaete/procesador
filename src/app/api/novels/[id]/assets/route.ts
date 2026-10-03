@@ -3,7 +3,7 @@ import { handler } from "@/lib/auth";
 import { db, getNovel } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { MAX_ORIGINAL_BYTES, ORIGINAL_TYPES, assetPaths, type OriginalType } from "@/lib/images";
-import { bucket, sweepAssets } from "@/lib/assets-server";
+import { ASSET_INFO, assetUses, bucket, sweepAssets } from "@/lib/assets-server";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -12,6 +12,11 @@ type Ctx = { params: Promise<{ id: string }> };
  * signed, single-use URL that accepts the original for that one path only. The
  * browser uploads the original straight to Storage (it can exceed what a Vercel
  * function accepts), then calls /api/assets/{id}/complete.
+ *
+ * Repeated files: with `sha256` (computed by the browser), if the novel already
+ * has that exact file nothing is created or uploaded. The answer is 200 with the
+ * existing file and its uses, so the caller can reuse it. The hash only finds a
+ * candidate: stored hashes are the server's own (complete re-hashes every original).
  */
 export const POST = handler<Ctx>(async (request, { params }) => {
   const novel = await getNovel((await params).id);
@@ -22,6 +27,23 @@ export const POST = handler<Ctx>(async (request, { params }) => {
   if (!Number.isInteger(bytes) || bytes <= 0) throw new HttpError(400, "Tamaño inválido");
   if (bytes > MAX_ORIGINAL_BYTES) throw new HttpError(413, "El archivo supera los 50 MB.");
   const fileName = typeof body.file_name === "string" ? body.file_name.trim().slice(0, 200) : "";
+
+  if (typeof body.sha256 === "string" && /^[0-9a-f]{64}$/.test(body.sha256)) {
+    const { data: existing, error } = await db()
+      .from("assets")
+      .select(ASSET_INFO)
+      .eq("novel_id", novel.id)
+      .eq("status", "ready")
+      .eq("sha256", body.sha256)
+      .eq("original_bytes", bytes)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (existing) {
+      const asset = existing as unknown as { id: string };
+      return NextResponse.json({ duplicate: { asset, uses: await assetUses(asset.id) } });
+    }
+  }
 
   await sweepAssets(novel.id);
 

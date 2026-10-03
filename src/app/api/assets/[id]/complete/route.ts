@@ -11,10 +11,9 @@ import {
   assetPaths,
   imageInfo,
   type DerivedType,
-  type ImageInfo,
 } from "@/lib/images";
-import { bucket, deleteUnusedAssets, readHead, removeFiles } from "@/lib/assets-server";
-import { addCharacterImage, readUse } from "@/lib/asset-uses";
+import { bucket, deleteUnusedAssets, inspectStored, removeFiles } from "@/lib/assets-server";
+import { applyUse, readUse } from "@/lib/asset-uses";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -28,23 +27,13 @@ async function readDerived(form: FormData, field: string, maxSide: number) {
   return { bytes, type: info.type as DerivedType };
 }
 
-/** Type and size of the stored original, read from its first bytes (a big EXIF block can push a JPEG header further). */
-async function inspectOriginal(path: string): Promise<{ info: ImageInfo | null; total: number } | null> {
-  let head = await readHead(path, 256 * 1024);
-  if (!head) return null;
-  let info = imageInfo(head.bytes);
-  if (!info && head.total > head.bytes.length) {
-    head = (await readHead(path, 4 * 1024 * 1024)) ?? head;
-    info = imageInfo(head.bytes);
-  }
-  return { info, total: head.total };
-}
-
 /**
  * Step 2 of an upload. The original is already in Storage (signed URL); this
- * checks it from its own bytes, stores the display version and thumbnail the
- * browser generated, marks the asset ready and creates its use. If anything
- * fails, the asset and its files are removed: nothing is left half-made.
+ * checks it from its own bytes and hashes it. If the novel already has that exact
+ * file, the new copy is discarded and the existing file is used: a file is never
+ * stored twice in a novel. Otherwise it stores the display version and thumbnail
+ * the browser generated and marks the asset ready. Then it applies the use (a new
+ * gallery image, or a replacement). If anything fails, nothing is left half-made.
  */
 export const POST = handler<Ctx>(async (request, { params }) => {
   const id = assertId((await params).id, "Archivo");
@@ -72,55 +61,78 @@ export const POST = handler<Ctx>(async (request, { params }) => {
   if (display.type !== thumb.type) throw new HttpError(400, "La miniatura no coincide con la versión reducida.");
   if (display.bytes.length + thumb.bytes.length > MAX_DERIVED_BYTES) throw new HttpError(413, "Las versiones reducidas pesan demasiado.");
 
-  const discard = async (status: number, message: string) => {
+  /** Removes this upload entirely: row first, then its files. */
+  const discard = async (files: string[] = []) => {
     await db().from("assets").delete().eq("id", id);
-    await removeFiles([asset.original_path]);
-    return new HttpError(status, message);
+    await removeFiles([asset.original_path, ...files]);
   };
-  const original = await inspectOriginal(asset.original_path);
-  if (!original) throw new HttpError(400, "El archivo original no se ha recibido. Vuelve a intentarlo.");
-  if (original.total > MAX_ORIGINAL_BYTES) throw await discard(413, "El archivo supera los 50 MB.");
-  if (!original.info) throw await discard(400, "El archivo no es una imagen JPEG, PNG, WebP o AVIF.");
+  const stored = await inspectStored(asset.original_path);
+  if (!stored) throw new HttpError(400, "El archivo original no se ha recibido. Vuelve a intentarlo.");
+  if (stored.total > MAX_ORIGINAL_BYTES) {
+    await discard();
+    throw new HttpError(413, "El archivo supera los 50 MB.");
+  }
+  const info = imageInfo(stored.head);
+  if (!info) {
+    await discard();
+    throw new HttpError(400, "El archivo no es una imagen JPEG, PNG, WebP o AVIF.");
+  }
 
-  const paths = assetPaths(asset.novel_id, id, asset.version, original.info.type, display.type);
-  const uploaded: string[] = [];
-  try {
-    for (const [path, part] of [
-      [paths.display_path!, display],
-      [paths.thumb_path!, thumb],
-    ] as const) {
-      const { error: upError } = await bucket().upload(path, part.bytes, { contentType: part.type, upsert: false });
-      if (upError) throw upError;
-      uploaded.push(path);
+  // Already in the novel? Reuse it before storing anything else.
+  const { data: same, error: sameError } = await db()
+    .from("assets")
+    .select("id")
+    .eq("novel_id", asset.novel_id)
+    .eq("status", "ready")
+    .eq("sha256", stored.sha256)
+    .eq("original_bytes", stored.total)
+    .limit(1)
+    .maybeSingle();
+  if (sameError) throw sameError;
+
+  let fileId: string;
+  if (same) {
+    await discard();
+    fileId = same.id;
+  } else {
+    const paths = assetPaths(asset.novel_id, id, asset.version, info.type, display.type);
+    const uploaded: string[] = [];
+    try {
+      for (const [path, part] of [
+        [paths.display_path!, display],
+        [paths.thumb_path!, thumb],
+      ] as const) {
+        const { error: upError } = await bucket().upload(path, part.bytes, { contentType: part.type, upsert: false });
+        if (upError) throw upError;
+        uploaded.push(path);
+      }
+      // Under a per-novel lock: if an identical upload finished meanwhile, that one wins.
+      const { data: finalId, error: readyError } = await db().rpc("finalize_asset", {
+        p_asset: id,
+        p_sha256: stored.sha256,
+        p_type: info.type,
+        p_bytes: stored.total,
+        p_width: info.width,
+        p_height: info.height,
+        p_display: paths.display_path,
+        p_thumb: paths.thumb_path,
+        p_derived: display.type,
+      });
+      if (readyError) throw readyError;
+      fileId = finalId as string;
+      if (fileId !== id) await discard(uploaded);
+    } catch (e) {
+      await removeFiles(uploaded);
+      throw e;
     }
-    const sha = form.get("sha256");
-    const { error: readyError } = await db()
-      .from("assets")
-      .update({
-        status: "ready",
-        original_type: original.info.type,
-        original_bytes: original.total,
-        width: original.info.width,
-        height: original.info.height,
-        display_path: paths.display_path,
-        thumb_path: paths.thumb_path,
-        derived_type: display.type,
-        sha256: typeof sha === "string" && /^[0-9a-f]{64}$/.test(sha) ? sha : null,
-      })
-      .eq("id", id)
-      .eq("status", "pending");
-    if (readyError) throw readyError;
-  } catch (e) {
-    await removeFiles(uploaded);
-    throw e;
   }
 
   try {
-    const images = await addCharacterImage(use, id);
-    return NextResponse.json({ asset_id: id, images }, { status: 201 });
+    const images = await applyUse(use, fileId);
+    return NextResponse.json({ asset_id: fileId, reused: fileId !== id, images }, { status: 201 });
   } catch (e) {
-    // The use failed (unknown character, another novel, gallery full): the new file has no use left.
-    await deleteUnusedAssets([id]);
+    // The use failed (unknown character, another novel, gallery full): a new file is left without use.
+    if (fileId === id) await deleteUnusedAssets([id]);
     throw e;
   }
 });

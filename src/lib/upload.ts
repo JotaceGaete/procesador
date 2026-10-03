@@ -8,13 +8,14 @@ import {
   THUMB_MAX_SIDE,
   type OriginalType,
 } from "./images";
-import type { CharacterImage } from "./types";
+import type { AssetInfo, AssetUse, CharacterImage } from "./types";
 
 /**
  * Browser side of an upload (docs/archivos.md):
- *   1. ask the server for a signed, single-use URL and send the original there untouched;
- *   2. make the display version (≤ 2048 px) and the thumbnail (≤ 480 px) here;
- *   3. complete: the server checks the original and stores the derivatives and the use.
+ *   1. hash the file; if the novel already has it, reuse it (nothing is uploaded);
+ *   2. otherwise ask for a signed, single-use URL and send the original there untouched;
+ *   3. make the display version (≤ 2048 px) and the thumbnail (≤ 480 px) here;
+ *   4. complete: the server checks and hashes the original, stores the derivatives and applies the use.
  */
 
 export type UploadStage = "preparing" | "uploading" | "processing";
@@ -95,31 +96,95 @@ function put(url: string, file: File, onProgress: (fraction: number) => void): P
   });
 }
 
-/** Uploads one image to a character's gallery. Returns the updated gallery. */
-export async function uploadCharacterImage({ novelId, characterId, file, onProgress }: CharacterUpload): Promise<CharacterImage[]> {
+type StoreResult =
+  | { kind: "duplicate"; asset: AssetInfo; uses: AssetUse[] }
+  | { kind: "stored"; assetId: string; reused: boolean; images: CharacterImage[] };
+
+/**
+ * Stores a file for a use. The hash goes first: if the novel already has this
+ * exact file, nothing is processed or uploaded and the existing file comes back
+ * (the server double-checks with its own hash when an upload completes).
+ */
+async function storeFile(novelId: string, file: File, use: object, onProgress: CharacterUpload["onProgress"]): Promise<StoreResult> {
   const reason = rejectReason(file);
   if (reason) throw new Error(reason);
 
   onProgress("preparing");
+  const hash = await sha256(file);
+  const start = await api<{ asset_id?: string; upload_url?: string; duplicate?: { asset: AssetInfo; uses: AssetUse[] } }>(
+    `/api/novels/${novelId}/assets`,
+    { method: "POST", json: { file_name: file.name, type: file.type, bytes: file.size, sha256: hash } },
+  );
+  if (start.duplicate) return { kind: "duplicate", ...start.duplicate };
+
   const source = await decode(file);
   const display = await derive(source, DISPLAY_MAX_SIDE);
   const thumb = await derive(source, THUMB_MAX_SIDE, display.type);
   if ("close" in source) source.close();
-  const hash = await sha256(file);
 
-  const start = await api<{ asset_id: string; upload_url: string }>(`/api/novels/${novelId}/assets`, {
-    method: "POST",
-    json: { file_name: file.name, type: file.type, bytes: file.size },
-  });
   onProgress("uploading", 0);
-  await put(start.upload_url, file, (f) => onProgress("uploading", f));
+  await put(start.upload_url!, file, (f) => onProgress("uploading", f));
 
   onProgress("processing");
   const form = new FormData();
   form.append("display", display, "display");
   form.append("thumb", thumb, "thumb");
-  if (hash) form.append("sha256", hash);
-  form.append("use", JSON.stringify({ kind: "character", character_id: characterId }));
-  const done = await api<{ images: CharacterImage[] }>(`/api/assets/${start.asset_id}/complete`, { method: "POST", body: form });
-  return done.images;
+  form.append("use", JSON.stringify(use));
+  const done = await api<{ asset_id: string; reused: boolean; images: CharacterImage[] }>(`/api/assets/${start.asset_id}/complete`, {
+    method: "POST",
+    body: form,
+  });
+  return { kind: "stored", assetId: done.asset_id, reused: done.reused, images: done.images };
+}
+
+export const REUSED = "Ya estaba en la novela: se usa el mismo archivo, sin guardar otra copia.";
+
+/**
+ * Adds an image to a character's gallery. Returns the updated gallery, or null
+ * when that exact image is already in this gallery (nothing changes), plus a
+ * notice when an existing file was reused.
+ */
+export async function addCharacterImage({
+  novelId,
+  characterId,
+  file,
+  onProgress,
+}: CharacterUpload): Promise<{ images: CharacterImage[] | null; notice: string }> {
+  const r = await storeFile(novelId, file, { kind: "character", character_id: characterId }, onProgress);
+  if (r.kind === "stored") return { images: r.images, notice: r.reused ? REUSED : "" };
+  if (r.uses.some((u) => u.character_id === characterId)) {
+    return { images: null, notice: `«${file.name}» ya está en esta galería.` };
+  }
+  const images = await api<CharacterImage[]>(`/api/characters/${characterId}/images`, {
+    method: "POST",
+    json: { asset_id: r.asset.id },
+  });
+  return { images, notice: REUSED };
+}
+
+/**
+ * Replaces the file of a gallery image, keeping its caption, stage label, order and
+ * main-image status. `scope: "use"` changes this image only; `"all"` every use of
+ * its current file. Returns the whole novel's gallery images.
+ */
+export async function replaceCharacterImage({
+  novelId,
+  imageId,
+  scope,
+  file,
+  onProgress,
+}: {
+  novelId: string;
+  imageId: string;
+  scope: "use" | "all";
+  file: File;
+  onProgress: CharacterUpload["onProgress"];
+}): Promise<{ images: CharacterImage[]; notice: string }> {
+  const r = await storeFile(novelId, file, { kind: "replace", character_image_id: imageId, scope }, onProgress);
+  if (r.kind === "stored") return { images: r.images, notice: r.reused ? REUSED : "" };
+  const images = await api<CharacterImage[]>(`/api/character-images/${imageId}/replace`, {
+    method: "POST",
+    json: { asset_id: r.asset.id, scope },
+  });
+  return { images, notice: REUSED };
 }

@@ -1241,3 +1241,20 @@ details.group > p {
     display: none;
   }
 }
+.replace-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+}
+.replace-choice p {
+  margin: 0;
+}
+.viewer-status {
+  color: var(--text);
+}
+.gallery-info {
+  margin: 0;
+}

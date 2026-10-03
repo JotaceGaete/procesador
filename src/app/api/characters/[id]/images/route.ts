@@ -3,7 +3,7 @@ import { handler } from "@/lib/auth";
 import { assertId, db } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { getCharacterImages } from "@/lib/assets-server";
-import { addCharacterImage, readUse } from "@/lib/asset-uses";
+import { applyUse, readUse } from "@/lib/asset-uses";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -22,7 +22,7 @@ export const POST = handler<Ctx>(async (request, { params }) => {
   if (error) throw error;
   if (!asset || asset.status !== "ready") throw new HttpError(404, "Archivo no encontrado");
   const use = readUse({ ...body, kind: "character", character_id: characterId });
-  return NextResponse.json(await addCharacterImage(use, assetId), { status: 201 });
+  return NextResponse.json(await applyUse(use, assetId), { status: 201 });
 });
 
 /** New gallery order: the complete list of the character's image ids. */

@@ -151,7 +151,8 @@ create table if not exists public.assets (
   original_bytes bigint not null check (original_bytes > 0),
   width          integer check (width > 0),
   height         integer check (height > 0),
-  -- Calculado en el navegador; sólo sirve para avisar de archivos repetidos.
+  -- Huella del original, calculada por el servidor al terminar la subida. Dentro de una
+  -- novela no hay dos archivos listos con el mismo contenido (ver finalize_asset).
   sha256         text,
   display_path   text unique,
   thumb_path     text unique,
@@ -163,6 +164,7 @@ create table if not exists public.assets (
                                  and thumb_path is not null and derived_type is not null))
 );
 create index if not exists assets_novel_idx on public.assets(novel_id);
+create index if not exists assets_novel_sha_idx on public.assets(novel_id, sha256) where status = 'ready';
 
 -- Uso: galería de un personaje (imágenes de referencia).
 -- stage_label es una etiqueta descriptiva ("1982", "tras la cárcel"), no un dato cronológico.
@@ -349,6 +351,56 @@ begin
   where p is not null;
 end $$;
 
+-- Último paso de una subida. Bajo un bloqueo por novela, si ya existe un archivo listo con
+-- el mismo contenido devuelve ése (el servidor descarta la copia nueva); si no, marca éste
+-- como listo. Así una novela nunca guarda dos veces el mismo archivo, ni con subidas simultáneas.
+create or replace function public.finalize_asset(
+  p_asset uuid, p_sha256 text, p_type text, p_bytes bigint, p_width integer, p_height integer,
+  p_display text, p_thumb text, p_derived text)
+returns uuid language plpgsql set search_path = '' as $$
+declare v_novel uuid; v_existing uuid;
+begin
+  select novel_id into v_novel from public.assets where id = p_asset and status = 'pending';
+  if v_novel is null then
+    raise exception 'Este archivo ya está completo' using errcode = '22023';
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended(v_novel::text, 0));
+  select id into v_existing from public.assets
+  where novel_id = v_novel and status = 'ready' and sha256 = p_sha256 and original_bytes = p_bytes
+  limit 1;
+  if v_existing is not null then
+    return v_existing;
+  end if;
+  update public.assets
+  set status = 'ready', sha256 = p_sha256, original_type = p_type, original_bytes = p_bytes,
+      width = p_width, height = p_height, display_path = p_display, thumb_path = p_thumb, derived_type = p_derived
+  where id = p_asset;
+  return p_asset;
+end $$;
+
+-- Reemplazar un archivo: los usos pasan a apuntar a otro archivo y conservan todo lo demás
+-- (id, pie, etiqueta, orden, principal). Con p_all = false sólo cambia ese uso; con true,
+-- todos los usos del archivo anterior (al añadir otras tablas de uso, se incluyen aquí).
+-- Devuelve el archivo anterior, que el servidor borra si se quedó sin usos.
+create or replace function public.replace_asset_uses(p_use uuid, p_new uuid, p_all boolean)
+returns uuid language plpgsql set search_path = '' as $$
+declare v_old uuid;
+begin
+  select asset_id into v_old from public.character_images where id = p_use;
+  if v_old is null then
+    raise exception 'Imagen no encontrada' using errcode = 'P0002';
+  end if;
+  if v_old = p_new then
+    return v_old;
+  end if;
+  if p_all then
+    update public.character_images set asset_id = p_new where asset_id = v_old;
+  else
+    update public.character_images set asset_id = p_new where id = p_use;
+  end if;
+  return v_old;
+end $$;
+
 -- Imagen principal: quita la anterior y marca ésta, en una transacción.
 create or replace function public.set_primary_image(p_image uuid)
 returns void language plpgsql set search_path = '' as $$
@@ -484,10 +536,15 @@ revoke execute on function public.reorder_character_images(uuid, uuid[]) from pu
 revoke execute on function public.asset_in_use(uuid) from public, anon, authenticated;
 revoke execute on function public.delete_unused_assets(uuid[]) from public, anon, authenticated;
 revoke execute on function public.sweep_assets(uuid) from public, anon, authenticated;
+revoke execute on function public.finalize_asset(uuid, text, text, bigint, integer, integer, text, text, text)
+  from public, anon, authenticated;
+revoke execute on function public.replace_asset_uses(uuid, uuid, boolean) from public, anon, authenticated;
 grant execute on function public.word_count(text), public.library(), public.novel_outline(uuid),
   public.reorder_chapters(uuid, uuid[]), public.duplicate_novel(uuid, text),
   public.set_primary_image(uuid), public.reorder_character_images(uuid, uuid[]),
-  public.asset_in_use(uuid), public.delete_unused_assets(uuid[]), public.sweep_assets(uuid) to service_role;
+  public.asset_in_use(uuid), public.delete_unused_assets(uuid[]), public.sweep_assets(uuid),
+  public.finalize_asset(uuid, text, text, bigint, integer, integer, text, text, text),
+  public.replace_asset_uses(uuid, uuid, boolean) to service_role;
 
 -- ---------------------------------------------------------------------------
 -- Storage: un bucket privado para todos los archivos de las novelas (docs/archivos.md).

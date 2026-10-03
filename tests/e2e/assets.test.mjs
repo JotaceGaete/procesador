@@ -348,13 +348,13 @@ test("duplicate: an independent copy, each shared file copied once", async () =>
 
 test("duplicate: if a file can't be copied, there is no half-made novel", async () => {
   const before = (await call("/api/novels")).data.length;
+  const filesBefore = await storage();
   await fetch(`${STACK}/__storage/fail?op=copy&times=1`);
   const r = await call(`/api/novels/${s.A}/duplicate`, "POST");
   assert.equal(r.status, 500);
   assert.equal((await call("/api/novels")).data.length, before);
-  const novels = new Set((await call("/api/novels")).data.map((n) => n.id));
-  const strays = (await storage()).filter((k) => !novels.has(k.split("/")[1]));
-  assert.deepEqual(strays, [], "no files left for a novel that doesn't exist");
+  const strays = (await storage()).filter((k) => !filesBefore.includes(k));
+  assert.deepEqual(strays, [], "no files left behind by the failed copy");
 });
 
 test("deleting a character deletes the files only it used", async () => {

@@ -26,6 +26,8 @@ interface Props {
   onChange(memory: Memory): void;
   /** A character's gallery changed on the server (upload, delete, main image, order…). */
   onImagesChange(characterId: string, images: CharacterImage[]): void;
+  /** The whole novel's gallery images changed (a file replaced in every use). */
+  onAllImagesChange(images: CharacterImage[]): void;
   onClose(): void;
 }
 
@@ -68,7 +70,16 @@ const RELATION_SUGGESTIONS = [
 type Draft = Record<string, string | string[] | null>;
 
 /** Narrative memory of one novel: a list per kind; picking an item swaps the list for its form. */
-export default function MemoryModal({ novelId, memory, chapters, images, onChange, onImagesChange, onClose }: Props) {
+export default function MemoryModal({
+  novelId,
+  memory,
+  chapters,
+  images,
+  onChange,
+  onImagesChange,
+  onAllImagesChange,
+  onClose,
+}: Props) {
   const [tab, setTab] = useState<MemoryKind>("characters");
   const [editing, setEditing] = useState<{ id: string | null; draft: Draft; original: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -227,7 +238,16 @@ export default function MemoryModal({ novelId, memory, chapters, images, onChang
               }
               return (
                 <>
-                  <CharacterVisual key={saved.id} novelId={novelId} character={saved} images={galleryOf(saved.id)} onImages={onImagesChange}>
+                  <CharacterVisual
+                    key={saved.id}
+                    novelId={novelId}
+                    character={saved}
+                    images={galleryOf(saved.id)}
+                    allImages={images}
+                    names={names}
+                    onImages={onImagesChange}
+                    onAllImages={onAllImagesChange}
+                  >
                     {sections[0]}
                   </CharacterVisual>
                   {sections.slice(1)}

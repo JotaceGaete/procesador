@@ -1,6 +1,7 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import { db } from "./supabase";
-import type { CharacterImage } from "./types";
+import type { AssetUse, CharacterImage } from "./types";
 
 /**
  * Novel files on the server (see docs/archivos.md). One private bucket for every
@@ -30,41 +31,44 @@ export async function getCharacterImages(characterId: string): Promise<Character
   return data as unknown as CharacterImage[];
 }
 
+/** First bytes kept for format detection (a big EXIF block can push a JPEG header far). */
+const HEAD_BYTES = 4 * 1024 * 1024;
+
 /**
- * The first bytes of a stored file and its total size, without downloading it
- * (originals can be 50 MB). Null when the file doesn't exist.
+ * Reads a stored original once, as a stream: its first bytes (for the format),
+ * its real size and its SHA-256. Only the head is kept in memory, so a 50 MB
+ * original never is. Null when the file doesn't exist.
  */
-export async function readHead(path: string, length: number): Promise<{ bytes: Uint8Array; total: number } | null> {
+export async function inspectStored(path: string): Promise<{ head: Uint8Array; total: number; sha256: string } | null> {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY!;
   const encoded = path.split("/").map(encodeURIComponent).join("/");
   const res = await fetch(`${process.env.SUPABASE_URL}/storage/v1/object/${BUCKET}/${encoded}`, {
-    headers: { apikey: key, authorization: `Bearer ${key}`, range: `bytes=0-${length - 1}` },
+    headers: { apikey: key, authorization: `Bearer ${key}` },
     cache: "no-store",
   });
-  if (!res.ok) {
+  if (!res.ok || !res.body) {
     await res.arrayBuffer().catch(() => {}); // small error body; read it so the connection is released
     return null;
   }
-  // Read at most `length` bytes, even if the server ignored the range.
-  const reader = res.body!.getReader();
-  const chunks: Uint8Array[] = [];
-  let read = 0;
-  while (read < length) {
+  const hash = createHash("sha256");
+  const head = new Uint8Array(HEAD_BYTES);
+  let total = 0;
+  const reader = res.body.getReader();
+  for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    chunks.push(value);
-    read += value.length;
+    hash.update(value);
+    if (total < HEAD_BYTES) head.set(value.subarray(0, HEAD_BYTES - total), total);
+    total += value.length;
   }
-  await reader.cancel().catch(() => {});
-  const bytes = new Uint8Array(read);
-  let offset = 0;
-  for (const c of chunks) {
-    bytes.set(c, offset);
-    offset += c.length;
-  }
-  const range = res.headers.get("content-range")?.match(/\/(\d+)$/);
-  const total = range ? Number(range[1]) : Number(res.headers.get("content-length") ?? read);
-  return { bytes: bytes.subarray(0, length), total };
+  return { head: head.subarray(0, Math.min(total, HEAD_BYTES)), total, sha256: hash.digest("hex") };
+}
+
+/** Where a file is used (shown when an upload turns out to be a file the novel already has). */
+export async function assetUses(assetId: string): Promise<AssetUse[]> {
+  const { data, error } = await db().from("character_images").select("id, character_id").eq("asset_id", assetId);
+  if (error) throw error;
+  return data.map((u) => ({ kind: "character", character_id: u.character_id, character_image_id: u.id }));
 }
 
 /**
