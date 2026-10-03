@@ -1,22 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Character, Project, ProviderId } from "@/lib/types";
+import Link from "next/link";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Chapter, ChapterInfo, Memory, Novel, ProviderId } from "@/lib/types";
 import { api, readPref, writePref } from "@/lib/client";
-import { useAutosave, type SaveState } from "./useAutosave";
-import CharactersModal from "./CharactersModal";
-import ProjectModal from "./ProjectModal";
-import AnalysisPanel from "./AnalysisPanel";
-
-export interface Selection {
-  start: number;
-  end: number;
-  text: string;
-}
+import { chapterLabel } from "@/lib/ai/context";
+import type { SaveState } from "./useAutosave";
+import ChapterEditor, { type EditorHandle, type Selection } from "./ChapterEditor";
+import ChapterNav from "./ChapterNav";
+import NovelModal from "./NovelModal";
+import MemoryModal from "./MemoryModal";
+import AssistantPanel from "./AssistantPanel";
 
 interface Loaded {
-  project: Project;
-  characters: Character[];
+  novel: Novel;
+  chapters: ChapterInfo[];
+  memory: Memory;
   providers: ProviderId[];
   defaultProvider: ProviderId | null;
 }
@@ -29,56 +28,94 @@ const SAVE_LABELS: Record<SaveState, string> = {
   conflict: "Cambió en otro lugar",
 };
 
-export default function Workspace() {
+export default function Workspace({ novelId }: { novelId: string }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [project, setProject] = useState<Project | null>(null);
-  const [characters, setCharacters] = useState<Character[]>([]);
-  const [content, setContent] = useState("");
-  const [selection, setSelection] = useState<Selection | null>(null);
+  const [novel, setNovel] = useState<Novel | null>(null);
+  const [chapters, setChapters] = useState<ChapterInfo[]>([]);
+  const [memory, setMemory] = useState<Memory>({ characters: [], relationships: [], places: [], facts: [] });
+  const [chapter, setChapter] = useState<Chapter | null>(null);
 
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const [stats, setStats] = useState({ words: 0, chars: 0 });
+  const [save, setSave] = useState<{ state: SaveState; retry(): void; overwrite(): void }>({
+    state: "saved",
+    retry() {},
+    overwrite() {},
+  });
+
+  const [navOpen, setNavOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
-  const [modal, setModal] = useState<"characters" | "project" | null>(null);
+  const [modal, setModal] = useState<"novel" | "memory" | null>(null);
+  const editorRef = useRef<EditorHandle>(null);
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const contentRef = useRef(content);
-  contentRef.current = content;
-
-  const initial = useMemo(
-    () => (loaded ? { content: loaded.project.content, revision: loaded.project.revision } : null),
-    [loaded],
-  );
-  const autosave = useAutosave(content, initial);
-  const saveNow = autosave.save;
+  const openChapter = useCallback(async (id: string) => {
+    const data = await api<Chapter>(`/api/chapters/${id}`);
+    setSelection(null);
+    setChapter(data);
+    writePref(`chapter:${data.novel_id}`, id);
+  }, []);
 
   useEffect(() => {
-    api<Loaded>("/api/project")
-      .then((data) => {
+    api<Loaded>(`/api/novels/${novelId}`)
+      .then(async (data) => {
         setLoaded(data);
-        setProject(data.project);
-        setCharacters(data.characters);
-        setContent(data.project.content);
+        setNovel(data.novel);
+        setChapters(data.chapters);
+        setMemory(data.memory);
+        writePref("lastNovel", novelId);
+        // Continue where the author left off in this novel.
+        const last = readPref(`chapter:${novelId}`);
+        await openChapter(data.chapters.find((c) => c.id === last)?.id ?? data.chapters[0].id);
       })
       .catch((e: Error) => setLoadError(e.message));
-    // Panel open by default on wide screens only; remembered afterwards.
-    const pref = readPref("panelOpen");
-    setPanelOpen(pref ? pref === "1" : window.matchMedia("(min-width: 1000px)").matches);
+    const wide = window.matchMedia("(min-width: 1000px)").matches;
+    const panelPref = readPref("panelOpen");
+    setPanelOpen(panelPref ? panelPref === "1" : wide);
+    setNavOpen(wide && readPref("navOpen") === "1");
+  }, [novelId, openChapter]);
+
+  // Keep the chapter list's counts in step with the chapter being written.
+  const currentId = chapter?.id;
+  useEffect(() => {
+    if (!currentId) return;
+    setChapters((list) => list.map((c) => (c.id === currentId ? { ...c, words: stats.words, chars: stats.chars } : c)));
+  }, [currentId, stats]);
+
+  /** Never leaves a chapter with text that didn't reach the server without asking. */
+  const leaveChapter = useCallback(async () => {
+    if (!editorRef.current || (await editorRef.current.flush())) return true;
+    return confirm("Los últimos cambios de este capítulo no se pudieron guardar. Si continúas, se perderán. ¿Continuar?");
   }, []);
 
-  const togglePanel = useCallback(() => {
-    setPanelOpen((open) => {
-      writePref("panelOpen", open ? "0" : "1");
+  const narrow = () => !window.matchMedia("(min-width: 1000px)").matches;
+
+  const switchChapter = useCallback(
+    async (id: string) => {
+      // On a phone the list is a drawer over the text: picking any chapter closes it.
+      if (narrow()) setNavOpen(false);
+      if (id === chapter?.id || !(await leaveChapter())) return;
+      await openChapter(id);
+    },
+    [chapter?.id, leaveChapter, openChapter],
+  );
+
+  const toggle = (key: "navOpen" | "panelOpen", set: (fn: (v: boolean) => boolean) => void) => {
+    // On a phone the drawer and the bottom sheet would cover each other: one at a time.
+    if (narrow()) (key === "navOpen" ? setPanelOpen : setNavOpen)(false);
+    set((open) => {
+      writePref(key, open ? "0" : "1");
       return !open;
     });
-  }, []);
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key === "s") {
         e.preventDefault();
-        saveNow();
+        save.retry();
       } else if (mod && e.key === ".") {
         e.preventDefault();
         setFocusMode((f) => !f);
@@ -88,142 +125,137 @@ export default function Workspace() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [saveNow, focusMode, modal]);
+  }, [save, focusMode, modal]);
 
-  const updateSelection = useCallback(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    const { selectionStart: start, selectionEnd: end } = el;
-    setSelection((prev) => {
-      if (end <= start) return null;
-      if (prev && prev.start === start && prev.end === end) return prev;
-      return { start, end, text: el.value.slice(start, end) };
-    });
-  }, []);
-
-  /**
-   * Replaces the original fragment with the proposal, only when the author asks.
-   * Uses insertText so Ctrl+Z in the editor undoes it.
-   */
-  const applyRewrite = useCallback(
-    (original: Selection, rewrite: string): boolean => {
-      const el = textareaRef.current;
-      const current = contentRef.current;
-      if (!el) return false;
-      let start = original.start;
-      if (current.slice(start, original.end) !== original.text) {
-        // The text moved since the analysis: take the occurrence closest to where it was.
-        let best = -1;
-        for (let i = current.indexOf(original.text); i !== -1; i = current.indexOf(original.text, i + 1)) {
-          if (best === -1 || Math.abs(i - original.start) < Math.abs(best - original.start)) best = i;
-        }
-        if (best === -1) return false;
-        start = best;
-      }
-      const end = start + original.text.length;
-      el.focus();
-      el.setSelectionRange(start, end);
-      if (!document.execCommand("insertText", false, rewrite)) {
-        setContent(current.slice(0, start) + rewrite + current.slice(end));
-      }
-      requestAnimationFrame(() => {
-        el.setSelectionRange(start, start + rewrite.length);
-        updateSelection();
-      });
-      return true;
-    },
-    [updateSelection],
+  const onSaveState = useCallback(
+    (state: SaveState, actions: { retry(): void; overwrite(): void }) => setSave({ state, ...actions }),
+    [],
   );
-
-  const getContent = useCallback(() => contentRef.current, []);
-
-  // Counting words in a whole novel on every keystroke is noticeable: do it once typing pauses.
-  const [stats, setStats] = useState({ words: 0, chars: 0 });
-  useEffect(() => {
-    const delay = stats.chars ? 400 : 0;
-    const t = setTimeout(() => setStats({ words: (content.match(/\S+/g) ?? []).length, chars: content.length }), delay);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the first count is immediate
-  }, [content]);
-  const words = stats.words;
-  // Rounded so the panel doesn't re-render for every few characters.
-  const manuscriptChars = Math.round(stats.chars / 1000) * 1000;
+  const getContent = useCallback(() => editorRef.current?.getContent() ?? "", []);
+  const getCursor = useCallback(() => editorRef.current?.getCursor() ?? 0, []);
+  const applyRewrite = useCallback(
+    (original: Selection, text: string) => editorRef.current?.applyRewrite(original, text) ?? false,
+    [],
+  );
+  const insertAtCursor = useCallback((text: string) => editorRef.current?.insertAtCursor(text), []);
 
   if (loadError) {
     return (
       <main className="fatal">
-        <h1>No se pudo cargar el proyecto</h1>
+        <h1>No se pudo abrir la novela</h1>
         <p>{loadError}</p>
-        <p className="muted">Revisa las variables de entorno de Supabase y que hayas ejecutado supabase/schema.sql.</p>
+        <p>
+          <Link href="/">Volver a la biblioteca</Link>
+        </p>
       </main>
     );
   }
-  if (!loaded || !project) return <main className="fatal muted">Cargando…</main>;
+  if (!loaded || !novel || !chapter) return <main className="fatal muted">Cargando…</main>;
 
+  const chapterIndex = chapters.findIndex((c) => c.id === chapter.id);
+  const current = chapters[chapterIndex];
+  // Whole novel size for the "include manuscript" estimate: saved chapters plus the live one.
+  const novelChars = chapters.reduce((n, c) => n + (c.id === chapter.id ? stats.chars : c.chars), 0);
+  const showNav = navOpen && !focusMode;
   const showPanel = panelOpen && !focusMode;
 
   return (
-    <div className={`workspace${focusMode ? " focus" : ""}${showPanel ? " with-panel" : ""}`}>
+    <div className={`workspace${focusMode ? " focus" : ""}${showPanel ? " with-panel" : ""}${showNav ? " with-nav" : ""}`}>
+      <ChapterNav
+        hidden={!showNav}
+        novelId={novel.id}
+        chapters={chapters}
+        currentId={chapter.id}
+        onSelect={switchChapter}
+        onChange={setChapters}
+        onClose={() => toggle("navOpen", setNavOpen)}
+        beforeDeleteCurrent={async (neighborId) => {
+          if (!(await leaveChapter())) return false;
+          await openChapter(neighborId);
+          return true;
+        }}
+      />
+
       <main className="editor-col">
         <header className="topbar">
-          <button className="link title" onClick={() => setModal("project")} title="Sinopsis y notas de estilo">
-            {project.title}
+          <Link
+            href="/"
+            className="link"
+            title="Biblioteca"
+            onClick={async (e) => {
+              e.preventDefault();
+              if (await leaveChapter()) window.location.href = "/";
+            }}
+          >
+            ←
+          </Link>
+          <button className="link title" onClick={() => setModal("novel")} title="Novela y Guía Maestra">
+            {novel.title}
+          </button>
+          <button
+            className={`link chapter-title${showNav ? " on" : ""}`}
+            onClick={() => toggle("navOpen", setNavOpen)}
+            title="Capítulos"
+          >
+            {current ? chapterLabel(chapterIndex, current.title) : ""}
           </button>
           <span className="spacer" />
-          <span className="meta words">{words.toLocaleString("es")} palabras</span>
-          <SaveStatus state={autosave.state} onRetry={autosave.save} onOverwrite={autosave.overwrite} />
-          <button className="link" onClick={() => setModal("characters")}>
-            Personajes
+          <span className="meta words">{stats.words.toLocaleString("es")} palabras</span>
+          <SaveStatus state={save.state} onRetry={save.retry} onOverwrite={save.overwrite} />
+          <button className="link" onClick={() => setModal("memory")}>
+            Memoria
           </button>
-          <button className={`link${showPanel ? " on" : ""}`} onClick={togglePanel} aria-pressed={showPanel}>
-            Análisis
+          <button
+            className={`link${showPanel ? " on" : ""}`}
+            onClick={() => toggle("panelOpen", setPanelOpen)}
+            aria-pressed={showPanel}
+          >
+            Asistente
           </button>
           <button className="link focus-toggle" onClick={() => setFocusMode((f) => !f)} title="Ctrl/⌘ + .  ·  Esc para salir">
             {focusMode ? "Salir" : "Concentración"}
           </button>
         </header>
-        <textarea
-          ref={textareaRef}
-          className="editor"
-          value={content}
-          onChange={(e) => {
-            setContent(e.target.value);
-            updateSelection();
-          }}
-          onSelect={updateSelection}
-          onMouseUp={updateSelection}
-          onKeyUp={updateSelection}
-          placeholder="Empieza a escribir…"
-          spellCheck
-          autoFocus
-          aria-label="Manuscrito"
+        <ChapterEditor
+          key={chapter.id}
+          ref={editorRef}
+          chapterId={chapter.id}
+          initial={{ content: chapter.content, revision: chapter.revision }}
+          focusMode={focusMode}
+          onSelection={setSelection}
+          onStats={setStats}
+          onSaveState={onSaveState}
         />
       </main>
 
-      <AnalysisPanel
+      <AssistantPanel
         hidden={!showPanel}
-        onClose={togglePanel}
-        getContent={getContent}
-        manuscriptChars={manuscriptChars}
-        selection={selection}
-        characters={characters}
+        onClose={() => toggle("panelOpen", setPanelOpen)}
+        novelId={novel.id}
+        chapterId={chapter.id}
+        memory={memory}
         providers={loaded.providers}
         defaultProvider={loaded.defaultProvider}
+        selection={selection}
+        novelChars={Math.round(novelChars / 1000) * 1000}
+        getContent={getContent}
+        getCursor={getCursor}
         onApply={applyRewrite}
+        onInsert={insertAtCursor}
       />
 
-      {modal === "characters" && (
-        <CharactersModal characters={characters} onChange={setCharacters} onClose={() => setModal(null)} />
-      )}
-      {modal === "project" && (
-        <ProjectModal
-          project={project}
+      {modal === "novel" && (
+        <NovelModal
+          novel={novel}
           onClose={() => setModal(null)}
-          onSaved={(p) => {
-            setProject((prev) => (prev ? { ...prev, ...p } : prev));
+          onSaved={(n) => {
+            setNovel(n);
             setModal(null);
           }}
         />
+      )}
+      {modal === "memory" && (
+        <MemoryModal novelId={novel.id} memory={memory} chapters={chapters} onChange={setMemory} onClose={() => setModal(null)} />
       )}
     </div>
   );

@@ -54,3 +54,19 @@ export async function requireAuth(request: Request): Promise<NextResponse | null
   }
   return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 }
+
+type Handler<C> = (request: Request, ctx: C) => Promise<Response>;
+
+/** Every API route goes through this: session check first, then errors turned into JSON. */
+export function handler<C>(fn: Handler<C>): Handler<C> {
+  return async (request, ctx) => {
+    const denied = await requireAuth(request);
+    if (denied) return denied;
+    try {
+      return await fn(request, ctx);
+    } catch (e) {
+      const { errorResponse } = await import("./http");
+      return errorResponse(e);
+    }
+  };
+}

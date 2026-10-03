@@ -139,6 +139,12 @@ input:focus,
 .workspace.with-panel {
   grid-template-columns: minmax(0, 1fr) 360px;
 }
+.workspace.with-nav {
+  grid-template-columns: 230px minmax(0, 1fr);
+}
+.workspace.with-nav.with-panel {
+  grid-template-columns: 230px minmax(0, 1fr) 360px;
+}
 
 .editor-col {
   display: flex;
@@ -163,6 +169,11 @@ input:focus,
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 40%;
+}
+.topbar .chapter-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 30%;
 }
 .meta {
   color: var(--muted);
@@ -406,18 +417,18 @@ input:focus,
   margin-top: 16px;
 }
 
-.char-list {
+.item-list {
   list-style: none;
   margin: 0;
   padding: 0;
 }
-.char-list li + li {
+.item-list li + li {
   border-top: 1px solid var(--faint);
 }
-.char-list button {
+.item-list button {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  flex-direction: column;
+  gap: 2px;
   width: 100%;
   text-align: left;
   border: none;
@@ -425,10 +436,10 @@ input:focus,
   padding: 10px 0;
   cursor: pointer;
 }
-.char-list button:hover .char-name {
+.item-list button:hover .item-title {
   text-decoration: underline;
 }
-.char-name {
+.item-title {
   font-family: var(--serif);
   font-size: 16px;
 }
@@ -450,6 +461,258 @@ input:focus,
 .form textarea {
   resize: vertical;
   line-height: 1.5;
+}
+
+/* ---------- Chapters ---------- */
+.chapters {
+  border-right: 1px solid var(--faint);
+  overflow-y: auto;
+  padding: 12px 16px 32px;
+  font-size: 13px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--faint) transparent;
+}
+.chapters ol {
+  list-style: none;
+  margin: 12px 0;
+  padding: 0;
+}
+.chapters li {
+  padding: 5px 0;
+}
+.chapter-name {
+  border: none;
+  background: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  color: var(--muted);
+  font-family: var(--serif);
+  font-size: 14px;
+  line-height: 1.35;
+}
+.chapters li.current .chapter-name {
+  color: var(--text);
+}
+.chapters input {
+  width: 100%;
+}
+.row-actions {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.chapters li:hover .row-actions,
+.chapters li:focus-within .row-actions,
+.chapters li.current .row-actions,
+.novel-list li:hover .row-actions,
+.novel-list li:focus-within .row-actions {
+  opacity: 1;
+}
+.chapters .add {
+  font-size: 13px;
+}
+
+/* ---------- Assistant extras ---------- */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+.actions button {
+  border: none;
+  background: none;
+  padding: 2px 0;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+}
+.actions button.on {
+  color: var(--text);
+  border-bottom-color: var(--text);
+}
+.argument {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.argument > span {
+  color: var(--muted);
+}
+.argument textarea {
+  border: 1px solid var(--faint);
+  background: transparent;
+  border-radius: 4px;
+  padding: 8px;
+  resize: vertical;
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.argument textarea:focus {
+  outline: none;
+  border-color: var(--muted);
+}
+.checks {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+.checks legend {
+  color: var(--muted);
+  padding: 0;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.checks .check {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+.estimate {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.estimate.large {
+  color: var(--danger);
+}
+.retry-with {
+  margin: 10px 0 0;
+}
+.compare-actions {
+  flex-wrap: wrap;
+}
+
+/* ---------- Modal extras ---------- */
+.modal.wide {
+  max-width: 680px;
+}
+.modal .tabs {
+  margin-bottom: 14px;
+}
+.group {
+  border-top: 1px solid var(--faint);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+details.group:not([open]) {
+  gap: 0;
+}
+/* The content of <details> doesn't take part in flex layout in every browser. */
+details.group > label,
+details.group > p,
+details.group > pre {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+}
+details.group > p {
+  margin-bottom: 0;
+}
+.group summary,
+.group-title {
+  cursor: pointer;
+  color: var(--text);
+  font-family: var(--serif);
+  font-size: 15px;
+  list-style-position: outside;
+}
+.group.static {
+  gap: 6px;
+}
+.plain {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.6;
+}
+.compiled {
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  max-height: 40vh;
+  overflow-y: auto;
+  margin: 0;
+}
+.relation-row {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 1fr;
+  gap: 8px;
+}
+.two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.btn.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ---------- Library ---------- */
+.library {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 8vh 24px 80px;
+}
+.library-head {
+  display: flex;
+  align-items: baseline;
+  margin-bottom: 28px;
+}
+.library-head h1 {
+  font-family: var(--serif);
+  font-weight: normal;
+  font-size: 28px;
+  margin: 0;
+}
+.novel-list {
+  list-style: none;
+  margin: 0 0 28px;
+  padding: 0;
+}
+.novel-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 0;
+  border-top: 1px solid var(--faint);
+}
+.novel-title {
+  font-family: var(--serif);
+  font-size: 21px;
+  color: var(--text);
+  text-decoration: none;
+}
+.novel-title:hover {
+  text-decoration: underline;
+}
+.rename {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.rename input {
+  flex: 1;
+  min-width: 200px;
+  font-family: var(--serif);
+  font-size: 17px;
+}
+.confirm-delete {
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.8;
 }
 
 /* ---------- Login / fatal ---------- */
@@ -479,8 +742,27 @@ input:focus,
 
 /* ---------- Narrow screens: the panel becomes a bottom sheet ---------- */
 @media (max-width: 999px) {
-  .workspace.with-panel {
+  .workspace.with-panel,
+  .workspace.with-nav,
+  .workspace.with-nav.with-panel {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .chapters {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(300px, 85vw);
+    background: var(--paper);
+    box-shadow: 8px 0 30px rgb(0 0 0 / 0.12);
+    z-index: 11;
+  }
+  .row-actions {
+    opacity: 1;
+  }
+  .relation-row,
+  .two {
+    grid-template-columns: 1fr;
   }
   .topbar {
     gap: 14px;
@@ -509,7 +791,10 @@ input:focus,
 }
 @media (max-width: 520px) {
   .topbar .title {
-    max-width: 34%;
+    display: none;
+  }
+  .topbar .chapter-title {
+    max-width: 40%;
   }
   /* The editor is already full screen here; the save state matters more than this button. */
   .topbar .focus-toggle {
@@ -523,4 +808,12 @@ input:focus,
   height: 1px;
   overflow: hidden;
   clip: rect(0 0 0 0);
+}
+
+/* Checkbox rows inside forms stay horizontal (form labels are columns). */
+.form .checks .check,
+.controls .checks .check {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
 }

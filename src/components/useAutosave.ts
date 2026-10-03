@@ -11,58 +11,60 @@ const RETRY_MS = 5000;
 const KEEPALIVE_LIMIT = 60_000;
 
 /**
- * Saves `content` a moment after typing stops. Only one save is in flight at a
- * time; each save sends the revision it is based on, so a newer save from
- * another tab or device is never silently overwritten (state "conflict").
+ * Saves one chapter's `content` a moment after typing stops. Only one save is
+ * in flight at a time; each save sends the revision it is based on, so a newer
+ * save from another tab or device is never silently overwritten ("conflict").
+ *
+ * The component using it is remounted per chapter, so `endpoint` never changes
+ * under a running save.
  */
-export function useAutosave(content: string, initial: { content: string; revision: number } | null) {
+export function useAutosave(endpoint: string, content: string, initial: { content: string; revision: number }) {
   const [state, setState] = useState<SaveState>("saved");
   const contentRef = useRef(content);
-  const savedRef = useRef<string | null>(null);
-  const revisionRef = useRef(0);
-  const inFlight = useRef(false);
+  const savedRef = useRef(initial.content);
+  const revisionRef = useRef(initial.revision);
+  const inFlight = useRef<Promise<void> | null>(null);
   const blocked = useRef(false);
   contentRef.current = content;
 
-  useEffect(() => {
-    if (initial && savedRef.current === null) {
-      savedRef.current = initial.content;
-      revisionRef.current = initial.revision;
-    }
-  }, [initial]);
-
-  const save = useCallback(async (opts: { keepalive?: boolean } = {}) => {
-    const text = contentRef.current;
-    if (savedRef.current === null || text === savedRef.current || blocked.current) return;
-    if (inFlight.current) return; // the running save re-checks when it finishes
-    inFlight.current = true;
-    setState("saving");
-    try {
-      const body = JSON.stringify({ content: text, revision: revisionRef.current });
-      const res = await api<{ revision: number }>("/api/project", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body,
-        keepalive: Boolean(opts.keepalive) && body.length < KEEPALIVE_LIMIT,
-      });
-      revisionRef.current = res.revision;
-      savedRef.current = text;
-      setState(contentRef.current === text ? "saved" : "pending");
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 409) {
-        blocked.current = true;
-        setState("conflict");
-      } else {
-        setState("error");
-      }
-    } finally {
-      inFlight.current = false;
-    }
-  }, []);
+  const save = useCallback(
+    (opts: { keepalive?: boolean } = {}): Promise<void> => {
+      const text = contentRef.current;
+      if (text === savedRef.current || blocked.current) return Promise.resolve();
+      if (inFlight.current) return inFlight.current; // the running save re-checks when it finishes
+      setState("saving");
+      const run = (async () => {
+        try {
+          const body = JSON.stringify({ content: text, revision: revisionRef.current });
+          const res = await api<{ revision: number }>(endpoint, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body,
+            keepalive: Boolean(opts.keepalive) && body.length < KEEPALIVE_LIMIT,
+          });
+          revisionRef.current = res.revision;
+          savedRef.current = text;
+          setState(contentRef.current === text ? "saved" : "pending");
+        } catch (e) {
+          if (e instanceof ApiError && e.status === 409) {
+            blocked.current = true;
+            setState("conflict");
+          } else {
+            setState("error");
+          }
+        } finally {
+          inFlight.current = null;
+        }
+      })();
+      inFlight.current = run;
+      return run;
+    },
+    [endpoint],
+  );
 
   // Debounce while typing; after a failed save keep retrying every few seconds.
   useEffect(() => {
-    if (savedRef.current === null || content === savedRef.current || blocked.current) return;
+    if (content === savedRef.current || blocked.current) return;
     if (state === "saved") setState("pending");
     const t = setTimeout(save, state === "error" ? RETRY_MS : DEBOUNCE_MS);
     return () => clearTimeout(t);
@@ -79,7 +81,7 @@ export function useAutosave(content: string, initial: { content: string; revisio
   useEffect(() => {
     const onHide = () => document.visibilityState === "hidden" && save({ keepalive: true });
     const onUnload = (e: BeforeUnloadEvent) => {
-      if (savedRef.current !== null && contentRef.current !== savedRef.current) {
+      if (contentRef.current !== savedRef.current) {
         save({ keepalive: true });
         e.preventDefault();
       }
@@ -94,11 +96,25 @@ export function useAutosave(content: string, initial: { content: string; revisio
 
   /** Keep our text: adopt the server's latest revision and save over it. */
   const overwrite = useCallback(async () => {
-    const { project } = await api<{ project: { revision: number } }>("/api/project");
-    revisionRef.current = project.revision;
+    const chapter = await api<{ revision: number }>(endpoint);
+    revisionRef.current = chapter.revision;
     blocked.current = false;
     await save();
+  }, [endpoint, save]);
+
+  /**
+   * Saves now and waits. Resolves true only when everything is on the server
+   * (used before switching chapter or leaving the novel).
+   */
+  const flush = useCallback(async (): Promise<boolean> => {
+    for (let i = 0; i < 3; i++) {
+      if (inFlight.current) await inFlight.current;
+      if (blocked.current) return false;
+      if (contentRef.current === savedRef.current) return true;
+      await save();
+    }
+    return contentRef.current === savedRef.current && !blocked.current;
   }, [save]);
 
-  return { state, save, overwrite };
+  return { state, save, overwrite, flush };
 }

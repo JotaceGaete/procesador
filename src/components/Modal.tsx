@@ -6,10 +6,11 @@ interface Props {
   title: string;
   onClose: () => void;
   onBack?: () => void;
+  wide?: boolean;
   children: React.ReactNode;
 }
 
-export default function Modal({ title, onClose, onBack, children }: Props) {
+export default function Modal({ title, onClose, onBack, wide, children }: Props) {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
 
@@ -21,7 +22,7 @@ export default function Modal({ title, onClose, onBack, children }: Props) {
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
+      <div className={`modal${wide ? " wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
         <header>
           {onBack && (
             <button className="link" onClick={onBack} aria-label="Volver">

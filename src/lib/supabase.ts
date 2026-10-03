@@ -1,6 +1,7 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { Project } from "./types";
+import { HttpError } from "./http";
+import type { Chapter, ChapterInfo, Fact, Memory, Novel } from "./types";
 
 let client: SupabaseClient | null = null;
 
@@ -16,14 +17,73 @@ export function db(): SupabaseClient {
   return client;
 }
 
-/** MVP: a single project. The unique `singleton` column makes concurrent first loads safe. */
-export async function getActiveProject(columns = "*"): Promise<Project> {
-  const { error: upsertError } = await db()
-    .from("projects")
-    .upsert({ singleton: true }, { onConflict: "singleton", ignoreDuplicates: true });
-  if (upsertError) throw upsertError;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-  const { data, error } = await db().from("projects").select(columns).eq("singleton", true).single();
+export function assertId(id: unknown, what = "Elemento"): string {
+  if (typeof id !== "string" || !UUID.test(id)) throw new HttpError(404, `${what} no encontrado`);
+  return id;
+}
+
+export async function getNovel(id: string): Promise<Novel> {
+  const { data, error } = await db()
+    .from("novels")
+    .select("id, title, synopsis, notes, guide, updated_at")
+    .eq("id", assertId(id, "Novela"))
+    .maybeSingle();
   if (error) throw error;
-  return data as unknown as Project;
+  if (!data) throw new HttpError(404, "Novela no encontrada");
+  return data as Novel;
+}
+
+export async function getOutline(novelId: string): Promise<ChapterInfo[]> {
+  const { data, error } = await db().rpc("novel_outline", { p_novel: novelId });
+  if (error) throw error;
+  return data as ChapterInfo[];
+}
+
+export async function getChapter(id: string): Promise<Chapter> {
+  const { data, error } = await db()
+    .from("chapters")
+    .select("id, novel_id, title, content, revision")
+    .eq("id", assertId(id, "Capítulo"))
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new HttpError(404, "Capítulo no encontrado");
+  return data as Chapter;
+}
+
+/** Text of every chapter, in order (server-side only, for context building). */
+export async function getChapterTexts(novelId: string): Promise<{ id: string; title: string; content: string }[]> {
+  const { data, error } = await db()
+    .from("chapters")
+    .select("id, title, content")
+    .eq("novel_id", novelId)
+    .order("position")
+    .order("created_at");
+  if (error) throw error;
+  return data;
+}
+
+/** All narrative memory of one novel. Every query is filtered by novel_id. */
+export async function getMemory(novelId: string): Promise<Memory> {
+  const by = (table: string, columns = "*") => db().from(table).select(columns).eq("novel_id", novelId).order("created_at");
+  const [characters, relationships, places, facts, links] = await Promise.all([
+    by("characters"),
+    by("relationships"),
+    by("places"),
+    by("facts"),
+    db().from("fact_characters").select("fact_id, character_id").eq("novel_id", novelId),
+  ]);
+  for (const r of [characters, relationships, places, facts, links]) if (r.error) throw r.error;
+
+  const linksByFact = new Map<string, string[]>();
+  for (const l of links.data as { fact_id: string; character_id: string }[]) {
+    linksByFact.set(l.fact_id, [...(linksByFact.get(l.fact_id) ?? []), l.character_id]);
+  }
+  return {
+    characters: characters.data as unknown as Memory["characters"],
+    relationships: relationships.data as unknown as Memory["relationships"],
+    places: places.data as unknown as Memory["places"],
+    facts: (facts.data as unknown as Fact[]).map((f) => ({ ...f, character_ids: linksByFact.get(f.id) ?? [] })),
+  };
 }

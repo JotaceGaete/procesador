@@ -1,113 +1,102 @@
 # Procesador
 
-Herramienta personal para escribir ficción con asistencia de IA. Es un editor sin distracciones con fichas de personajes que sirven de memoria narrativa, y un análisis bajo demanda del fragmento que selecciones.
+Procesador de textos personal para escribir novelas con asistencia de IA. Tú imaginas la historia; el procesador conoce tu obra (su Guía Maestra, sus personajes, lugares y hechos) y te ayuda a convertir tus argumentos en prosa, manteniendo la continuidad, el estilo y la voz de los personajes. El manuscrito es siempre el centro.
 
-**Stack:** Next.js 16 (App Router + API Routes) · Supabase (Postgres) · Claude API, con Grok como alternativa opcional · Vercel.
+**Stack:** Next.js 16 (App Router + API Routes) · Supabase (Postgres) · Claude, GPT y Grok, intercambiables · Vercel.
 
 ## Uso
 
-- **Editor**: texto plano, con autoguardado un segundo después de dejar de escribir.
-  - Estado siempre visible: *Sin guardar*, *Guardando…*, *Guardado* o *No se pudo guardar*. Si falla, reintenta solo.
-  - Si el texto cambió en otra pestaña o dispositivo, no lo pisa. Te deja elegir entre *Cargar esa versión* y *Conservar la mía*.
-- **Atajos**:
-  - `Ctrl/⌘ + S`: guardar ahora.
-  - `Ctrl/⌘ + .`: entrar o salir del modo concentración (`Esc` también sale).
-  - `Ctrl/⌘ + Z`: deshace también un reemplazo hecho desde el análisis.
-- **Personajes** (botón *Personajes*, hasta 10): nombre, apodos, rol, trasfondo, personalidad, voz, motivaciones, relaciones, arco narrativo y notas.
-- **Proyecto** (clic en el título): sinopsis y notas de estilo, que acompañan a cada análisis. También desde ahí se cierra la sesión.
-- **Análisis** (panel derecho; en móvil, hoja inferior): selecciona un fragmento y elige *Redacción*, *Consistencia*, *Diálogo* o *Evolución*.
-  - Cuando la IA propone una reescritura, ves **Original / Propuesta**. El texto sólo cambia si pulsas *Reemplazar selección*.
-  - Si un proveedor no responde a una solicitud, se indica en una línea y, si el otro está configurado, aparece *Probar con Grok* (o *con Claude*).
+- **Biblioteca** (`/`): tus novelas, con la última abierta primero. Puedes crear, abrir, renombrar y duplicar novelas, y eliminarlas con una confirmación explícita. Duplicar copia capítulos y memoria.
+- **Capítulos**: clic en el título del capítulo, en la barra superior, para mostrar u ocultar la lista. Desde ahí puedes crear, renombrar, reordenar (↑ ↓) y eliminar capítulos (con confirmación). Al volver, la app abre la última novela y capítulo, con el cursor y el scroll donde estaban.
+- **Guía Maestra** (clic en el título de la novela): género, época, narrador, persona, tiempo verbal, tono, estilo, diálogos, regionalismos, temas, cosas que evitar…
+  - Todo es opcional.
+  - La app la convierte en las instrucciones que recibe cualquier modelo. *Ver instrucciones maestras* muestra el resultado.
+- **Memoria**: Personajes, Relaciones (Juan → hermano de → Pedro), Lugares y Hechos de continuidad, estos últimos ligados opcionalmente a personajes, capítulo, lugar y fecha. Cada novela tiene la suya.
+- **Asistente** (panel derecho; en móvil, hoja inferior). Tiene dos modos:
+  - *Editar selección*: Redacción, Diálogo, Expandir, Acortar, Consistencia, Personaje, Evolución. Es conservador: preserva hechos, intención, voz y regionalismos. Las propuestas se muestran como **Original / Propuesta**.
+  - *Escribir escena*: escribes el argumento y pulsas **Desarrollar escena**. Puedes marcar quién está en escena, el lugar y la extensión. Tu argumento es la autoridad sobre lo que ocurre; la IA sólo decide cómo contarlo. La escena se puede **insertar en el cursor**.
+  - Nada se escribe en el manuscrito sin tu clic. Cada propuesta ofrece *Otra versión*, *Copiar*, *Descartar* y *Probar con* otro proveedor. Reemplazar e insertar se deshacen con `Ctrl/⌘+Z`.
+- **Concentración** (`Ctrl/⌘ + .`, `Esc` para salir): sólo el texto y el cursor.
+- **Guardado**: automático, por capítulo.
+  - Si un capítulo cambió en otra pestaña o dispositivo, no se pisa: eliges *Cargar esa versión* o *Conservar la mía*.
+  - Al cambiar de capítulo, la app espera a que el actual termine de guardarse.
 
 ## Qué se envía a la IA
 
-Por defecto, cada análisis envía sólo lo necesario:
+Sólo lo relevante. El manuscrito completo nunca se envía por defecto.
 
-| Siempre | Instrucciones de editor, la selección, ~4.000 caracteres antes y ~1.500 después, sinopsis y notas de estilo |
+| Operación | Contexto |
 |---|---|
-| Fichas | Las del personaje elegido y las de los personajes nombrados (por nombre o apodo) cerca de la selección |
-| Consistencia / Evolución | Además, hasta ~12.000 caracteres de pasajes de todo el manuscrito donde aparece el personaje, repartidos de principio a fin y con su posición (≈35 % del manuscrito, por ejemplo) |
-| Manuscrito completo | Sólo si marcas la casilla. La casilla muestra cuántos tokens añade por consulta |
+| Redacción, Diálogo, Expandir, Acortar | Guía Maestra, selección, ~4.000 caracteres antes y ~1.500 después, fichas de los personajes nombrados o elegidos |
+| Consistencia | Lo anterior, más relaciones, lugares y hechos relevantes, y pasajes de toda la novela donde aparecen los personajes de la selección |
+| Personaje, Evolución | La ficha, sus relaciones, sus hechos y sus pasajes en toda la novela |
+| Desarrollar escena | Guía Maestra, argumento, capítulo, ~6.000 caracteres antes del cursor (y el final del capítulo anterior si el actual empieza), personajes en escena o nombrados, sus relaciones, lugares y hechos |
 
-En una novela de ~1 millón de caracteres, una verificación de consistencia por defecto usa unos 5.000 tokens de contexto, frente a unos 300.000 con el manuscrito completo. Cuando lo incluyes, el manuscrito va en un bloque cacheado: varias consultas seguidas sin editar el texto se cobran a tarifa de caché.
-
-No se usan embeddings ni RAG. La búsqueda de pasajes es por nombre y apodos, así que conviene rellenar *También llamado*.
+- "Relevante" se decide por nombres y apodos (de personajes y lugares) y por los vínculos de cada hecho. No hay embeddings ni base vectorial.
+- Los hechos de capítulos posteriores se marcan como "aún no ocurridos". Los hechos *sugeridos* (reservados para el futuro) nunca se usan sin tu aprobación.
+- El panel muestra el tamaño del contexto antes de enviar y pide confirmación por encima de ~30.000 tokens. *Incluir la novela completa* indica cuántos tokens añade.
 
 ## Puesta en marcha
 
-### 1. Supabase
+1. **Supabase**:
+   - Crea un proyecto.
+   - En **SQL Editor**, ejecuta [`supabase/schema.sql`](supabase/schema.sql). Es idempotente y elimina las tablas de la etapa anterior si existen.
+   - Copia la *Project URL* y la clave **secret / service_role**. La clave *publishable* no sirve: el esquema le niega todo acceso.
+2. **Variables** (`cp .env.example .env.local`):
 
-1. Crea un proyecto en [supabase.com](https://supabase.com).
-2. En **SQL Editor**, ejecuta [`supabase/schema.sql`](supabase/schema.sql). Es idempotente: si ya ejecutaste una versión anterior, vuelve a ejecutarlo para migrar.
-3. En **Project Settings → API** copia la *Project URL* y la clave **service_role / secret**.
-
-### 2. Variables de entorno
-
-```bash
-cp .env.example .env.local
-```
-
-| Variable | Obligatoria | Descripción |
+| Variable | Obligatoria | |
 |---|---|---|
-| `SUPABASE_URL` | sí | URL del proyecto |
-| `SUPABASE_SERVICE_ROLE_KEY` | sí | Clave secreta; sólo la usa el servidor |
-| `APP_PASSWORD` | en producción | Contraseña de acceso. Si falta en producción, la app responde 503 |
-| `ANTHROPIC_API_KEY` | al menos un proveedor | [console.anthropic.com](https://console.anthropic.com) |
-| `ANTHROPIC_MODEL` | no | Por defecto `claude-opus-5-5` |
-| `ANTHROPIC_EFFORT` | no | `low` · `medium` (por defecto) · `high` · `xhigh` · `max` |
-| `XAI_API_KEY` | al menos un proveedor | Activa Grok |
-| `XAI_MODEL` | no | Por defecto `grok-4`; comprueba el nombre vigente en la consola de xAI |
-| `AI_PROVIDER` | no | Proveedor inicial: `anthropic` o `xai` (luego se recuerda tu elección) |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | sí | Sólo servidor |
+| `APP_PASSWORD` | en producción | Si falta en producción: 503 |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY` | al menos una | Con varias aparece un selector |
+| `ANTHROPIC_MODEL` | no | `claude-opus-5-5` |
+| `ANTHROPIC_EFFORT` | no | `medium` |
+| `OPENAI_MODEL` | no | `gpt-5.5` |
+| `XAI_MODEL` | no | `grok-4` |
+| `AI_PROVIDER` | no | Proveedor inicial |
 
-### 3. Local
-
-```bash
-npm install
-npm run dev        # http://localhost:3000 (sin APP_PASSWORD, en local no pide contraseña)
-npm run typecheck
-npm run build
-```
-
-### 4. Vercel
-
-Importa el repositorio, añade las variables (incluida `APP_PASSWORD`) y despliega. `/api/analyze` declara `maxDuration = 300` s; si tu plan permite menos, se aplica el límite del plan.
+3. **Local**: `npm install`, `npm run dev`, `npm run typecheck`, `npm run build`.
+4. **Vercel**: importa el repositorio y añade las variables. `/api/assist` declara `maxDuration = 300` s.
 
 ## Privacidad y seguridad
 
-- **Claves**: `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY` y `XAI_API_KEY` sólo se leen en el servidor (los módulos que las usan importan `server-only`). Ninguna lleva el prefijo `NEXT_PUBLIC_`.
-- **Base de datos**: RLS activado sin políticas y permisos revocados a `anon`/`authenticated`. Con la clave pública de Supabase no se puede leer ni escribir nada.
+- **Claves**: sólo en el servidor. Los módulos que las usan importan `server-only`, y no hay variables `NEXT_PUBLIC_`.
+- **Base de datos**:
+  - RLS activado sin políticas, y permisos de tablas y funciones revocados a `anon` y `authenticated`.
+  - Las claves foráneas compuestas `(id, novel_id)` hacen que la base de datos rechace mezclar novelas, por ejemplo una relación entre personajes de dos novelas.
 - **Acceso**:
-  - `APP_PASSWORD` se valida en el servidor, en dos lugares: el proxy de Next.js y cada ruta API.
-  - La sesión es una cookie `HttpOnly`, `SameSite=Strict` y `Secure` en producción, firmada con HMAC y válida 30 días. Cambiar la contraseña invalida todas las sesiones.
-  - Cada intento fallido de login tarda 1 s.
-  - Sin `APP_PASSWORD`, la app queda cerrada en producción.
-- **Logs**: los errores se registran sólo con su mensaje. Ni el manuscrito ni los cuerpos de las peticiones se escriben en logs.
-- **Proveedores**: el texto que analizas se envía a Anthropic o a xAI según el modelo elegido. No se modifica ni se oculta para esquivar sus políticas. Si un proveedor rechaza una solicitud, la app lo dice.
+  - `APP_PASSWORD` se valida en el proxy y otra vez dentro de cada ruta API (`handler()` en `lib/auth.ts`).
+  - Sesión `HttpOnly` y `SameSite=Strict`, firmada con HMAC y con caducidad de 30 días. Un login fallido tarda 1 s.
+- **Logs**: sólo mensajes de error. Nunca el manuscrito ni los cuerpos de las peticiones.
+- **Proveedores**: el texto se envía al proveedor elegido sin transformaciones. Si uno rechaza, se informa y puedes probar otro.
 
 ## Estructura
 
 ```
 src/
   app/
-    page.tsx, login/page.tsx
-    api/project/        GET proyecto + personajes · PATCH texto (con revisión) o metadatos
-    api/characters/     POST (máx. 10) · [id]: PATCH, DELETE
-    api/analyze/        análisis en streaming (NDJSON: text | refusal | truncated | error)
-    api/login, api/logout
+    page.tsx                         biblioteca
+    novela/[id]/page.tsx             espacio de escritura
+    api/novels                       GET biblioteca · POST nueva
+    api/novels/[id]                  GET (novela, capítulos, memoria) · PATCH · DELETE
+    api/novels/[id]/duplicate        POST
+    api/novels/[id]/chapters         POST nuevo · PUT orden
+    api/novels/[id]/memory/[kind]    POST personaje | relación | lugar | hecho
+    api/chapters/[id]                GET · PATCH (texto con revisión, o título) · DELETE
+    api/memory/[kind]/[id]           PATCH · DELETE
+    api/assist                       IA: editar o escribir escena (streaming NDJSON; dryRun = tamaño)
   components/
-    Workspace.tsx       editor, barra superior, atajos
-    useAutosave.ts      autoguardado con revisiones y reintentos
-    AnalysisPanel.tsx   acciones, Original/Propuesta, aviso de rechazo
-    CharactersModal.tsx lista + ficha
+    Library, Workspace, ChapterEditor, ChapterNav, NovelModal, MemoryModal, AssistantPanel, useAutosave
   lib/
-    ai/context.ts       contexto cercano, fichas relevantes, pasajes del personaje
-    ai/prompts.ts       instrucciones y tareas
-    ai/providers.ts     interfaz común para Claude (SDK oficial) y Grok (REST de xAI)
-    auth.ts, supabase.ts, client.ts, http.ts, types.ts
-  proxy.ts              protección por contraseña
+    guide.ts            Guía Maestra → instrucciones maestras
+    ai/context.ts       selección de contexto y memoria
+    ai/prompts.ts       instrucciones de los dos modos y tareas
+    ai/providers.ts     interfaz común: Claude (SDK oficial), GPT (SDK oficial, Responses API), Grok (REST)
+    auth.ts, supabase.ts, memory.ts, client.ts, http.ts, types.ts
+  proxy.ts
 supabase/schema.sql
 ```
 
 ## Fuera del alcance
 
-Un solo proyecto y un solo usuario. Sin capítulos ni formato enriquecido, sin historial ni versiones, sin colaboración ni publicación.
+Un solo usuario. Sin RAG, embeddings ni base vectorial. Sin colaboración, publicación, exportación editorial, historial de versiones ni extracción automática de memoria.

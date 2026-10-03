@@ -1,0 +1,162 @@
+"use client";
+
+import { useState } from "react";
+import type { ChapterInfo } from "@/lib/types";
+import { api } from "@/lib/client";
+import { chapterLabel } from "@/lib/ai/context";
+
+interface Props {
+  hidden: boolean;
+  novelId: string;
+  chapters: ChapterInfo[];
+  currentId: string;
+  onSelect(id: string): void;
+  onChange(chapters: ChapterInfo[]): void;
+  onClose(): void;
+  /** Moves the editor to another chapter before the current one is deleted. */
+  beforeDeleteCurrent(neighborId: string): Promise<boolean>;
+}
+
+/** Discreet chapter list: select, add, rename, reorder (↑ ↓) and delete. */
+export default function ChapterNav({
+  hidden,
+  novelId,
+  chapters,
+  currentId,
+  onSelect,
+  onChange,
+  onClose,
+  beforeDeleteCurrent,
+}: Props) {
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function run(fn: () => Promise<void>) {
+    setBusy(true);
+    setError("");
+    try {
+      await fn();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const add = () =>
+    run(async () => {
+      const res = await api<{ id: string; chapters: ChapterInfo[] }>(`/api/novels/${novelId}/chapters`, {
+        method: "POST",
+        json: {},
+      });
+      onChange(res.chapters);
+      onSelect(res.id);
+    });
+
+  const move = (index: number, delta: number) =>
+    run(async () => {
+      const ids = chapters.map((c) => c.id);
+      [ids[index], ids[index + delta]] = [ids[index + delta], ids[index]];
+      onChange(await api<ChapterInfo[]>(`/api/novels/${novelId}/chapters`, { method: "PUT", json: { ids } }));
+    });
+
+  const rename = (id: string) => {
+    if (renaming !== id) return; // Enter and blur both land here
+    setRenaming(null);
+    return run(async () => {
+      const title = draft.trim();
+      await api(`/api/chapters/${id}`, { method: "PATCH", json: { title } });
+      onChange(chapters.map((c) => (c.id === id ? { ...c, title } : c)));
+    });
+  };
+
+  const remove = (c: ChapterInfo, index: number) => {
+    const words = c.words ? ` y sus ${c.words.toLocaleString("es")} palabras` : "";
+    if (!confirm(`¿Eliminar «${chapterLabel(index, c.title)}»${words}? No se puede deshacer.`)) return;
+    run(async () => {
+      if (c.id === currentId) {
+        const neighbor = chapters[index + 1] ?? chapters[index - 1];
+        if (!neighbor || !(await beforeDeleteCurrent(neighbor.id))) return;
+      }
+      await api(`/api/chapters/${c.id}`, { method: "DELETE" });
+      onChange(chapters.filter((x) => x.id !== c.id));
+    });
+  };
+
+  return (
+    <nav className="chapters" hidden={hidden} aria-label="Capítulos">
+      <header className="panel-head">
+        <span className="panel-title">Capítulos</span>
+        <span className="spacer" />
+        <button className="link" onClick={onClose}>
+          Ocultar
+        </button>
+      </header>
+      <ol>
+        {chapters.map((c, i) => (
+          <li key={c.id} className={c.id === currentId ? "current" : undefined}>
+            {renaming === c.id ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  rename(c.id);
+                }}
+              >
+                <input
+                  autoFocus
+                  value={draft}
+                  placeholder={`Capítulo ${i + 1}`}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => e.key === "Escape" && setRenaming(null)}
+                  onBlur={() => rename(c.id)}
+                  aria-label="Título del capítulo"
+                />
+              </form>
+            ) : (
+              <>
+                <button className="chapter-name" onClick={() => onSelect(c.id)} aria-current={c.id === currentId}>
+                  {chapterLabel(i, c.title)}
+                  <span className="muted small"> · {c.words.toLocaleString("es")}</span>
+                </button>
+                <span className="row-actions">
+                  <button className="link" disabled={busy || i === 0} onClick={() => move(i, -1)} aria-label="Subir">
+                    ↑
+                  </button>
+                  <button
+                    className="link"
+                    disabled={busy || i === chapters.length - 1}
+                    onClick={() => move(i, 1)}
+                    aria-label="Bajar"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    className="link"
+                    onClick={() => {
+                      setDraft(c.title);
+                      setRenaming(c.id);
+                    }}
+                    aria-label="Renombrar"
+                  >
+                    Renombrar
+                  </button>
+                  {chapters.length > 1 && (
+                    <button className="link danger" disabled={busy} onClick={() => remove(c, i)} aria-label="Eliminar">
+                      Eliminar
+                    </button>
+                  )}
+                </span>
+              </>
+            )}
+          </li>
+        ))}
+      </ol>
+      {error && <p className="error small">{error}</p>}
+      <button className="link add" onClick={add} disabled={busy}>
+        + Nuevo capítulo
+      </button>
+    </nav>
+  );
+}

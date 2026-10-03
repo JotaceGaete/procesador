@@ -1,20 +1,25 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
-import type { AnalysisEvent, ProviderId } from "../types";
+import OpenAI from "openai";
+import type { AssistEvent, ProviderId } from "../types";
 
+/**
+ * What every provider receives. The editor tools build this without knowing
+ * which provider will answer; each provider maps it to its own API.
+ */
 export interface CompletionRequest {
-  /** Fixed instructions: identical on every request. */
+  /** Mode instructions (edit or write): identical on every request of that mode. */
   instructions: string;
   /** Full manuscript, only when the author asks for it. Kept as its own block so it can be cached. */
   manuscript: string | null;
-  /** Synopsis, style notes and relevant character profiles. */
+  /** Guía Maestra and the narrative memory relevant to this request. */
   project: string;
-  /** Excerpts, nearby context, selection and task. */
+  /** Passages, nearby text, selection or argument, and the task. */
   prompt: string;
   signal: AbortSignal;
 }
 
-type ProviderEvent = Exclude<AnalysisEvent, { type: "error" }>;
+type ProviderEvent = Exclude<AssistEvent, { type: "error" }>;
 
 interface Provider {
   configured(): boolean;
@@ -33,6 +38,17 @@ const providers: Record<ProviderId, Provider> = {
       if (e instanceof Anthropic.APIConnectionError) return "No se pudo conectar con Claude.";
       if (e instanceof Anthropic.APIError) return `Claude respondió con un error (${e.status ?? "sin código"}).`;
       return "Error inesperado al llamar a Claude.";
+    },
+  },
+  openai: {
+    configured: () => Boolean(process.env.OPENAI_API_KEY),
+    stream: streamOpenAI,
+    describeError(e) {
+      if (e instanceof OpenAI.AuthenticationError) return "La API key de OpenAI no es válida.";
+      if (e instanceof OpenAI.RateLimitError) return "GPT: límite de uso alcanzado. Espera un momento y reintenta.";
+      if (e instanceof OpenAI.APIConnectionError) return "No se pudo conectar con OpenAI.";
+      if (e instanceof OpenAI.APIError) return `OpenAI respondió con un error (${e.status ?? "sin código"}).`;
+      return e instanceof OpenAIStreamError ? e.message : "Error inesperado al llamar a GPT.";
     },
   },
   xai: {
@@ -99,6 +115,39 @@ async function* streamAnthropic(req: CompletionRequest): AsyncGenerator<Provider
   }
 }
 
+// ---------- GPT (OpenAI Responses API) ----------
+
+class OpenAIStreamError extends Error {}
+let openai: OpenAI | null = null;
+
+async function* streamOpenAI(req: CompletionRequest): AsyncGenerator<ProviderEvent> {
+  openai ??= new OpenAI();
+  const stream = await openai.responses.create(
+    {
+      model: process.env.OPENAI_MODEL || "gpt-5.5",
+      instructions: [req.instructions, req.manuscript, req.project].filter(Boolean).join("\n\n"),
+      input: req.prompt,
+      max_output_tokens: 16000,
+      stream: true,
+    },
+    { signal: req.signal },
+  );
+
+  let refused = false;
+  for await (const event of stream) {
+    if (event.type === "response.output_text.delta") yield { type: "text", text: event.delta };
+    else if (event.type === "response.refusal.delta") refused = true;
+    else if (event.type === "response.incomplete") {
+      const reason = event.response.incomplete_details?.reason;
+      if (reason === "content_filter") refused = true;
+      else if (reason === "max_output_tokens") yield { type: "truncated" };
+    } else if (event.type === "response.failed" || event.type === "error") {
+      throw new OpenAIStreamError("GPT no pudo completar la respuesta.");
+    }
+  }
+  if (refused) yield { type: "refusal", message: "GPT no respondió a esta solicitud." };
+}
+
 // ---------- Grok (xAI, Chat Completions-style REST API) ----------
 
 class XaiError extends Error {}
@@ -107,7 +156,7 @@ async function* streamXai(req: CompletionRequest): AsyncGenerator<ProviderEvent>
   const system = [req.instructions, req.manuscript, req.project].filter(Boolean).join("\n\n");
   let res: Response;
   try {
-    res = await fetch("https://api.x.ai/v1/chat/completions", {
+    res = await fetch(`${process.env.XAI_BASE_URL || "https://api.x.ai/v1"}/chat/completions`, {
       method: "POST",
       signal: req.signal,
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.XAI_API_KEY}` },
