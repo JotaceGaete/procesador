@@ -1,6 +1,6 @@
 # Consejero literario
 
-> Estado: **diseño, pendiente de aprobación. Sin implementar.**
+> Estado: **diseño aprobado como base. Sin implementar.** Decisiones del autor en "Decisiones tomadas", al final; prevalecen sobre el resto del documento.
 
 ## Qué es, y qué no es
 
@@ -331,8 +331,21 @@ create table public.ai_usage (
 
 Cada fase es usable por sí misma. La 1 ya responde sin coste "¿hace cuánto que no aparece X?" y "¿qué expresiones repito?".
 
-## Decisiones abiertas
+## Decisiones tomadas
 
-1. **Trasladar *Consistencia, Personaje y Evolución* al Consejero** (recomendado) o mantenerlas en el Asistente.
-2. **Actualización de fichas al cambiar de capítulo:** automática o sólo bajo demanda. Recomiendo automática con umbral de cambio sustancial y un interruptor para desactivarla.
-3. **Modelo económico por proveedor** para las fichas: se fija por variables de entorno; por defecto, el mismo modelo que para escribir, hasta que configures uno más barato.
+1. **Separación:**
+   - **Asistente = escribe conmigo:** genera, desarrolla, transforma o mejora texto (Redacción, Diálogo, Expandir, Acortar, Escribir escena).
+   - **Consejero = piensa conmigo sobre la novela:** análisis, coherencia, personajes, evolución, trama, ritmo, repeticiones, cabos y posibilidades narrativas.
+   - *Consistencia*, *Personaje* y *Evolución* **se trasladan al Consejero**.
+2. **Fichas de capítulo:**
+   - Actualización automática **sólo ante cambios sustanciales** y **nunca durante la escritura**. Un cambio sustancial marca la ficha como desactualizada; se regenera al abandonar el capítulo o cuando el Consejero la necesita, sin interferir con la escritura.
+   - Las pequeñas modificaciones no llaman a la IA.
+   - Hay un **interruptor** para desactivar la automatización.
+   - El manuscrito es siempre la fuente de verdad.
+3. **Modelos:** se configuran por separado el **modelo de escritura**, el **del Consejero** y el **económico de análisis y resúmenes**. Al principio pueden coincidir con el proveedor y modelo disponibles; la separación queda preparada para cambiarlos.
+4. **Coste y tokens:**
+   - **Sin confirmación** en las consultas normales.
+   - Se muestra, de forma discreta, qué contexto se usó, los tokens y, cuando sea posible, el coste estimado o real.
+   - Sólo se pide confirmación en operaciones excepcionalmente grandes que superen un **umbral configurable**, como la lectura profunda de una novela extensa.
+   - Esto sustituye la confirmación previa de las secciones 3 y 7.
+5. **Evidencia:** las observaciones deben ser verificables (pendiente de completar con el resto de la indicación del autor).
