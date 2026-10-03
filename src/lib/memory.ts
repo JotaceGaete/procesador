@@ -20,7 +20,8 @@ export const MEMORY_KINDS: Record<
   },
   facts: {
     table: "facts",
-    fields: ["text", "chapter_id", "place_id", "story_time", "note"],
+    // status: 'suggested' (proposed by the Consejero, not canon yet) or 'approved'.
+    fields: ["text", "chapter_id", "place_id", "story_time", "note", "status"],
     nullable: ["chapter_id", "place_id"],
     required: "text",
     label: "Escribe el hecho.",

@@ -303,6 +303,61 @@ create table if not exists public.chapter_digests (
 );
 create index if not exists chapter_digests_novel_idx on public.chapter_digests(novel_id);
 
+-- Conversaciones del Consejero (fase 4). Los turnos más recientes van literales a cada
+-- consulta; los anteriores, resumidos en summary (hasta el mensaje summarized_count).
+create table if not exists public.advisor_conversations (
+  id               uuid primary key default gen_random_uuid(),
+  novel_id         uuid not null references public.novels(id) on delete cascade,
+  title            text not null default '' check (length(title) <= 200),
+  summary          text not null default '',
+  summarized_count integer not null default 0,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  unique (id, novel_id)
+);
+create index if not exists advisor_conversations_novel_idx on public.advisor_conversations(novel_id, updated_at);
+
+-- Mensajes: del autor (pregunta o acción) y del Consejero (su texto en Markdown).
+-- context: qué se leyó (partes y tokens), el plan y based_on { chapter_id: revision }.
+create table if not exists public.advisor_messages (
+  id               uuid primary key default gen_random_uuid(),
+  conversation_id  uuid not null,
+  novel_id         uuid not null references public.novels(id) on delete cascade,
+  role             text not null check (role in ('author', 'advisor')),
+  content          text not null,
+  context          jsonb,
+  created_at       timestamptz not null default now(),
+  unique (id, novel_id),
+  foreign key (conversation_id, novel_id) references public.advisor_conversations(id, novel_id) on delete cascade
+);
+create index if not exists advisor_messages_conversation_idx on public.advisor_messages(conversation_id, created_at);
+
+-- Observaciones (tarjetas). refs: [{ chapterId, quote, verified, at }], verificadas contra el
+-- texto. based_on: { chapter_id: revision } de los capítulos en que se apoya; si alguno cambió,
+-- la observación se marca "basada en una versión anterior" y se puede volver a comprobar.
+-- Sobreviven a su conversación (message_id pasa a null) si el autor las guardó.
+create table if not exists public.advisor_observations (
+  id          uuid primary key default gen_random_uuid(),
+  novel_id    uuid not null references public.novels(id) on delete cascade,
+  message_id  uuid,
+  kind        text not null check (kind in ('problem', 'repetition', 'contradiction', 'thread', 'opportunity', 'alternative', 'pacing')),
+  title       text not null default '',
+  body        text not null default '',
+  confidence  text not null default 'medium' check (confidence in ('high', 'medium', 'low')),
+  verified    boolean not null default false,
+  refs        jsonb not null default '[]'::jsonb,
+  based_on    jsonb not null default '{}'::jsonb,
+  status      text not null default 'new' check (status in ('new', 'saved', 'dismissed', 'resolved')),
+  -- Orden dentro de su respuesta.
+  position    smallint not null default 0,
+  checked_at  timestamptz not null default now(),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  foreign key (message_id, novel_id) references public.advisor_messages(id, novel_id) on delete set null (message_id)
+);
+create index if not exists advisor_observations_novel_idx on public.advisor_observations(novel_id, status);
+create index if not exists advisor_observations_message_idx on public.advisor_observations(message_id);
+
 -- Resumen global, derivado de las fichas (no del texto). based_on: { chapter_id: revision }.
 create table if not exists public.novel_digests (
   novel_id    uuid primary key references public.novels(id) on delete cascade,
@@ -339,7 +394,8 @@ do $$
 declare t text;
 begin
   foreach t in array array['novels', 'characters', 'relationships', 'places', 'facts', 'assets', 'character_images',
-                           'manuscript_images', 'story_threads', 'chapter_digests', 'novel_digests'] loop
+                           'manuscript_images', 'story_threads', 'chapter_digests', 'novel_digests',
+                           'advisor_conversations', 'advisor_observations'] loop
     execute format('drop trigger if exists %I_touch on public.%I', t, t);
     execute format('create trigger %I_touch before update on public.%I for each row execute function public.touch_row()', t, t);
   end loop;
@@ -667,7 +723,8 @@ begin
   -- Lectura del Consejero: fichas, cabos y resumen global se copian (son caros de rehacer)
   -- con sus ids reasignados. Una ficha al día de la original lo está en la copia (cuya
   -- revisión empieza en 0); una desactualizada sigue desactualizada (-1).
-  -- El uso de la IA (ai_usage) no se copia: es el historial de esa novela.
+  -- El uso de la IA (ai_usage), las conversaciones y las observaciones no se copian: son el
+  -- historial de esa novela.
   select coalesce(jsonb_object_agg(id, gen_random_uuid()), '{}') into m_thread from public.story_threads where novel_id = p_novel;
   insert into public.story_threads (id, novel_id, title, description, kind, status, status_by, origin, confirmed,
     opened_chapter_id, last_chapter_id, closed_chapter_id)
@@ -720,7 +777,8 @@ declare t text;
 begin
   foreach t in array array['novels', 'chapters', 'characters', 'relationships', 'places', 'facts', 'fact_characters',
                            'assets', 'character_images', 'manuscript_images', 'ai_usage',
-                           'story_threads', 'chapter_digests', 'novel_digests'] loop
+                           'story_threads', 'chapter_digests', 'novel_digests',
+                           'advisor_conversations', 'advisor_messages', 'advisor_observations'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('revoke all on public.%I from anon, authenticated', t);
     execute format('grant all on public.%I to service_role', t);

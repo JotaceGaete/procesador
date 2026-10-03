@@ -1,6 +1,6 @@
 # Consejero literario
 
-> Estado: **diseño aprobado. Fases 1, 2 y 3 implementadas** (ver "Estado de la implementación", al final). Decisiones del autor en "Decisiones tomadas", al final; prevalecen sobre el resto del documento.
+> Estado: **diseño aprobado. Fases 1 a 4 implementadas** (ver "Estado de la implementación", al final). Decisiones del autor en "Decisiones tomadas", al final; prevalecen sobre el resto del documento.
 
 ## Qué es, y qué no es
 
@@ -326,7 +326,7 @@ create table public.ai_usage (
 | **1 · Base sin IA** | Índice de menciones y estadísticas (última aparición, presencia por capítulo), informe léxico de repeticiones, mapa de la novela. Pestañas *Asistente / Consejero* en el panel, con *Consistencia, Personaje y Evolución* ya en el Consejero. Proveedores con roles y registro de uso (`ai_usage`). **Hecha.** | Ninguna |
 | **2 · Lectura de la novela** | `chapter_digests`, `story_threads`, `novel_digests`; vigencia por revisión y hash de párrafos; generación perezosa con estimación; sección *Cabos y lecturas* editable. **Hecha.** | Fichas y global, con el modelo económico |
 | **3 · Acciones del Consejero** | Recetas de contexto y planificador determinista; *Analizar capítulo*, *¿Cómo seguir?*, *Repeticiones*, *Cabos pendientes*, *Coherencia*, *Personajes*; tarjetas tipificadas con citas verificadas e *Ir al texto*. **Hecha.** | Respuestas del Consejero |
-| **4 · Conversación** | Conversaciones persistentes con compactación; guardar y descartar observaciones; *Proponer hecho* (hecho `suggested`); acciones sobre cabos; *Volver a comprobar* tras editar. | — |
+| **4 · Conversación** | Conversaciones persistentes con compactación; guardar y descartar observaciones; *Proponer hecho* (hecho `suggested`); acciones sobre cabos; *Volver a comprobar* tras editar. **Hecha.** | — |
 | **5 · Lectura profunda** | Herramientas de sólo lectura para que el modelo pida fichas, pasajes o capítulos (con topes); análisis de la novela completa con caché; integración con la Cronología cuando exista. | Consultas con herramientas |
 
 Cada fase es usable por sí misma. La 1 ya responde sin coste "¿hace cuánto que no aparece X?" y "¿qué expresiones repito?".
@@ -482,4 +482,34 @@ Cada fase es usable por sí misma. La 1 ya responde sin coste "¿hace cuánto qu
 - **Pruebas:**
   - unitarias del planificador y de la verificación de observaciones;
   - E2E de `tests/e2e/advice.test.mjs`: niveles del contexto, capítulos sin ficha, validación, modelo del Consejero y caché del marco, texto vivo, fichas en orden, datos calculados, pasajes de cabos, preguntas libres con capítulos nombrados, selección, JSON roto, la vista con *Ir*, la pregunta libre, *Enviar al Asistente* y la lectura previa de fichas.
+
+### Fase 4 · Conversación (implementada)
+
+- **Tablas nuevas:** `advisor_conversations`, `advisor_messages` y `advisor_observations`, con aislamiento por novela, RLS y sin acceso público. No se copian al duplicar: son el historial de esa novela.
+- **Conversaciones** (`src/lib/advisor/conversations.ts`):
+  - cada pregunta o acción de *Consultar* se guarda como un intercambio: el turno del autor, la respuesta del Consejero en Markdown (sin el bloque JSON), lo que leyó, el plan y el uso;
+  - la primera pregunta abre una conversación con ese título; las siguientes la continúan;
+  - el panel tiene un selector de conversaciones, *Nueva* y *Eliminar*, y recuerda por novela la que estaba abierta.
+- **Compactación:**
+  - a cada consulta van literales los últimos tres intercambios;
+  - los anteriores se resumen con el **modelo económico** (registrado como `digest`) en cuanto salen de esa ventana, y el resumen va como «Resumen de lo hablado antes»;
+  - la compactación ocurre al hacer la pregunta siguiente, nunca en una estimación (`dryRun`).
+- **Observaciones guardadas:**
+  - cada tarjeta se guarda con estado (*nueva*, *guardada*, *descartada* o *resuelta*), su orden, sus referencias verificadas y `based_on`, las revisiones de los capítulos en que se apoya: el foco, los capítulos leídos completos y los de sus citas;
+  - antes de cada consulta se guarda el capítulo abierto, para que la revisión registrada sea la del texto leído;
+  - acciones: *Guardar*, *Descartar* (queda plegada y se puede *Restaurar*), *Marcar resuelta* y *Reabrir*;
+  - la vista **Guardadas** lista las pendientes y las resueltas;
+  - al eliminar una conversación se conservan las observaciones guardadas, sin su mensaje.
+- **Volver a comprobar** (§6):
+  - si cambió un capítulo en que se apoya, la tarjeta dice «Basada en una versión anterior del capítulo N»;
+  - *Volver a comprobar* busca otra vez sus citas en el texto actual, sin IA: las que siguen quedan verificadas y la observación pasa a apoyarse en las revisiones nuevas; las que ya no están se marcan;
+  - *Preguntar de nuevo* le pide al Consejero, en la misma conversación, que la reconsidere con el texto actual.
+- **Proponer hecho** (tarjetas de problema, contradicción o cabo):
+  - abre un formulario con el texto propuesto, que el autor puede editar, y lo añade a la Memoria como hecho `suggested`, con el capítulo de su primera cita verificada y los personajes que nombra;
+  - en *Memoria → Hechos* aparece como «Sugerido por el Consejero, sin aprobar», con una casilla para aprobarlo;
+  - mientras no se aprueba, ni el Asistente ni el Consejero lo usan como canon;
+  - la API de hechos acepta y valida `status`.
+- **Acciones sobre cabos** (tarjetas de cabo): si la observación nombra un cabo existente y abierto, *Marcar cabo «…» cerrado* (estado decidido por el autor); si no, *Crear cabo*.
+- **Ninguna acción escribe en el manuscrito.**
+- **Pruebas:** E2E de `tests/e2e/conversation.test.mjs`: intercambios guardados y su orden, continuación con los turnos anteriores, compactación con el modelo económico, aislamiento, estados de las observaciones, «versión anterior» y *Volver a comprobar*, hechos sugeridos fuera del canon hasta aprobarse, borrado y duplicado, y en el panel: conversación, *Guardar*, *Descartar*, seguimiento, selector, *Guardadas*, *Volver a comprobar*, *Proponer hecho* y las acciones sobre cabos.
 

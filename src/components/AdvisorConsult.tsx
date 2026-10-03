@@ -1,12 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { chapterLabel } from "@/lib/ai/context";
+import { api, readPref, writePref } from "@/lib/client";
 import {
   ADVISOR_ACTIONS,
-  OBSERVATION_LABELS,
   PROVIDER_LABELS,
+  type AdvisorMessage,
+  type ConversationSummary,
+  type Fact,
+  type Memory,
+  type StoredObservation,
+  type StoryThread,
   type AdvisorAction,
   type AssistEvent,
   type ChapterInfo,
@@ -18,6 +24,7 @@ import {
 import type { Selection } from "./ChapterEditor";
 import { formatTokens } from "./format";
 import UsageLine from "./UsageLine";
+import ObservationCard, { type CardActions } from "./ObservationCard";
 
 interface Props {
   novelId: string;
@@ -32,12 +39,15 @@ interface Props {
   onGoTo(chapterId: string, start: number, end: number, text: string): void;
   /** An alternative of "¿Cómo seguir?" goes to the Asistente as the argument of a scene. */
   onSendToAssistant(text: string): void;
+  memory: Memory;
+  /** Saves the open chapter, so what an observation relied on is the saved revision. */
+  flush(): Promise<boolean>;
+  onFactAdded(f: Fact): void;
 }
 
 type Ask = { action?: AdvisorAction; question?: string; useSelection: boolean };
 type Unread = { id: string; title: string; estimate: number };
 
-const CONFIDENCE = { high: "confianza alta", medium: "confianza media", low: "confianza baja" };
 const OPEN_TAG = "<observaciones>";
 
 /** What streamed, without the observations block (or a half-written opening tag). */
@@ -69,6 +79,38 @@ export default function AdvisorConsult(p: Props) {
   const abort = useRef<AbortController | null>(null);
   useEffect(() => () => abort.current?.abort(), []);
 
+  // Conversations: the open one (null: a new one starts with the next question) and its history.
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [history, setHistory] = useState<AdvisorMessage[]>([]);
+  // The live answer was stored and now shows in the history.
+  const [stored, setStored] = useState(false);
+  const [threads, setThreads] = useState<StoryThread[]>([]);
+
+  const loadList = useCallback(async () => {
+    setConversations(await api<ConversationSummary[]>(`/api/novels/${p.novelId}/conversations`).catch(() => []));
+  }, [p.novelId]);
+  const loadThreads = useCallback(async () => {
+    setThreads(await api<StoryThread[]>(`/api/novels/${p.novelId}/threads`).catch(() => []));
+  }, [p.novelId]);
+  // keepLast: after a stored answer, "Probar con" still repeats it.
+  const open = useCallback(async (id: string | null, keepLast = false) => {
+    setConversationId(id);
+    // Remembered per novel: switching views or reloading comes back to it.
+    writePref(`conversation:${p.novelId}`, id ?? "");
+    if (!keepLast) {
+      setLast(null);
+      setStored(false);
+    }
+    setHistory(id ? (await api<{ messages: AdvisorMessage[] }>(`/api/conversations/${id}`)).messages : []);
+  }, [p.novelId]);
+  useEffect(() => {
+    loadList();
+    loadThreads();
+    const last = readPref(`conversation:${p.novelId}`);
+    if (last) open(last).catch(() => open(null));
+  }, [loadList, loadThreads, open, p.novelId]);
+
   const index = new Map(p.chapters.map((c, i) => [c.id, i]));
   const label = (id: string) => (index.has(id) ? chapterLabel(index.get(id)!, p.chapters[index.get(id)!].title) : "capítulo desconocido");
 
@@ -81,6 +123,7 @@ export default function AdvisorConsult(p: Props) {
       question: ask.question,
       selection: ask.useSelection && p.selection ? { start: p.selection.start, end: p.selection.end } : null,
       provider: using,
+      conversationId,
     };
   }
 
@@ -93,6 +136,7 @@ export default function AdvisorConsult(p: Props) {
 
   async function run(ask: Ask, using: ProviderId) {
     abort.current?.abort();
+    setStored(false);
     const controller = new AbortController();
     abort.current = controller;
     setRunning(true);
@@ -104,7 +148,9 @@ export default function AdvisorConsult(p: Props) {
     setParts(null);
     setUsage(null);
     setPlan(null);
+    let savedTo: string | null = null;
     try {
+      await p.flush();
       // What it would read, and which chapters it would like read first.
       const dry = await (await post("/api/advisor", { ...body(ask, using), dryRun: true }, controller.signal)).json();
       setPlan(dry.plan);
@@ -148,7 +194,8 @@ export default function AdvisorConsult(p: Props) {
           else if (e.type === "observations") {
             setCards(e.items);
             setInvalid(Boolean(e.invalid));
-          } else if (e.type === "refusal" || e.type === "error") setNotice(e.message);
+          } else if (e.type === "saved") savedTo = e.conversationId;
+          else if (e.type === "refusal" || e.type === "error") setNotice(e.message);
           else if (e.type === "truncated") setNotice("La respuesta se cortó por longitud.");
         }
       }
@@ -158,13 +205,110 @@ export default function AdvisorConsult(p: Props) {
       setProgress(null);
       if (abort.current === controller) setRunning(false);
     }
+    // Stored: it now belongs to the conversation's history, where its cards can be acted on.
+    if (savedTo) {
+      setStored(true);
+      // Threads may have changed (reading chapters first, or elsewhere): the cards act on the current ones.
+      await Promise.all([open(savedTo, true), loadThreads()]);
+      if (ask.question) setQuestion("");
+      await loadList();
+    }
   }
 
   const ask = (a: Ask) => p.provider && run(a, p.provider);
   const others = p.providers.filter((x) => x !== last?.provider);
+  const update = (o: StoredObservation) =>
+    setHistory((h) => h.map((m) => ({ ...m, observations: m.observations.map((x) => (x.id === o.id ? o : x)) })));
+  const actions: CardActions = {
+    novelId: p.novelId,
+    memory: p.memory,
+    threads,
+    label,
+    onChanged: update,
+    onThreadsChanged: loadThreads,
+    onFactAdded: p.onFactAdded,
+    onAskAgain: (o) =>
+      ask({ question: `Vuelve a comprobar esta observación con el texto actual: «${o.title}». ${o.body}`, useSelection: false }),
+  };
+  const lastAdvisor = [...history].reverse().find((m) => m.role === "advisor");
 
   return (
     <div className="consult">
+      <div className="conversation-bar">
+        <select
+          aria-label="Conversación"
+          value={conversationId ?? ""}
+          disabled={running}
+          onChange={(e) => open(e.target.value || null)}
+        >
+          <option value="">Nueva conversación</option>
+          {conversations.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.title || "Sin título"}
+            </option>
+          ))}
+        </select>
+        {conversationId && (
+          <>
+            <button className="link small" disabled={running} onClick={() => open(null)}>
+              Nueva
+            </button>
+            <button
+              className="link small danger"
+              disabled={running}
+              onClick={async () => {
+                if (!confirm("¿Eliminar esta conversación? Las observaciones guardadas se conservan.")) return;
+                await api(`/api/conversations/${conversationId}`, { method: "DELETE" });
+                await open(null);
+                await loadList();
+              }}
+            >
+              Eliminar
+            </button>
+          </>
+        )}
+      </div>
+      {history.length > 0 && (
+        <ol className="history" aria-label="Conversación">
+          {history.map((m, k) =>
+            m.role === "author" ? (
+              <li key={m.id} className="turn author">
+                {m.content}
+              </li>
+            ) : (
+              <li key={m.id} className="turn advisor">
+                {m.context?.plan && (
+                  <p className="muted small plan">
+                    {history[k - 1]?.content !== m.context.plan.label ? "Entendí la pregunta como: " : ""}
+                    <strong>{m.context.plan.label}</strong>
+                    {m.context.plan.detail ? ` · ${m.context.plan.detail}` : ""}
+                  </p>
+                )}
+                {m.content && (
+                  <div className="markdown">
+                    <ReactMarkdown>{m.content}</ReactMarkdown>
+                  </div>
+                )}
+                {m.observations.length > 0 && (
+                  <ul className="observations">
+                    {m.observations.map((o) => (
+                      <ObservationCard
+                        key={o.id}
+                        o={o}
+                        label={label}
+                        onGoTo={p.onGoTo}
+                        onSendToAssistant={p.onSendToAssistant}
+                        actions={actions}
+                      />
+                    ))}
+                  </ul>
+                )}
+                {m === lastAdvisor && m.context?.parts && <UsageLine parts={m.context.parts} usage={m.context.usage ?? null} />}
+              </li>
+            ),
+          )}
+        </ol>
+      )}
       <div className="actions advisor-actions" role="group" aria-label="Acciones del Consejero">
         {ADVISOR_ACTIONS.map((a) => (
           <button key={a.id} title={a.hint} disabled={running || !p.provider} onClick={() => ask({ action: a.id, useSelection })}>
@@ -189,7 +333,9 @@ export default function AdvisorConsult(p: Props) {
           rows={2}
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          placeholder="Pregúntale al Consejero… Ej.: ¿Revelo demasiado pronto lo de la carta?"
+          placeholder={
+            conversationId ? "Sigue la conversación…" : "Pregúntale al Consejero… Ej.: ¿Revelo demasiado pronto lo de la carta?"
+          }
           aria-label="Pregunta al Consejero"
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) e.currentTarget.form?.requestSubmit();
@@ -211,7 +357,7 @@ export default function AdvisorConsult(p: Props) {
       </form>
       {!p.provider && <p className="error">No hay proveedor de IA configurado.</p>}
 
-      {last && (
+      {last && !stored && (
         <section className="result advisor-result" aria-live="polite">
           {plan && (
             <p className="muted small plan">
@@ -229,69 +375,34 @@ export default function AdvisorConsult(p: Props) {
           {running && !text && !progress && <p className="muted">Pensando…</p>}
           {cards && cards.length > 0 && (
             <ul className="observations">
-              {cards.map((o, i) => (
-                <li key={i} className={`observation obs-${o.kind}${o.verified ? "" : " unverified"}`}>
-                  <p className="obs-head">
-                    <span className="obs-kind">{OBSERVATION_LABELS[o.kind]}</span>
-                    <span className="muted small"> · {CONFIDENCE[o.confidence]}</span>
-                  </p>
-                  <p className="obs-title">{o.title}</p>
-                  {o.body && <p className="obs-body">{o.body}</p>}
-                  {o.refs.length > 0 && (
-                    <ul className="obs-refs">
-                      {o.refs.map((r, j) => (
-                        <li key={j} className={r.verified ? "verified" : "unverified"}>
-                          {r.verified && r.at ? (
-                            <>
-                              <span className="muted small">{label(r.chapterId)}:</span> «{r.quote}»{" "}
-                              <button className="link small" onClick={() => p.onGoTo(r.chapterId, r.at!.start, r.at!.end, r.quote)}>
-                                Ir
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              «{r.quote}» <span className="muted small">— no aparece en el texto</span>
-                            </>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {!o.verified && (
-                    <p className="muted small impression">Impresión: sin cita verificable en el manuscrito.</p>
-                  )}
-                  {o.kind === "alternative" && (
-                    <button className="link small" onClick={() => p.onSendToAssistant(`${o.title}. ${o.body}`)}>
-                      Enviar al Asistente
-                    </button>
-                  )}
-                </li>
+              {cards.map((o, k) => (
+                <ObservationCard key={k} o={o} label={label} onGoTo={p.onGoTo} onSendToAssistant={p.onSendToAssistant} />
               ))}
             </ul>
           )}
           {invalid && <p className="notice small">Las observaciones llegaron mal formadas y no se muestran; el texto sí.</p>}
           {notice && <p className="notice">{notice}</p>}
           {!running && (parts || usage) && <UsageLine parts={parts} usage={usage} />}
-          {!running && others.length > 0 && (
-            <p className="retry-with muted small">
-              Probar con{" "}
-              {others.map((x, i) => (
-                <span key={x}>
-                  {i > 0 && " · "}
-                  <button
-                    className="link"
-                    onClick={() => {
-                      p.onProvider(x);
-                      run(last, x);
-                    }}
-                  >
-                    {PROVIDER_LABELS[x]}
-                  </button>
-                </span>
-              ))}
-            </p>
-          )}
         </section>
+      )}
+      {last && !running && others.length > 0 && (
+        <p className="retry-with muted small">
+          Probar con{" "}
+          {others.map((x, i) => (
+            <span key={x}>
+              {i > 0 && " · "}
+              <button
+                className="link"
+                onClick={() => {
+                  p.onProvider(x);
+                  run(last, x);
+                }}
+              >
+                {PROVIDER_LABELS[x]}
+              </button>
+            </span>
+          ))}
+        </p>
       )}
     </div>
   );

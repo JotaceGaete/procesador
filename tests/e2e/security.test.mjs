@@ -25,6 +25,14 @@ const ROUTES = [
   ["POST", "/api/assist"],
   ["POST", `/api/novels/${U}/advisor`],
   ["POST", "/api/advisor"],
+  ["GET", `/api/novels/${U}/conversations`],
+  ["GET", `/api/novels/${U}/observations`],
+  ["GET", `/api/novels/${U}/threads`],
+  ["GET", `/api/conversations/${U}`],
+  ["PATCH", `/api/conversations/${U}`],
+  ["DELETE", `/api/conversations/${U}`],
+  ["PATCH", `/api/observations/${U}`],
+  ["POST", `/api/observations/${U}/recheck`],
   ["GET", `/api/novels/${U}/reading`],
   ["POST", `/api/novels/${U}/digest`],
   ["POST", `/api/novels/${U}/threads`],
@@ -129,6 +137,9 @@ test("the public (anon) key can't read tables or call functions", async () => {
     "story_threads",
     "chapter_digests",
     "novel_digests",
+    "advisor_conversations",
+    "advisor_messages",
+    "advisor_observations",
   ]) {
     const res = await fetch(`${STACK}/rest/v1/${table}`, { headers });
     assert.ok([401, 403].includes(res.status), `${table}: ${res.status}`);

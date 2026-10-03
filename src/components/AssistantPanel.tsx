@@ -9,6 +9,7 @@ import {
   type AIPanelSection,
   type AssistEvent,
   type ChapterInfo,
+  type Fact,
   type ContextPart,
   type EditAction,
   type Memory,
@@ -23,6 +24,7 @@ import type { Selection } from "./ChapterEditor";
 import AdvisorOverview from "./AdvisorOverview";
 import AdvisorReading from "./AdvisorReading";
 import AdvisorConsult from "./AdvisorConsult";
+import AdvisorSaved from "./AdvisorSaved";
 import { formatTokens } from "./format";
 import UsageLine from "./UsageLine";
 
@@ -38,6 +40,7 @@ interface Props {
   flush(): Promise<boolean>;
   onAutoDigest(on: boolean): void;
   chapters: ChapterInfo[];
+  onFactAdded(f: Fact): void;
   onClose(): void;
   novelId: string;
   chapterId: string;
@@ -119,6 +122,7 @@ function AssistantPanel(props: Props) {
     flush,
     onAutoDigest,
     chapters,
+    onFactAdded,
     onClose,
     novelId,
     chapterId,
@@ -135,7 +139,7 @@ function AssistantPanel(props: Props) {
   } = props;
 
   const [assistantMode, setMode] = useState<Mode>("edit");
-  const [advisorView, setAdvisorView] = useState<"consult" | "selection" | "overview" | "reading">("consult");
+  const [advisorView, setAdvisorView] = useState<"consult" | "saved" | "selection" | "overview" | "reading">("consult");
   // Each section remembers its own action.
   const [actions, setActions] = useState<Record<AIPanelSection, EditAction>>({
     assistant: "redaccion",
@@ -344,6 +348,13 @@ function AssistantPanel(props: Props) {
     setUsage(null);
   };
 
+  // The author chose a path of "¿Cómo seguir?": the Asistente gets it as the argument of a scene.
+  const sendToAssistant = (text: string) => {
+    setArgument(text);
+    setMode("scene");
+    onSection("assistant");
+  };
+
   // Views of the Consejero that are not a request about the selection.
   const overview = section === "advisor" && advisorView !== "selection";
   const showResult = !overview && last && last.section === section && last.mode === mode && (output || running || notice);
@@ -436,6 +447,9 @@ function AssistantPanel(props: Props) {
           <button className={advisorView === "consult" ? "on" : undefined} onClick={() => setAdvisorView("consult")}>
             Consultar
           </button>
+          <button className={advisorView === "saved" ? "on" : undefined} onClick={() => setAdvisorView("saved")}>
+            Guardadas
+          </button>
           <button className={advisorView === "selection" ? "on" : undefined} onClick={() => setAdvisorView("selection")}>
             Sobre la selección
           </button>
@@ -466,14 +480,21 @@ function AssistantPanel(props: Props) {
               confirmTokens={confirmTokens}
               getContent={getContent}
               onGoTo={onGoTo}
-              onSendToAssistant={(text) => {
-                // The author chose a path: the Asistente gets it as the argument of a scene.
-                setArgument(text);
-                setMode("scene");
-                onSection("assistant");
-              }}
+              memory={memory}
+              flush={flush}
+              onFactAdded={onFactAdded}
+              onSendToAssistant={sendToAssistant}
             />
           </>
+        ) : advisorView === "saved" ? (
+          <AdvisorSaved
+            novelId={novelId}
+            chapters={chapters}
+            memory={memory}
+            onGoTo={onGoTo}
+            onSendToAssistant={sendToAssistant}
+            onFactAdded={onFactAdded}
+          />
         ) : advisorView === "overview" ? (
           <AdvisorOverview novelId={novelId} chapterId={chapterId} memory={memory} getContent={getContent} onGoTo={onGoTo} />
         ) : (

@@ -7,7 +7,8 @@ import { splitAnswer, verifyObservations } from "@/lib/advisor/observations";
 import { extractJson } from "@/lib/ai/structured";
 import { getProvider } from "@/lib/ai/providers";
 import { recordUsage } from "@/lib/ai/usage";
-import type { AdvisorAction, AssistEvent, ProviderId } from "@/lib/types";
+import { conversationContext, getConversation, saveExchange } from "@/lib/advisor/conversations";
+import type { AdvisorAction, AssistEvent, Observation, ProviderId, Usage } from "@/lib/types";
 
 export const maxDuration = 300;
 
@@ -22,15 +23,26 @@ export const POST = handler(async (request) => {
   const provider = getProvider(body.provider as ProviderId);
   if (!provider && !body.dryRun) throw new HttpError(400, "Ese proveedor de IA no está configurado.");
   const sel = body.selection as { start?: unknown; end?: unknown } | null;
+  const novelId = String(body.novelId ?? "");
+  // Continuing a conversation: its summary and last turns go with the question
+  // (compacting the older ones first if needed; never on a dry run).
+  const conversationId = typeof body.conversationId === "string" && body.conversationId ? body.conversationId : null;
+  let conversation: { text: string; messages: number } | null = null;
+  if (conversationId) {
+    const c = await getConversation(conversationId);
+    if (c.novel_id !== novelId) throw new HttpError(404, "Conversación no encontrada");
+    if (!body.dryRun) conversation = await conversationContext({ conversationId, novelId, provider: body.provider as ProviderId, signal: request.signal });
+  }
   const advice = await buildAdvice(
     {
-      novelId: String(body.novelId ?? ""),
+      novelId,
       chapterId: String(body.chapterId ?? ""),
       content: typeof body.content === "string" ? body.content : "",
       action: typeof body.action === "string" ? (body.action as AdvisorAction) : undefined,
       question: typeof body.question === "string" ? body.question : undefined,
       selection: sel && Number.isFinite(Number(sel.start)) ? { start: Number(sel.start), end: Number(sel.end) } : null,
       characterIds: Array.isArray(body.characterIds) ? body.characterIds.filter((x): x is string => typeof x === "string") : [],
+      conversation: conversation?.text,
     },
     request.signal,
   );
@@ -49,7 +61,10 @@ export const POST = handler(async (request) => {
   const send = (c: ReadableStreamDefaultController<Uint8Array>, e: AssistEvent) => c.enqueue(encoder.encode(`${JSON.stringify(e)}\n`));
   const generator = provider!.stream(advice.request);
   let text = "";
+  let model: string | null = null;
+  let usage: Usage | null = null;
   let ended = false;
+  const question = typeof body.question === "string" && body.question.trim() ? body.question.trim().slice(0, 2000) : plan.label;
   const stream = new ReadableStream<Uint8Array>({
     start(c) {
       send(c, { type: "context", parts: advice.parts });
@@ -61,18 +76,38 @@ export const POST = handler(async (request) => {
         const { value, done } = await generator.next();
         if (!done) {
           if (value.type === "text") text += value.text;
-          if (value.type === "usage") await recordUsage(advice.novelId, "advise", body.provider as ProviderId, value);
+          if (value.type === "usage") {
+            model = value.model;
+            usage = value;
+            await recordUsage(advice.novelId, "advise", body.provider as ProviderId, value);
+          }
           send(c, value);
           return;
         }
         // The cards, validated and verified, once the whole answer is in.
-        const { json } = splitAnswer(text);
+        const { markdown, json } = splitAnswer(text);
+        let items: Observation[] = [];
         if (json !== null) {
           try {
-            send(c, { type: "observations", items: verifyObservations(parseList(json), advice.chapters) });
+            items = verifyObservations(parseList(json), advice.chapters);
+            send(c, { type: "observations", items });
           } catch {
             send(c, { type: "observations", items: [], invalid: true });
           }
+        }
+        // Stored as an exchange of the conversation (a new one if none was given).
+        if (markdown || items.length) {
+          const saved = await saveExchange({
+            novelId: advice.novelId,
+            conversationId,
+            title: question,
+            question,
+            answer: markdown,
+            context: { parts: advice.parts, plan: { label: plan.label, detail: plan.detail }, model, usage },
+            observations: items,
+            basedOn: advice.basedOn,
+          });
+          send(c, { type: "saved", ...saved });
         }
         ended = true;
         c.close();

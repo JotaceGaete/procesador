@@ -16,6 +16,7 @@ export const POST = handler<Ctx>(async (request, { params }) => {
   const body = await readJson(request);
   const fields = pickFields(body, config.fields, config.nullable);
   if (!fields[config.required]?.trim()) throw new HttpError(400, config.label);
+  if ("status" in fields && !["approved", "suggested"].includes(String(fields.status))) throw new HttpError(400, "Estado de hecho desconocido.");
 
   if (kind === "characters") {
     const { count, error } = await db().from("characters").select("id", { count: "exact", head: true }).eq("novel_id", novel.id);

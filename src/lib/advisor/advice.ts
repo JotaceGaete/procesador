@@ -55,6 +55,8 @@ export interface AdviceInput {
   question?: string;
   selection?: { start: number; end: number } | null;
   characterIds?: string[];
+  /** The conversation so far (summary and last turns), when continuing one. */
+  conversation?: string;
 }
 
 export interface Advice {
@@ -66,6 +68,8 @@ export interface Advice {
   detail: string;
   /** Chapters (with the live one) to verify quotes against. */
   chapters: { id: string; content: string }[];
+  /** Revisions of the chapters the answer reads complete (the focus and named ones). */
+  basedOn: Record<string, number>;
   /** Chapters the recipe reads through their digest that have none, or a stale one. */
   unread: { id: string; title: string; estimate: number }[];
 }
@@ -291,6 +295,11 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
   }
   if (data.length) blocks.push(part("Datos calculados", `<datos>\n${data.join("\n\n")}\n</datos>`));
 
+  // ---------- the conversation so far ----------
+  if (input.conversation) {
+    blocks.push(part("Conversación", `<conversacion>\n${input.conversation}\n</conversacion>`));
+  }
+
   // ---------- task ----------
   const task = ADVISE_TASKS[plan.action](label(index));
   const ask = question ? `${task}\n\nPregunta del autor: ${question}` : task;
@@ -332,6 +341,7 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
     plan,
     detail,
     chapters: chapters.map((c) => ({ id: c.id, content: c.content })),
+    basedOn: Object.fromEntries([index, ...named].map((i) => [rows[i].id, rows[i].revision])),
     unread,
   };
 }

@@ -26,7 +26,10 @@ export interface CompletionRequest {
   cacheProject?: boolean;
 }
 
-type ProviderEvent = Exclude<AssistEvent, { type: "error" } | { type: "context" } | { type: "plan" } | { type: "observations" }>;
+type ProviderEvent = Exclude<
+  AssistEvent,
+  { type: "error" } | { type: "context" } | { type: "plan" } | { type: "observations" } | { type: "saved" }
+>;
 
 /** The usage event every provider yields once, before a refusal or truncation. */
 function usage(model: string, input: number, cached: number, output: number): ProviderEvent {

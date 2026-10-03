@@ -23,6 +23,9 @@ Procesador de textos personal para escribir novelas con asistencia de IA. Tú im
     - La respuesta trae observaciones con tipo, confianza y citas comprobadas en el texto, cada una con *Ir*. Lo que no se puede verificar se presenta como impresión.
     - *¿Cómo seguir?* propone caminos, no escribe la continuación; uno se puede *Enviar al Asistente*.
     - Antes de responder lee los capítulos que no tengan ficha.
+    - Las consultas forman conversaciones que se pueden continuar; lo más antiguo se resume solo.
+    - Cada observación se puede guardar, descartar, marcar resuelta, volver a comprobar tras editar o convertir en un hecho sugerido para la Memoria.
+  - *Guardadas*: las observaciones que conservaste, con aviso si el capítulo cambió desde entonces.
   - *Sobre la selección*: Consistencia, Personaje y Evolución, con el modelo del Consejero.
   - *Panorama*, sin IA, medido en el texto:
     - cuánto hace que no aparece cada personaje;

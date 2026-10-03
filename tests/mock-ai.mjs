@@ -20,6 +20,10 @@ const EDIT_KEEP = "Bien.\n\n<reescritura>Primero la imagen.\n\n[IMAGEN 1]\n\nY e
  *   "JSON-SIEMPRE-ROTO"   never valid
  */
 function readingReply(system, user) {
+  if (system.includes("<resumen-conversacion>")) {
+    const n = (user.match(/^\[(Autor|Consejero)\]/gm) ?? []).length;
+    return JSON.stringify({ summary: `Resumen de la conversación: ${n} mensajes anteriores.` });
+  }
   if (system.includes("<resumen-global>")) {
     const n = (user.match(/<ficha /g) ?? []).length;
     return JSON.stringify({ summary: `Resumen global a partir de ${n} fichas de capítulo, con sus cabos.` });
@@ -75,6 +79,10 @@ function adviceReply(system, user) {
     { kind: "problem", title: "Una impresión", body: "Algo no termina de encajar.", confidence: "high", refs: [{ chapter: n, quote: "una cita que el modelo inventó" }] },
     { kind: "opportunity", title: "Mal atribuida", body: "Cita del capítulo abierto, con otro número.", confidence: "low", refs: [{ chapter: n === 1 ? 2 : 1, quote }] },
   ];
+  if (task.includes("Revisa los cabos")) {
+    cards.push({ kind: "thread", title: "La carta de Marta sigue abierta", body: "No aparece desde hace tiempo.", confidence: "medium", refs: [] });
+    cards.push({ kind: "thread", title: "El viaje a Cartagena", body: "Se insinúa y no se retoma.", confidence: "low", refs: [] });
+  }
   if (task.includes("caminos razonables")) {
     for (const t of ["Seguir el conflicto", "Recuperar un cabo", "Cambiar de personaje"])
       cards.push({ kind: "alternative", title: t, body: `${t}: qué aprovecha de lo escrito.`, confidence: "medium", refs: [{ chapter: n, quote }] });

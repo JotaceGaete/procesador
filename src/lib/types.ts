@@ -296,7 +296,9 @@ export type AssistEvent =
   | ({ type: "usage" } & Usage)
   /** Consejero: how a free question was understood, and the verified cards at the end. */
   | { type: "plan"; action: string; label: string; detail: string }
-  | { type: "observations"; items: Observation[]; invalid?: boolean };
+  | { type: "observations"; items: Observation[]; invalid?: boolean }
+  /** Consejero: the exchange is stored; ids to act on the cards. */
+  | { type: "saved"; conversationId: string; messageId: string; observationIds: string[] };
 
 // ---------------------------------------------------------------------------
 // Consejero: the reading of the novel (docs/consejero.md, phase 2)
@@ -424,4 +426,36 @@ export interface Observation {
   refs: ObservationRef[];
   /** False when none of its references could be found in the manuscript: an impression. */
   verified: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Consejero: conversations and stored observations (phase 4)
+// ---------------------------------------------------------------------------
+
+export type ObservationStatus = "new" | "saved" | "dismissed" | "resolved";
+
+export interface StoredObservation extends Observation {
+  id: string;
+  message_id: string | null;
+  status: ObservationStatus;
+  based_on: Record<string, number>;
+  checked_at: string;
+  created_at: string;
+  /** Chapters it relied on that changed since (computed when read). */
+  changed: string[];
+}
+
+export interface AdvisorMessage {
+  id: string;
+  role: "author" | "advisor";
+  content: string;
+  context: { parts?: ContextPart[]; plan?: { label: string; detail: string }; model?: string; usage?: Usage | null } | null;
+  created_at: string;
+  observations: StoredObservation[];
+}
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  updated_at: string;
 }

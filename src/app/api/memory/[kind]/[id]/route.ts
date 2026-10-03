@@ -20,6 +20,7 @@ export const PATCH = handler<Ctx>(async (request, { params }) => {
   const body = await readJson(request);
   const fields = pickFields(body, config.fields, config.nullable);
   if (config.required in fields && !fields[config.required]?.trim()) throw new HttpError(400, config.label);
+  if ("status" in fields && !["approved", "suggested"].includes(String(fields.status))) throw new HttpError(400, "Estado de hecho desconocido.");
   const characterIds = kind === "facts" ? readCharacterIds(body.character_ids) : undefined;
   if (!Object.keys(fields).length && !characterIds) throw new HttpError(400, "Nada que guardar");
 

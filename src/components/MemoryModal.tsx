@@ -176,7 +176,8 @@ export default function MemoryModal({
         .filter(Boolean)
         .join(", "),
     ];
-    return [f.text, meta.filter(Boolean).join(" · ")];
+    // A fact the Consejero proposed is not canon until the author approves it.
+    return [f.text, [f.status === "suggested" ? "Sugerido por el Consejero, sin aprobar" : "", ...meta].filter(Boolean).join(" · ")];
   };
 
   const blank = (): Draft => {
@@ -184,7 +185,7 @@ export default function MemoryModal({
     if (tab === "places") return { name: "", aliases: "", description: "", notes: "" };
     if (tab === "relationships")
       return { from_id: memory.characters[0]?.id ?? "", kind: "", to_id: memory.characters[1]?.id ?? "", note: "" };
-    return { text: "", chapter_id: null, place_id: null, story_time: "", note: "", character_ids: [] };
+    return { text: "", chapter_id: null, place_id: null, story_time: "", note: "", character_ids: [], status: "approved" };
   };
   const toDraft = (item: { id: string }): Draft => {
     const d: Draft = {};
@@ -332,6 +333,16 @@ export default function MemoryModal({
 
           {tab === "facts" && (
             <>
+              {JSON.parse(editing.original).status === "suggested" && (
+                <label className="check suggested-fact">
+                  <input
+                    type="checkbox"
+                    checked={d.status === "approved"}
+                    onChange={(e) => set("status", e.target.checked ? "approved" : "suggested")}
+                  />
+                  <span>Aprobar: lo propuso el Consejero y aún no cuenta como canon</span>
+                </label>
+              )}
               <Field
                 label="Hecho"
                 hint="Ej.: Pedro perdió dos dedos de la mano izquierda."

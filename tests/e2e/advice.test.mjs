@@ -14,6 +14,7 @@ const T2 = "Juan llegó tarde al puerto.\n\nElena lo esperaba con la carta en la
 const LIVE =
   "Elena recordó los veranos en Cartagena, frente al mar.\n\nLa lámpara temblaba sobre la mesa. Afuera, la lámpara temblaba sobre la mesa del vecino.";
 
+const cardsOf = (list) => list.find((e) => e.type === "observations");
 const advise = (extra) =>
   call("/api/advisor", "POST", { novelId: novel, chapterId: ch[2], content: LIVE, provider: "anthropic", ...extra });
 async function usageRows(purpose) {
@@ -75,7 +76,7 @@ test("Analizar capítulo: the Consejero's model, a cached frame, the live chapte
   await clearAiLog();
   const list = events((await advise({ action: "analizar" })).data);
   assert.deepEqual(list.slice(0, 2).map((e) => e.type), ["context", "plan"]);
-  assert.equal(list.at(-1).type, "observations", "the cards come last");
+  assert.deepEqual(list.slice(-2).map((e) => e.type), ["observations", "saved"], "the cards come last, then the exchange is stored");
   assert.ok(list.some((e) => e.type === "usage"));
 
   const [sent] = await aiLog();
@@ -100,7 +101,7 @@ test("Analizar capítulo: the Consejero's model, a cached frame, the live chapte
 
 test("observations: verified quotes point at the text; an invented one is an impression; a misattributed one is moved", async () => {
   const list = events((await advise({ action: "analizar" })).data);
-  const [ok, invented, moved] = list.at(-1).items;
+  const [ok, invented, moved] = cardsOf(list).items;
   assert.deepEqual([ok.verified, ok.refs[0].chapterId], [true, ch[2]]);
   assert.equal(LIVE.slice(ok.refs[0].at.start, ok.refs[0].at.end), ok.refs[0].quote);
   assert.equal(invented.verified, false);
@@ -112,7 +113,7 @@ test("observations: verified quotes point at the text; an invented one is an imp
 test("¿Cómo seguir?: paths as alternatives, never the continuation itself", async () => {
   await clearAiLog();
   const list = events((await advise({ action: "seguir" })).data);
-  const alternatives = list.at(-1).items.filter((o) => o.kind === "alternative");
+  const alternatives = cardsOf(list).items.filter((o) => o.kind === "alternative");
   assert.equal(alternatives.length, 3);
   const prompt = (await aiLog())[0].body.messages[0].content;
   assert.match(prompt, /Propón de 3 a 4 caminos razonables/);
@@ -151,7 +152,7 @@ test("free question: the planner's reading is shown; named chapters go complete;
 test("broken observations: the text still arrives, the cards are reported as invalid", async () => {
   const list = events((await advise({ question: "OBS-ROTAS ¿funciona el ritmo?" })).data);
   assert.ok(list.some((e) => e.type === "text" && e.text.includes("Lectura del Consejero")));
-  assert.deepEqual(list.at(-1), { type: "observations", items: [], invalid: true });
+  assert.deepEqual(cardsOf(list), { type: "observations", items: [], invalid: true });
 });
 
 // ---------------------------------------------------------------- panel
@@ -172,11 +173,11 @@ test("panel: Consultar runs an action; cards show their references; Ir selects t
   await page.locator(".topbar .link", { hasText: "Consejero" }).click();
   const panel = page.locator("aside.panel");
   await panel.getByRole("button", { name: "Analizar capítulo" }).click();
-  const cards = panel.locator(".observation");
+  const cards = panel.locator(".turn.advisor .observation");
   await cards.first().waitFor({ timeout: 15_000 });
   assert.equal(await cards.count(), 3);
-  assert.match(await panel.locator(".advisor-result .markdown").innerText(), /Lectura del Consejero/);
-  assert.doesNotMatch(await panel.locator(".advisor-result").innerText(), /<observaciones>|"kind"/, "no raw JSON on screen");
+  assert.match(await panel.locator(".turn.advisor .markdown").innerText(), /Lectura del Consejero/);
+  assert.doesNotMatch(await panel.locator(".consult").innerText(), /<observaciones>|"kind"/, "no raw JSON on screen");
   assert.match(await cards.nth(1).innerText(), /Impresión: sin cita verificable/);
   assert.match(await panel.locator(".usage-line").innerText(), /Leyó: marco/);
 
@@ -190,8 +191,9 @@ test("panel: a free question shows how it was understood", async () => {
   const panel = page.locator("aside.panel");
   await panel.getByRole("textbox", { name: "Pregunta al Consejero" }).fill("¿Qué cabos dejé sin resolver?");
   await panel.getByRole("button", { name: "Preguntar" }).click();
-  await page.waitForFunction(() => /Entendí la pregunta como: Cabos pendientes/.test(document.querySelector(".advisor-result .plan")?.textContent ?? ""));
-  await panel.locator(".observation").first().waitFor();
+  await page.waitForFunction(() =>
+    /Entendí la pregunta como: Cabos pendientes/.test([...document.querySelectorAll(".turn.advisor .plan")].at(-1)?.textContent ?? ""),
+  );
 });
 
 test("panel: an alternative of ¿Cómo seguir? goes to the Asistente as a scene's argument", async () => {
@@ -218,10 +220,11 @@ test("panel: chapters without a digest are read first, then it answers", async (
   await page.locator(".topbar .link", { hasText: "Consejero" }).click();
   const panel = page.locator("aside.panel");
   await panel.getByRole("button", { name: "Consultar" }).click();
+  const turns = await panel.locator(".turn.advisor").count();
   await panel.getByRole("button", { name: "Personajes" }).click();
-  await panel.locator(".observation").first().waitFor({ timeout: 15_000 });
+  await page.waitForFunction((n) => document.querySelectorAll(".turn.advisor").length > n, turns, { timeout: 15_000 });
   const log = await aiLog();
-  assert.equal(log.length, 2, JSON.stringify(log.map((x) => x.body.system?.[0]?.text?.slice(0, 20))) + (await panel.locator(".advisor-result").innerText()));
+  assert.equal(log.length, 2, JSON.stringify(log.map((x) => x.body.system?.[0]?.text?.slice(0, 20))));
   assert.match(log[0].body.system[0].text, /<ficha-capitulo>/, "first, the missing digest");
   assert.match(log[1].body.system[0].text, /<consejero>/, "then the answer");
   assert.match(log[1].body.messages[0].content, /<ficha numero="2"/, "with that digest");

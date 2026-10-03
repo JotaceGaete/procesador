@@ -119,3 +119,9 @@ export const ADVISE_TASKS: Record<string, (chapter: string) => string> = {
   personajes: (c) =>
     `Analiza los personajes hasta ${c}: presencia (según los datos), evolución según las fichas, personajes desaprovechados o ausentes demasiado tiempo, y reacciones que no encajan con su ficha. Observaciones de tipo problem u opportunity.`,
 };
+
+export const CONVERSATION_SUMMARY_INSTRUCTIONS = `<resumen-conversacion>
+Resumes una conversación entre un autor y su consejero literario, para que el consejero recuerde lo hablado sin releerla entera.
+Conserva: las preguntas del autor, las conclusiones y observaciones principales, lo que el autor decidió o descartó, y lo que quedó pendiente. Omite saludos y repeticiones. De 80 a 250 palabras, en español.
+Responde SÓLO con un objeto JSON: { "summary": "el resumen" }
+</resumen-conversacion>`;

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AIPanelSection, Chapter, ChapterInfo, CharacterImage, ManuscriptImage, Memory, Novel, ProviderId } from "@/lib/types";
+import type { AIPanelSection, Chapter, Fact, ChapterInfo, CharacterImage, ManuscriptImage, Memory, Novel, ProviderId } from "@/lib/types";
 import { api, readPref, writePref } from "@/lib/client";
 import { chapterLabel } from "@/lib/ai/context";
 import type { SaveState } from "./useAutosave";
@@ -234,6 +234,8 @@ export default function Workspace({ novelId }: { novelId: string }) {
     [currentId],
   );
   const flush = useCallback(async () => !editorRef.current || (await editorRef.current.flush()), []);
+  // A fact the Consejero proposed (suggested): Memoria shows it at once.
+  const onFactAdded = useCallback((f: Fact) => setMemory((m) => ({ ...m, facts: [...m.facts, f] })), []);
   const onAutoDigest = useCallback((on: boolean) => setNovel((n) => (n ? { ...n, auto_digest: on } : n)), []);
   const getContent = useCallback(() => editorRef.current?.getContent() ?? "", []);
   const getCursor = useCallback(() => editorRef.current?.getCursor() ?? 0, []);
@@ -490,6 +492,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
         flush={flush}
         onAutoDigest={onAutoDigest}
         chapters={chapters}
+        onFactAdded={onFactAdded}
         onClose={() => toggle("panelOpen", setPanelOpen)}
         novelId={novel.id}
         chapterId={chapter.id}

@@ -3,6 +3,7 @@ import { handler } from "@/lib/auth";
 import { db, getNovel } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { cleanThreadPatch } from "@/lib/advisor/threads";
+import { threadRows } from "@/lib/advisor/reading";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -18,4 +19,10 @@ export const POST = handler<Ctx>(async (request, { params }) => {
     .single();
   if (error) throw error;
   return NextResponse.json(data, { status: 201 });
+});
+
+/** The novel's threads (for the observations' thread actions). */
+export const GET = handler<Ctx>(async (_request, { params }) => {
+  const novel = await getNovel((await params).id);
+  return NextResponse.json(await threadRows(novel.id), { headers: { "Cache-Control": "no-store" } });
 });
