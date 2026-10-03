@@ -106,22 +106,32 @@ export interface Fact {
   character_ids: string[];
 }
 
-/** One image of a character's visual memory. Files live in private Storage; this is metadata only. */
+/** What the browser knows about a file of the novel (paths stay on the server). See docs/archivos.md. */
+export interface AssetInfo {
+  id: string;
+  version: number;
+  file_name: string;
+  original_type: "image/jpeg" | "image/png" | "image/webp" | "image/avif";
+  original_bytes: number;
+  /** Pixel size of the original. */
+  width: number;
+  height: number;
+  derived_type: "image/webp" | "image/jpeg" | "image/png";
+}
+
+/** A use of a file: one image in a character's gallery (reference image, not part of the book). */
 export interface CharacterImage {
   id: string;
   novel_id: string;
   character_id: string;
-  content_type: "image/webp" | "image/jpeg" | "image/png";
-  version: number;
+  asset_id: string;
   caption: string;
   /** Descriptive label ("1982", "tras la cárcel"). Not chronological data: the app never interprets it. */
   stage_label: string;
   is_primary: boolean;
   sort_order: number;
-  width: number;
-  height: number;
-  bytes: number;
   created_at: string;
+  asset: AssetInfo;
 }
 
 export interface Memory {

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { handler } from "@/lib/auth";
 import { assertId, db } from "@/lib/supabase";
 import { HttpError } from "@/lib/http";
-import { getCharacterImages } from "@/lib/images-server";
+import { getCharacterImages } from "@/lib/assets-server";
 
 type Ctx = { params: Promise<{ id: string }> };
 

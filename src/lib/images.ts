@@ -1,27 +1,44 @@
-import type { CharacterImage } from "./types";
+import type { AssetInfo } from "./types";
 
-/** Character images: limits, format detection and URLs (shared by client and server). */
+/**
+ * Novel files (see docs/archivos.md): limits, format detection, storage paths
+ * and URLs. Shared by client and server.
+ */
 
-export const MAX_IMAGES_PER_CHARACTER = 40;
-/** Image plus thumbnail, already downscaled in the browser. Below Vercel's ~4.5 MB request limit. */
-export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
-/** Longest side the browser downscales to, and what the server accepts. */
-export const IMAGE_MAX_SIDE = 2048;
+/** Originals are kept as uploaded, for export and print. */
+export const MAX_ORIGINAL_BYTES = 50 * 1024 * 1024;
+/** Display version plus thumbnail, generated in the browser. Below Vercel's ~4.5 MB request limit. */
+export const MAX_DERIVED_BYTES = 4 * 1024 * 1024;
+/** Longest side of the derivatives the interface uses. They never replace the original. */
+export const DISPLAY_MAX_SIDE = 2048;
 export const THUMB_MAX_SIDE = 480;
+export const MAX_IMAGES_PER_CHARACTER = 40;
 
-export type ImageType = "image/webp" | "image/jpeg" | "image/png";
+export type OriginalType = "image/jpeg" | "image/png" | "image/webp" | "image/avif";
+export type DerivedType = "image/webp" | "image/jpeg" | "image/png";
 
-export const EXTENSIONS: Record<ImageType, string> = { "image/webp": "webp", "image/jpeg": "jpg", "image/png": "png" };
+export const ORIGINAL_TYPES: readonly OriginalType[] = ["image/jpeg", "image/png", "image/webp", "image/avif"];
+export const DERIVED_TYPES: readonly DerivedType[] = ["image/webp", "image/jpeg", "image/png"];
+
+export const EXTENSIONS: Record<OriginalType, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/avif": "avif",
+};
+
+export type AssetVariant = "thumb" | "display" | "original";
 
 export interface ImageInfo {
-  type: ImageType;
+  type: OriginalType;
   width: number;
   height: number;
 }
 
 /**
- * Type and size read from the bytes themselves (never from the file name or the
- * declared type). Returns null for anything that isn't a WebP, JPEG or PNG.
+ * Type and pixel size read from the first bytes of the file (never from its name
+ * or declared type). Returns null for anything that isn't a JPEG, PNG, WebP or
+ * AVIF, or when the header doesn't fit in the bytes given.
  */
 export function imageInfo(bytes: Uint8Array): ImageInfo | null {
   const b = bytes;
@@ -43,10 +60,18 @@ export function imageInfo(bytes: Uint8Array): ImageInfo | null {
       return valid({ type: "image/webp", width: u16le(26) & 0x3fff, height: u16le(28) & 0x3fff });
     }
     if (ascii(12, "VP8L") && b[20] === 0x2f) {
-      const bits = b[21] | (b[22] << 8) | (b[23] << 16) | (b[24] << 24);
+      const bits = (b[21] | (b[22] << 8) | (b[23] << 16) | (b[24] << 24)) >>> 0;
       return valid({ type: "image/webp", width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 });
     }
     if (ascii(12, "VP8X")) return valid({ type: "image/webp", width: u24le(24) + 1, height: u24le(27) + 1 });
+    return null;
+  }
+
+  // AVIF: ISO-BMFF with an avif/avis brand; the size is in the first 'ispe' box.
+  if (b.length >= 16 && ascii(4, "ftyp") && (ascii(8, "avif") || ascii(8, "avis"))) {
+    for (let i = 12; i + 16 <= b.length; i++) {
+      if (ascii(i, "ispe")) return valid({ type: "image/avif", width: u32be(i + 8), height: u32be(i + 12) });
+    }
     return null;
   }
 
@@ -73,19 +98,20 @@ export function imageInfo(bytes: Uint8Array): ImageInfo | null {
   return null;
 }
 
-/** Bucket paths. Each version is a different file, so a version's bytes never change. */
-export function imagePaths(novelId: string, characterId: string, imageId: string, version: number, type: ImageType) {
-  const base = `${novelId}/${characterId}/${imageId}-v${version}`;
-  const ext = EXTENSIONS[type];
-  return { storage_path: `${base}.${ext}`, thumb_path: `${base}.thumb.${ext}` };
+/**
+ * Bucket paths of one version of an asset: {novel}/{asset}/v{n}/original|display|thumb.
+ * Folders are per file, not per use, because a file can have several uses.
+ */
+export function assetPaths(novelId: string, assetId: string, version: number, original: OriginalType, derived?: DerivedType) {
+  const base = `${novelId}/${assetId}/v${version}`;
+  return {
+    original_path: `${base}/original.${EXTENSIONS[original]}`,
+    display_path: derived ? `${base}/display.${EXTENSIONS[derived]}` : null,
+    thumb_path: derived ? `${base}/thumb.${EXTENSIONS[derived]}` : null,
+  };
 }
 
-/** The version is part of the URL: a replaced image gets a new URL, and the server rejects old ones. */
-export function imageUrl(image: Pick<CharacterImage, "id" | "version">, size: "thumb" | "full") {
-  return `/api/images/${image.id}?size=${size}&v=${image.version}`;
-}
-
-/** Gallery order: sort_order, then creation as a tiebreak. */
-export function sortImages<T extends Pick<CharacterImage, "sort_order" | "created_at">>(images: T[]): T[] {
-  return [...images].sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at));
+/** The version is part of the URL: a replaced file gets a new URL, and the server rejects old ones. */
+export function assetUrl(asset: Pick<AssetInfo, "id" | "version">, variant: AssetVariant) {
+  return `/api/assets/${asset.id}/${variant}?v=${asset.version}`;
 }

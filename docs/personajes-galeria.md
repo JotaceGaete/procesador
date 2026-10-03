@@ -1,6 +1,6 @@
 # Personajes · Memoria visual (imagen principal y galería)
 
-> Estado: **aprobada como Prioridad 2.** El almacenamiento se rediseñó en la [arquitectura común de archivos](archivos.md), compartida con las [imágenes del manuscrito](manuscrito-imagenes.md). Pendiente de aprobar ese ajuste antes de implementar.
+> Estado: **aprobada como Prioridad 2.** Servidor implementado sobre la [arquitectura común de archivos](archivos.md), compartida con las [imágenes del manuscrito](manuscrito-imagenes.md). Falta la interfaz.
 > Compatible con [Cronología · Tratamiento de edades](cronologia-edades.md): la asociación temporal usa el tiempo narrativo, nunca una edad fija.
 
 ## Objetivo
@@ -96,7 +96,8 @@ Todo esto es común y está en [Archivos · Arquitectura común](archivos.md):
 
 | Ruta | Hace |
 |---|---|
-| `POST /api/novels/{id}/assets` → `POST /api/assets/{id}/complete` | Subida común. Con `use: { character: { id } }` crea también la fila de la galería. |
+| `POST /api/novels/{id}/assets` → `POST /api/assets/{id}/complete` | Subida común. Con `use: { kind: "character", character_id, caption, stage_label }` crea también la fila de la galería. |
+| `POST /api/characters/{id}/images` | Añade a la galería un archivo que la novela ya tiene (`{ asset_id }`), sin subirlo ni copiarlo. |
 | `PATCH /api/character-images/{id}` | Edita `caption` y `stage_label` (después también `story_at`). |
 | `POST /api/character-images/{id}/primary` | La marca como principal. RPC `set_primary_image`: en una transacción quita la anterior y pone esta. |
 | `PUT /api/characters/{id}/images` | Reordena. RPC `reorder_character_images(p_character, p_ids)`, que exige la lista completa, como `reorder_chapters`. |

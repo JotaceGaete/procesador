@@ -23,6 +23,15 @@ const ROUTES = [
   ["PATCH", `/api/memory/characters/${U}`],
   ["DELETE", `/api/memory/facts/${U}`],
   ["POST", "/api/assist"],
+  ["POST", `/api/novels/${U}/assets`],
+  ["POST", `/api/assets/${U}/complete`],
+  ["GET", `/api/assets/${U}/thumb?v=1`],
+  ["GET", `/api/assets/${U}/original?v=1`],
+  ["POST", `/api/characters/${U}/images`],
+  ["PUT", `/api/characters/${U}/images`],
+  ["PATCH", `/api/character-images/${U}`],
+  ["DELETE", `/api/character-images/${U}`],
+  ["POST", `/api/character-images/${U}/primary`],
 ];
 const hit = (base, method, route, headers = {}) =>
   fetch(base + route, {
@@ -88,7 +97,17 @@ test("production without APP_PASSWORD is closed (503), pages and API alike", asy
 test("the public (anon) key can't read tables or call functions", async () => {
   const key = process.env.E2E_ANON_KEY;
   const headers = { apikey: key, authorization: `Bearer ${key}` };
-  for (const table of ["novels", "chapters", "characters", "relationships", "places", "facts", "fact_characters"]) {
+  for (const table of [
+    "novels",
+    "chapters",
+    "characters",
+    "relationships",
+    "places",
+    "facts",
+    "fact_characters",
+    "assets",
+    "character_images",
+  ]) {
     const res = await fetch(`${STACK}/rest/v1/${table}`, { headers });
     assert.ok([401, 403].includes(res.status), `${table}: ${res.status}`);
   }
@@ -98,6 +117,40 @@ test("the public (anon) key can't read tables or call functions", async () => {
     body: "{}",
   });
   assert.ok([401, 403].includes(rpc.status), `rpc: ${rpc.status}`);
+  for (const fn of ["delete_unused_assets", "sweep_assets", "set_primary_image", "reorder_character_images"]) {
+    const res = await fetch(`${STACK}/rest/v1/rpc/${fn}`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.ok([401, 403, 404].includes(res.status), `${fn}: ${res.status}`);
+  }
+});
+
+test("files: the bucket is private and closed to the public key", async () => {
+  const cookie = await login();
+  const call = client(cookie);
+  const novel = (await call("/api/novels", "POST", { title: "Archivos privados" })).data.id;
+  const start = await call(`/api/novels/${novel}/assets`, "POST", { type: "image/png", bytes: 10 });
+  assert.equal(start.status, 201);
+  const path = new URL(start.data.upload_url).pathname.replace("/storage/v1/object/upload/sign/novel-files/", "");
+  await fetch(start.data.upload_url, { method: "PUT", headers: { "content-type": "image/png" }, body: "0123456789" });
+
+  const key = process.env.E2E_ANON_KEY;
+  const anon = { apikey: key, authorization: `Bearer ${key}` };
+  const tries = [
+    fetch(`${STACK}/storage/v1/object/novel-files/${path}`, { headers: anon }),
+    fetch(`${STACK}/storage/v1/object/public/novel-files/${path}`),
+    fetch(`${STACK}/storage/v1/object/novel-files/${path}`),
+    fetch(`${STACK}/storage/v1/object/list/novel-files`, {
+      method: "POST",
+      headers: { ...anon, "content-type": "application/json" },
+      body: JSON.stringify({ prefix: "" }),
+    }),
+    fetch(`${STACK}/storage/v1/object/upload/sign/novel-files/${novel}/x.png`, { method: "POST", headers: anon }),
+  ];
+  for (const res of await Promise.all(tries)) assert.notEqual(res.status, 200, res.url);
+  await call(`/api/novels/${novel}`, "DELETE");
 });
 
 test("no keys or key names in the browser bundle", () => {

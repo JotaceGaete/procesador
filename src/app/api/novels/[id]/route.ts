@@ -4,7 +4,7 @@ import { assertId, db, getMemory, getNovel, getOutline } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { cleanGuide } from "@/lib/guide";
 import { availableProviders, defaultProvider } from "@/lib/ai/providers";
-import { getNovelImages, imageFiles, removeFiles } from "@/lib/images-server";
+import { getNovelImages, novelFiles, removeFiles } from "@/lib/assets-server";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -51,10 +51,10 @@ export const PATCH = handler<Ctx>(async (request, { params }) => {
   return NextResponse.json(data);
 });
 
-/** Deletes the novel with its chapters, memory and images (cascade). The UI asks for explicit confirmation. */
+/** Deletes the novel with its chapters, memory and files (cascade), then the files in Storage. The UI asks for explicit confirmation. */
 export const DELETE = handler<Ctx>(async (_request, { params }) => {
   const id = assertId((await params).id, "Novela");
-  const files = await imageFiles("novel_id", id);
+  const files = await novelFiles(id);
   const { error } = await db().from("novels").delete().eq("id", id);
   if (error) throw error;
   await removeFiles(files);

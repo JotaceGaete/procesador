@@ -1,6 +1,6 @@
 # Archivos · Arquitectura común
 
-> Estado: **diseño, pendiente de aprobación.** Sustituye la parte de almacenamiento de [Memoria visual de personajes](personajes-galeria.md) y es la base de [Imágenes del manuscrito](manuscrito-imagenes.md) y de la futura Investigación/Lugares.
+> Estado: **aprobado; base implementada en el servidor** (ver "Estado de implementación" al final). Sustituye la parte de almacenamiento de [Memoria visual de personajes](personajes-galeria.md) y es la base de [Imágenes del manuscrito](manuscrito-imagenes.md) y de la futura Investigación/Lugares.
 
 ## Dos tipos de imagen, un solo sistema de archivos
 
@@ -130,6 +130,34 @@ El código de la galería que estaba a medio hacer guarda las rutas en `characte
 - `character_images` pasa a tener `asset_id` en lugar de `storage_path`, `thumb_path`, `content_type`, `version`, `width`, `height` y `bytes`;
 - las rutas `/api/images/…` pasan a ser `/api/assets/…` (servir, reemplazar) y `/api/character-images/…` (pie, etapa, principal, orden, borrar);
 - se reutilizan sin cambios: `imageInfo()` (detección de formato por bytes), los triggers de principal única y orden, `reorder_character_images`, el Storage simulado de las pruebas (que añade la subida firmada, `info` y `Range`) y la estrategia de caché.
+
+## Estado de implementación
+
+**Hecho (servidor, base de datos y pruebas):**
+
+- `assets` y `character_images` en `supabase/schema.sql`, con el bucket privado `novel-files` (se crea al ejecutar el esquema en Supabase).
+- Los usos son la única forma de mantener vivo un archivo:
+  - la clave foránea sin cascada impide borrar un `asset` en uso;
+  - `delete_unused_assets()` sólo borra los que no tienen usos;
+  - `asset_in_use()` es el único sitio que enumera las tablas de uso. Al añadir `manuscript_images` se amplía ahí y en `duplicate_novel`.
+- Subida en dos pasos: `POST /api/novels/{id}/assets` emite la URL firmada; `POST /api/assets/{id}/complete` comprueba el original por sus bytes (lectura parcial con `Range`), guarda los derivados y crea el uso. Si algo falla, no queda nada a medias.
+- `GET /api/assets/{id}/{thumb|display|original}?v=`:
+  - con la caché descrita arriba;
+  - el original se descarga con un enlace firmado de 60 s, porque puede superar lo que una función de Vercel puede devolver.
+- Reutilizar un archivo en otra galería sin copiarlo: `POST /api/characters/{id}/images` con `{ asset_id }`.
+- Galería: principal, orden, pie, etiqueta y borrar.
+- Borrado seguro al eliminar una imagen, un personaje o una novela.
+- Limpieza de subidas abandonadas.
+- Duplicar una novela: cada archivo se copia una vez aunque tenga varios usos. La copia es independiente, de modo que borrar una novela nunca toca los archivos de la otra. Si falla una copia, se deshace.
+- Storage simulado (`tests/mock-storage.mjs`) con subida firmada de un solo uso ligada a su ruta, descarga firmada, `Range` y CORS.
+- Pruebas: `tests/unit/images.test.ts` y `tests/e2e/assets.test.mjs`, además de rutas y bucket en `security.test.mjs`.
+
+**Pendiente:**
+
+- Interfaz: generar derivados en el navegador, tarjetas, sección *Galería* y visor.
+- `POST /api/assets/{id}/replace` (nueva versión). El esquema y las rutas ya están versionados.
+- Aviso de archivos repetidos por `sha256`.
+- `manuscript_images` (Prioridad 2b).
 
 ## Orden de implementación propuesto
 

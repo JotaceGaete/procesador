@@ -4,7 +4,7 @@ import { assertId, db } from "@/lib/supabase";
 import { HttpError, pickFields, readJson } from "@/lib/http";
 import { isMemoryKind, MEMORY_KINDS } from "@/lib/memory";
 import { readCharacterIds, setFactCharacters } from "@/lib/memory-server";
-import { imageFiles, removeFiles } from "@/lib/images-server";
+import { deleteUnusedAssets } from "@/lib/assets-server";
 
 type Ctx = { params: Promise<{ kind: string; id: string }> };
 
@@ -41,10 +41,16 @@ export const PATCH = handler<Ctx>(async (request, { params }) => {
 
 export const DELETE = handler<Ctx>(async (request, { params }) => {
   const { kind, id, config } = await target(params);
-  // A character's images go with it (cascade); their files are removed after the rows.
-  const files = kind === "characters" ? await imageFiles("character_id", id) : [];
+  // A character's gallery goes with it (cascade). Its files are deleted afterwards
+  // only if nothing else uses them.
+  let assetIds: string[] = [];
+  if (kind === "characters") {
+    const { data, error } = await db().from("character_images").select("asset_id").eq("character_id", id);
+    if (error) throw error;
+    assetIds = data.map((r) => r.asset_id);
+  }
   const { error } = await db().from(config.table).delete().eq("id", id);
   if (error) throw error;
-  await removeFiles(files);
+  await deleteUnusedAssets(assetIds);
   return new NextResponse(null, { status: 204 });
 });

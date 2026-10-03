@@ -40,7 +40,7 @@ Sólo lo relevante. El manuscrito completo nunca se envía por defecto.
 
 1. **Supabase**:
    - Crea un proyecto.
-   - En **SQL Editor**, ejecuta [`supabase/schema.sql`](supabase/schema.sql). Es idempotente y elimina las tablas de la etapa anterior si existen.
+   - En **SQL Editor**, ejecuta [`supabase/schema.sql`](supabase/schema.sql). Es idempotente y elimina las tablas de la etapa anterior si existen. También crea el bucket privado `novel-files` de Storage.
    - Copia la *Project URL* y la clave **secret / service_role**. La clave *publishable* no sirve: el esquema le niega todo acceso.
 2. **Variables** (`cp .env.example .env.local`):
 
@@ -71,6 +71,7 @@ npm run test:all    # ambas
 
 - Un Postgres temporal con `supabase/schema.sql`, aplicado dos veces para comprobar que es idempotente.
 - PostgREST detrás de `/rest/v1`, igual que Supabase.
+- Un Storage en memoria detrás de `/storage/v1` (`tests/mock-storage.mjs`), con buckets privados y URLs firmadas.
 - Servidores que imitan las APIs de Anthropic, OpenAI y xAI (`tests/mock-ai.mjs`). Las llamadas pasan por los SDK reales.
 - `next build` y dos servidores: uno normal y otro en producción sin `APP_PASSWORD`, que debe responder 503.
 
@@ -81,7 +82,9 @@ npm run test:all    # ambas
 | `tests/unit/auth.test.ts` | Sesión firmada y caducidad, cierre por defecto sin `APP_PASSWORD` |
 | `tests/unit/providers.test.ts` | Claude, GPT y Grok: streaming, caché del manuscrito, rechazos, errores, cancelación |
 | `tests/e2e/api.test.mjs` | Biblioteca, capítulos, revisiones y conflictos, memoria, aislamiento entre novelas, duplicar, borrar, construcción de contexto y cada proveedor |
-| `tests/e2e/security.test.mjs` | Las 15 rutas sin sesión, cookies falsificadas, 503 sin contraseña, clave pública sin acceso, claves fuera del bundle, manuscrito fuera de los logs |
+| `tests/e2e/security.test.mjs` | Las 24 rutas sin sesión, cookies falsificadas, 503 sin contraseña, clave pública sin acceso a tablas, funciones ni al bucket, claves fuera del bundle, manuscrito fuera de los logs |
+| `tests/unit/images.test.ts` | Formato y tamaño de imagen leídos de los bytes (JPEG, PNG, WebP, AVIF), rutas y URLs versionadas |
+| `tests/e2e/assets.test.mjs` | Archivos: subida firmada de un solo uso, original conservado, derivados, caché versionada, galería (principal única, orden, límite), archivos compartidos sin duplicar, borrado seguro, aislamiento entre novelas, limpieza, duplicar novela, nada llega a la IA |
 | `tests/e2e/ui.test.mjs` | Flujo completo en el navegador: autoguardado, memoria, guía, capítulos, retomar posición, Desarrollar escena e insertar con deshacer, Original/Propuesta, cambio de proveedor, conflicto, concentración, móvil, capítulo de 1 MB |
 
 Requisitos de la E2E:

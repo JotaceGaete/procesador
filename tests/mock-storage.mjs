@@ -1,11 +1,14 @@
 // In-memory stand-in for Supabase Storage, mounted at /storage/v1 on the E2E gateway.
-// It implements the calls the app makes through supabase-js (upload, download,
-// remove, copy, list) and enforces what matters for the tests: buckets are
-// private, and only a service_role JWT can read or write.
+// It implements the calls the app makes (upload, download with Range, remove, copy,
+// list, signed upload URLs, signed download URLs) and enforces what matters for the
+// tests: buckets are private, only a service_role JWT can read or write, and a signed
+// upload URL works once, for its own path, before it expires.
 import crypto from "node:crypto";
 
-export function createStorage(jwtSecret, buckets = { "character-images": { public: false } }) {
+export function createStorage(jwtSecret, buckets = { "novel-files": { public: false } }) {
   const objects = new Map(); // "bucket/path" → { bytes, contentType }
+  const uploadTokens = new Map(); // token → { key, expires, used }
+  const downloadTokens = new Map(); // token → { key, expires }
   const failures = new Map(); // op → remaining forced failures (test hook)
   const log = [];
 
@@ -56,13 +59,67 @@ export function createStorage(jwtSecret, buckets = { "character-images": { publi
     }
     if (!url.pathname.startsWith("/storage/v1/")) return false;
     const route = decodeURIComponent(url.pathname.slice("/storage/v1".length));
+    // Like Supabase: the browser uploads originals cross-origin with a signed URL.
+    res.setHeader("access-control-allow-origin", "*");
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, {
+        "access-control-allow-methods": "GET, PUT, POST, DELETE, OPTIONS",
+        "access-control-allow-headers": "authorization, apikey, content-type, x-upsert, cache-control",
+      });
+      return res.end(), true;
+    }
 
     // Public URLs: every bucket here is private.
     const pub = route.match(/^\/object\/public\/([^/]+)\//);
     if (pub) return err(res, 400, "Bucket not found", "Bucket is not public"), true;
 
+    // Uploads with a signed URL: no key needed, but the token must match the path, be unused and unexpired.
+    const signedUp = route.match(/^\/object\/upload\/sign\/([^/]+)\/(.+)$/);
+    if (signedUp && req.method === "PUT") {
+      const key = `${signedUp[1]}/${signedUp[2]}`;
+      const t = uploadTokens.get(url.searchParams.get("token"));
+      if (!t || t.key !== key || t.used || t.expires < Date.now()) {
+        return err(res, 400, "InvalidSignature", "The signature is invalid or was used"), true;
+      }
+      if (objects.has(key)) return err(res, 409, "Duplicate", "The resource already exists"), true;
+      t.used = true;
+      log.push(`PUT (signed) ${route}`);
+      objects.set(key, { bytes: Buffer.from(body), contentType: req.headers["content-type"] ?? "application/octet-stream" });
+      return send(res, 200, { Key: key }), true;
+    }
+    // Downloads with a signed URL.
+    const signedDown = route.match(/^\/object\/sign\/([^/]+)\/(.+)$/);
+    if (signedDown && req.method === "GET") {
+      const key = `${signedDown[1]}/${signedDown[2]}`;
+      const t = downloadTokens.get(url.searchParams.get("token"));
+      if (!t || t.key !== key || t.expires < Date.now()) return err(res, 400, "InvalidSignature", "Invalid signature"), true;
+      const o = objects.get(key);
+      if (!o) return err(res, 404, "not_found", "Object not found"), true;
+      const name = url.searchParams.get("download");
+      return send(res, 200, o.bytes, {
+        "content-type": o.contentType,
+        ...(name !== null ? { "content-disposition": `attachment; filename="${name || key.split("/").pop()}"` } : {}),
+      }), true;
+    }
+
     if (role(req) !== "service_role") return err(res, 403, "Unauthorized", "new row violates row-level security policy"), true;
     log.push(`${req.method} ${route}`);
+
+    // Create signed URLs (service_role only).
+    const signUp = route.match(/^\/object\/upload\/sign\/([^/]+)\/(.+)$/);
+    if (signUp && req.method === "POST") {
+      const token = crypto.randomBytes(16).toString("hex");
+      uploadTokens.set(token, { key: `${signUp[1]}/${signUp[2]}`, expires: Date.now() + 2 * 3600_000, used: false });
+      return send(res, 200, { url: `/object/upload/sign/${signUp[1]}/${signUp[2]}?token=${token}` }), true;
+    }
+    const signDown = route.match(/^\/object\/sign\/([^/]+)\/(.+)$/);
+    if (signDown && req.method === "POST") {
+      const key = `${signDown[1]}/${signDown[2]}`;
+      if (!objects.has(key)) return err(res, 404, "not_found", "Object not found"), true;
+      const token = crypto.randomBytes(16).toString("hex");
+      downloadTokens.set(token, { key, expires: Date.now() + (json(body).expiresIn ?? 60) * 1000 });
+      return send(res, 200, { signedURL: `/object/sign/${key}?token=${token}` }), true;
+    }
 
     if (req.method === "POST" && route === "/object/copy") {
       const { bucketId, sourceKey, destinationKey } = json(body);
@@ -107,6 +164,15 @@ export function createStorage(jwtSecret, buckets = { "character-images": { publi
       if (req.method === "GET" || req.method === "HEAD") {
         const o = objects.get(key);
         if (!o) return err(res, 404, "not_found", "Object not found"), true;
+        const range = (req.headers.range ?? "").match(/^bytes=(\d+)-(\d*)$/);
+        if (range) {
+          const start = Number(range[1]);
+          const end = Math.min(range[2] ? Number(range[2]) : o.bytes.length - 1, o.bytes.length - 1);
+          return send(res, 206, o.bytes.subarray(start, end + 1), {
+            "content-type": o.contentType,
+            "content-range": `bytes ${start}-${end}/${o.bytes.length}`,
+          }), true;
+        }
         return send(res, 200, o.bytes, { "content-type": o.contentType }), true;
       }
     }
