@@ -58,6 +58,40 @@ Sólo lo relevante. El manuscrito completo nunca se envía por defecto.
 3. **Local**: `npm install`, `npm run dev`, `npm run typecheck`, `npm run build`.
 4. **Vercel**: importa el repositorio y añade las variables. `/api/assist` declara `maxDuration = 300` s.
 
+## Pruebas
+
+```bash
+npm run typecheck
+npm test            # unitarias (~1 s): contexto, prompts, Guía Maestra, sesiones, los tres proveedores
+npm run test:e2e    # de punta a punta (~2–3 min): API, seguridad e interfaz en Chromium
+npm run test:all    # ambas
+```
+
+`npm run test:e2e` levanta un entorno desechable y lo elimina al terminar. No usa claves reales ni crea recursos externos:
+
+- Un Postgres temporal con `supabase/schema.sql`, aplicado dos veces para comprobar que es idempotente.
+- PostgREST detrás de `/rest/v1`, igual que Supabase.
+- Servidores que imitan las APIs de Anthropic, OpenAI y xAI (`tests/mock-ai.mjs`). Las llamadas pasan por los SDK reales.
+- `next build` y dos servidores: uno normal y otro en producción sin `APP_PASSWORD`, que debe responder 503.
+
+| Archivo | Cubre |
+|---|---|
+| `tests/unit/context.test.ts` | Nombres y apodos, contexto cercano, manuscrito por capítulos, pasajes, selección de memoria |
+| `tests/unit/prompts.test.ts` | Instrucciones distintas para editar y escribir, prompts de edición y escena, memoria, Guía Maestra |
+| `tests/unit/auth.test.ts` | Sesión firmada y caducidad, cierre por defecto sin `APP_PASSWORD` |
+| `tests/unit/providers.test.ts` | Claude, GPT y Grok: streaming, caché del manuscrito, rechazos, errores, cancelación |
+| `tests/e2e/api.test.mjs` | Biblioteca, capítulos, revisiones y conflictos, memoria, aislamiento entre novelas, duplicar, borrar, construcción de contexto y cada proveedor |
+| `tests/e2e/security.test.mjs` | Las 15 rutas sin sesión, cookies falsificadas, 503 sin contraseña, clave pública sin acceso, claves fuera del bundle, manuscrito fuera de los logs |
+| `tests/e2e/ui.test.mjs` | Flujo completo en el navegador: autoguardado, memoria, guía, capítulos, retomar posición, Desarrollar escena e insertar con deshacer, Original/Propuesta, cambio de proveedor, conflicto, concentración, móvil, capítulo de 1 MB |
+
+Requisitos de la E2E:
+
+- **PostgreSQL**: `initdb`, `pg_ctl` y `psql`. Si no se encuentran solos, define `PG_BIN`.
+- **PostgREST**: se descarga una vez en Linux x64. En otros sistemas, define `POSTGREST_BIN`.
+- **Chromium**: si falta, `npx playwright install chromium`.
+
+Opciones: `E2E_SKIP_BUILD=1` reutiliza el build; `E2E_KEEP=1` deja el entorno en marcha para inspeccionarlo.
+
 ## Privacidad y seguridad
 
 - **Claves**: sólo en el servidor. Los módulos que las usan importan `server-only`, y no hay variables `NEXT_PUBLIC_`.
