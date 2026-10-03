@@ -132,8 +132,9 @@ alter table public.facts
 
 ```ts
 type Position = { chapter_id: string; offset?: number };   // offset se ignora en la v1
+type StoryPoint = Position | { mark_id: string } | { date: StoryDate };
 storyPointAt(pos: Position): { date: StoryDate | null; sinceMark: Interval | null; estimated: boolean }
-ageAt(character, pos: Position): { min: number; max: number; approx: boolean } | null
+ageAt(character, at: StoryPoint): { min: number; max: number; approx: boolean } | null
 warnings(novel): TimeWarning[]
 ```
 
@@ -142,6 +143,8 @@ warnings(novel): TimeWarning[]
 - Sin ancla, o sin forma de relacionar los dos puntos, devuelve `null` y la interfaz muestra la nota libre tal cual.
 
 **Ejemplo del enunciado.** Ancla: 21 años en el capítulo 1 (1972). Capítulo 6: 1977. En el capítulo 6 se muestra **26**, y la ficha sigue diciendo "21 en el capítulo 1". Si el capítulo 1 fuera "Año 0" y el 6 "Año 5", o si el 6 dijera sólo "cinco años después", el resultado es el mismo. Cuando existan marcas internas, un "cinco años después" a mitad del capítulo 6 hará que el personaje tenga 21 antes de la marca y 26 después.
+
+`StoryPoint` es el mismo tipo que usan el ancla `age_at.at` y la asociación temporal de las imágenes de personaje (`character_images.story_at`, ver [Memoria visual](personajes-galeria.md)). Una imagen de "Erika, 1982" guarda la fecha, no la edad, y su edad se calcula con `ageAt(erika, { date: { year: 1982 } })`.
 
 ## Advertencias temporales
 
