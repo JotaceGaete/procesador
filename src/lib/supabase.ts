@@ -16,13 +16,14 @@ export function db(): SupabaseClient {
   return client;
 }
 
-/** MVP: un único proyecto activo. Devuelve el más antiguo, o lo crea si no existe. */
-export async function getActiveProject(): Promise<Project> {
-  const { data, error } = await db().from("projects").select("*").order("created_at", { ascending: true }).limit(1).maybeSingle();
-  if (error) throw error;
-  if (data) return data as Project;
+/** MVP: a single project. The unique `singleton` column makes concurrent first loads safe. */
+export async function getActiveProject(columns = "*"): Promise<Project> {
+  const { error: upsertError } = await db()
+    .from("projects")
+    .upsert({ singleton: true }, { onConflict: "singleton", ignoreDuplicates: true });
+  if (upsertError) throw upsertError;
 
-  const { data: created, error: insertError } = await db().from("projects").insert({}).select("*").single();
-  if (insertError) throw insertError;
-  return created as Project;
+  const { data, error } = await db().from("projects").select(columns).eq("singleton", true).single();
+  if (error) throw error;
+  return data as unknown as Project;
 }

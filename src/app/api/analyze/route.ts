@@ -1,97 +1,104 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { db, getActiveProject } from "@/lib/supabase";
-import { errorResponse } from "@/lib/http";
-import { BASE_INSTRUCTIONS, projectContext, taskPrompt } from "@/lib/ai/prompts";
-import { availableProviders, streamCompletion } from "@/lib/ai/providers";
-import { ACTIONS, type AnalysisAction, type Character, type ProviderId } from "@/lib/types";
+import { errorResponse, HttpError, readJson } from "@/lib/http";
+import { requireAuth } from "@/lib/auth";
+import { characterExcerpts, nearbyRange, relevantCharacters } from "@/lib/ai/context";
+import { BASE_INSTRUCTIONS, manuscriptBlock, projectBlock, taskPrompt } from "@/lib/ai/prompts";
+import { getProvider } from "@/lib/ai/providers";
+import { ACTIONS, type AnalysisEvent, type Character, type ProviderId } from "@/lib/types";
 
 export const maxDuration = 300;
 
-const CONTEXT_CHARS = 1500;
-
-interface AnalyzeBody {
-  action: AnalysisAction;
-  characterId?: string | null;
-  content: string;
-  selectionStart: number;
-  selectionEnd: number;
-  includeManuscript?: boolean;
-  provider: ProviderId;
-}
+const MAX_SELECTION_CHARS = 30_000;
 
 export async function POST(request: Request) {
-  let body: AnalyzeBody;
+  const denied = await requireAuth(request);
+  if (denied) return denied;
+
+  let req;
   try {
-    body = await request.json();
-  } catch {
-    return errorResponse(new Error("JSON inválido"), 400);
-  }
-
-  const action = ACTIONS.find((a) => a.id === body.action);
-  if (!action) return errorResponse(new Error("Acción desconocida"), 400);
-  if (!availableProviders().includes(body.provider)) {
-    return errorResponse(new Error(`Proveedor "${body.provider}" no configurado`), 400);
-  }
-
-  const content = typeof body.content === "string" ? body.content : "";
-  const start = Math.max(0, Math.min(body.selectionStart, content.length));
-  const end = Math.max(start, Math.min(body.selectionEnd, content.length));
-  const selection = content.slice(start, end);
-  if (!selection.trim()) return errorResponse(new Error("Selecciona un fragmento del texto."), 400);
-
-  let characters: Character[];
-  let project;
-  try {
-    project = await getActiveProject();
-    const { data, error } = await db().from("characters").select("*").eq("project_id", project.id).order("created_at");
-    if (error) throw error;
-    characters = data as Character[];
+    req = await buildRequest(request);
   } catch (e) {
     return errorResponse(e);
   }
 
-  const character = body.characterId ? (characters.find((c) => c.id === body.characterId) ?? null) : null;
-  if (action.needsCharacter && !character) {
-    return errorResponse(new Error("Elige un personaje para esta acción."), 400);
-  }
-
-  const generator = streamCompletion(body.provider, {
-    instructions: BASE_INSTRUCTIONS,
-    context: projectContext(project, characters, body.includeManuscript === false ? null : content),
-    prompt: taskPrompt({
-      action: action.id,
-      character,
-      selection,
-      before: content.slice(Math.max(0, start - CONTEXT_CHARS), start),
-      after: content.slice(end, end + CONTEXT_CHARS),
-    }),
-  });
-
+  const { provider, ...completion } = req;
   const encoder = new TextEncoder();
+  const send = (controller: ReadableStreamDefaultController<Uint8Array>, event: AnalysisEvent) =>
+    controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+
+  const generator = provider.stream(completion);
   const stream = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
         const { value, done } = await generator.next();
         if (done) controller.close();
-        else controller.enqueue(encoder.encode(value));
+        else send(controller, value);
       } catch (e) {
-        controller.enqueue(encoder.encode(`\n\n> ❌ Error: ${describeError(e)}`));
+        if (!completion.signal.aborted) {
+          console.error("[analyze]", e instanceof Error ? e.message : e);
+          send(controller, { type: "error", message: provider.describeError(e) });
+        }
         controller.close();
       }
     },
     async cancel() {
+      // The author pressed "Detener" or closed the tab: stop the upstream call so it stops billing.
       await generator.return(undefined);
     },
   });
 
   return new Response(stream, {
-    headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+    headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" },
   });
 }
 
-function describeError(e: unknown): string {
-  if (e instanceof Anthropic.AuthenticationError) return "API key de Anthropic inválida.";
-  if (e instanceof Anthropic.RateLimitError) return "Límite de uso alcanzado; espera un momento y reintenta.";
-  if (e instanceof Anthropic.APIError) return `API de Anthropic (${e.status}): ${e.message}`;
-  return e instanceof Error ? e.message : String(e);
+async function buildRequest(request: Request) {
+  const body = await readJson(request);
+
+  const action = ACTIONS.find((a) => a.id === body.action);
+  if (!action) throw new HttpError(400, "Acción desconocida");
+  const provider = getProvider(body.provider as ProviderId);
+  if (!provider) throw new HttpError(400, "Ese proveedor de IA no está configurado.");
+
+  const content = typeof body.content === "string" ? body.content : "";
+  const start = Math.max(0, Math.min(Number(body.selectionStart) || 0, content.length));
+  const end = Math.max(start, Math.min(Number(body.selectionEnd) || 0, content.length));
+  const selection = content.slice(start, end);
+  if (!selection.trim()) throw new HttpError(400, "Selecciona un fragmento del texto.");
+  if (selection.length > MAX_SELECTION_CHARS) {
+    throw new HttpError(400, "La selección es demasiado larga. Analiza una escena o unos pocos párrafos cada vez.");
+  }
+
+  const project = await getActiveProject("id, title, synopsis, style_notes");
+  const { data, error } = await db().from("characters").select("*").eq("project_id", project.id).order("created_at");
+  if (error) throw error;
+  const characters = data as Character[];
+
+  const character = typeof body.characterId === "string" ? (characters.find((c) => c.id === body.characterId) ?? null) : null;
+  if (action.character === "required" && !character) throw new HttpError(400, "Elige un personaje para esta acción.");
+
+  const nearby = nearbyRange(content, { start, end });
+  const includeManuscript = body.includeManuscript === true;
+
+  return {
+    provider,
+    instructions: BASE_INSTRUCTIONS,
+    manuscript: includeManuscript ? manuscriptBlock(content) : null,
+    project: projectBlock(
+      project,
+      relevantCharacters(characters, character, content.slice(nearby.start, nearby.end)),
+      characters.length,
+    ),
+    prompt: taskPrompt({
+      action: action.id,
+      character,
+      selection,
+      before: content.slice(nearby.start, start),
+      after: content.slice(end, nearby.end),
+      // With the full manuscript included the excerpts would be redundant.
+      excerpts:
+        character && !includeManuscript && action.character === "required" ? characterExcerpts(content, character, nearby) : null,
+    }),
+    signal: request.signal,
+  };
 }

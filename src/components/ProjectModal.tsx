@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { Project } from "@/lib/types";
+import { api } from "@/lib/client";
 import Modal from "./Modal";
 
 type Meta = Pick<Project, "title" | "synopsis" | "style_notes">;
@@ -22,20 +23,20 @@ export default function ProjectModal({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const res = await fetch("/api/project", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    setBusy(false);
-    if (!res.ok) return setError((await res.json()).error);
-    onSaved(form);
+    setError("");
+    try {
+      await api("/api/project", { method: "PATCH", json: form });
+      onSaved(form);
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
   }
 
   return (
     <Modal title="Proyecto" onClose={onClose}>
       <form onSubmit={submit} className="form">
-        <label>
+        <label className="short">
           <span>Título</span>
           <input value={form.title} required onChange={(e) => setForm({ ...form, title: e.target.value })} />
         </label>
@@ -44,7 +45,7 @@ export default function ProjectModal({
           <textarea
             rows={6}
             value={form.synopsis}
-            placeholder="De qué va la historia, hacia dónde va. La IA la usa como contexto."
+            placeholder="De qué va la historia y hacia dónde va."
             onChange={(e) => setForm({ ...form, synopsis: e.target.value })}
           />
         </label>
@@ -53,17 +54,28 @@ export default function ProjectModal({
           <textarea
             rows={4}
             value={form.style_notes}
-            placeholder="Narrador, tiempo verbal, tono, referencias, cosas que nunca quieres que la IA cambie…"
+            placeholder="Narrador, tiempo verbal, tono, lo que la IA nunca debe cambiar…"
             onChange={(e) => setForm({ ...form, style_notes: e.target.value })}
           />
         </label>
+        <p className="muted small">La sinopsis y las notas de estilo acompañan a cada análisis.</p>
         {error && <p className="error">{error}</p>}
-        <footer>
+        <footer className="modal-foot">
+          <button
+            type="button"
+            className="link"
+            onClick={async () => {
+              await fetch("/api/logout", { method: "POST" });
+              window.location.href = "/login";
+            }}
+          >
+            Cerrar sesión
+          </button>
           <span className="spacer" />
           <button type="button" className="btn ghost" onClick={onClose}>
             Cancelar
           </button>
-          <button className="btn primary" disabled={busy}>
+          <button className="btn primary" disabled={busy || !form.title.trim()}>
             {busy ? "Guardando…" : "Guardar"}
           </button>
         </footer>

@@ -19,7 +19,8 @@ export default function LoginPage() {
     if (res.ok) {
       window.location.href = "/";
     } else {
-      setError("Contraseña incorrecta");
+      const data = await res.json().catch(() => ({}));
+      setError(data.error ?? "No se pudo entrar");
       setLoading(false);
     }
   }
@@ -28,7 +29,11 @@ export default function LoginPage() {
     <main className="login">
       <form onSubmit={submit} className="login-card">
         <h1>Procesador</h1>
+        <label className="sr-only" htmlFor="password">
+          Contraseña
+        </label>
         <input
+          id="password"
           type="password"
           autoFocus
           placeholder="Contraseña"

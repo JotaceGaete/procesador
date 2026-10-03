@@ -1,20 +1,51 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
-import type { ProviderId } from "../types";
+import type { AnalysisEvent, ProviderId } from "../types";
 
 export interface CompletionRequest {
-  /** Instrucciones fijas: nunca cambian, primera parte del prefijo cacheable. */
+  /** Fixed instructions: identical on every request. */
   instructions: string;
-  /** Proyecto, personajes y manuscrito: cambia cuando escribes. */
-  context: string;
+  /** Full manuscript, only when the author asks for it. Kept as its own block so it can be cached. */
+  manuscript: string | null;
+  /** Synopsis, style notes and relevant character profiles. */
+  project: string;
+  /** Excerpts, nearby context, selection and task. */
   prompt: string;
+  signal: AbortSignal;
 }
 
+type ProviderEvent = Exclude<AnalysisEvent, { type: "error" }>;
+
+interface Provider {
+  configured(): boolean;
+  stream(req: CompletionRequest): AsyncGenerator<ProviderEvent>;
+  /** Turns a thrown error into a short message for the author. */
+  describeError(e: unknown): string;
+}
+
+const providers: Record<ProviderId, Provider> = {
+  anthropic: {
+    configured: () => Boolean(process.env.ANTHROPIC_API_KEY),
+    stream: streamAnthropic,
+    describeError(e) {
+      if (e instanceof Anthropic.AuthenticationError) return "La API key de Anthropic no es válida.";
+      if (e instanceof Anthropic.RateLimitError) return "Claude: límite de uso alcanzado. Espera un momento y reintenta.";
+      if (e instanceof Anthropic.APIConnectionError) return "No se pudo conectar con Claude.";
+      if (e instanceof Anthropic.APIError) return `Claude respondió con un error (${e.status ?? "sin código"}).`;
+      return "Error inesperado al llamar a Claude.";
+    },
+  },
+  xai: {
+    configured: () => Boolean(process.env.XAI_API_KEY),
+    stream: streamXai,
+    describeError(e) {
+      return e instanceof XaiError ? e.message : "Error inesperado al llamar a Grok.";
+    },
+  },
+};
+
 export function availableProviders(): ProviderId[] {
-  const list: ProviderId[] = [];
-  if (process.env.ANTHROPIC_API_KEY) list.push("anthropic");
-  if (process.env.XAI_API_KEY) list.push("xai");
-  return list;
+  return (Object.keys(providers) as ProviderId[]).filter((id) => providers[id].configured());
 }
 
 export function defaultProvider(): ProviderId | null {
@@ -24,69 +55,89 @@ export function defaultProvider(): ProviderId | null {
   return available[0] ?? null;
 }
 
-export function streamCompletion(provider: ProviderId, req: CompletionRequest): AsyncGenerator<string> {
-  return provider === "xai" ? streamXai(req) : streamAnthropic(req);
+export function getProvider(id: ProviderId): Provider | null {
+  return providers[id]?.configured() ? providers[id] : null;
 }
 
-let anthropic: Anthropic | null = null;
+// ---------- Claude ----------
 
 type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+let anthropic: Anthropic | null = null;
 
-async function* streamAnthropic(req: CompletionRequest): AsyncGenerator<string> {
+async function* streamAnthropic(req: CompletionRequest): AsyncGenerator<ProviderEvent> {
   anthropic ??= new Anthropic();
-  const stream = anthropic.beta.messages.stream({
-    model: process.env.ANTHROPIC_MODEL || "claude-opus-5-5",
-    max_tokens: 64000,
-    output_config: { effort: (process.env.ANTHROPIC_EFFORT as Effort) || "medium" },
-    // If a safety classifier declines, the API re-runs the request on a fallback model.
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-    system: [
-      { type: "text", text: req.instructions },
-      // Cache breakpoint after the manuscript: repeated analyses on unchanged text reuse it.
-      { type: "text", text: req.context, cache_control: { type: "ephemeral" } },
-    ],
-    messages: [{ role: "user", content: req.prompt }],
-  });
+  const system: Anthropic.TextBlockParam[] = [{ type: "text", text: req.instructions }];
+  if (req.manuscript) {
+    // The manuscript is the large, stable part: cache it so several analyses
+    // in a row over the same text are billed at the cached rate.
+    system.push({ type: "text", text: req.manuscript, cache_control: { type: "ephemeral" } });
+  }
+  system.push({ type: "text", text: req.project });
+
+  const stream = anthropic.messages.stream(
+    {
+      model: process.env.ANTHROPIC_MODEL || "claude-opus-5-5",
+      max_tokens: 16000,
+      output_config: { effort: (process.env.ANTHROPIC_EFFORT as Effort) || "medium" },
+      system,
+      messages: [{ role: "user", content: req.prompt }],
+    },
+    { signal: req.signal },
+  );
 
   for await (const event of stream) {
     if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-      yield event.delta.text;
+      yield { type: "text", text: event.delta.text };
     }
   }
 
   const final = await stream.finalMessage();
   if (final.stop_reason === "refusal") {
-    const why = final.stop_details?.explanation;
-    yield `\n\n> ⚠️ El modelo rechazó esta petición${why ? `: ${why}` : "."} Prueba reformular la selección o cambiar de proveedor.`;
+    yield { type: "refusal", message: "Claude no respondió a esta solicitud." };
   } else if (final.stop_reason === "max_tokens") {
-    yield "\n\n> ⚠️ Respuesta cortada por longitud.";
+    yield { type: "truncated" };
   }
 }
 
-// xAI exposes a Chat Completions-style REST API.
-async function* streamXai(req: CompletionRequest): AsyncGenerator<string> {
-  const res = await fetch("https://api.x.ai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.XAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: process.env.XAI_MODEL || "grok-4",
-      stream: true,
-      messages: [
-        { role: "system", content: `${req.instructions}\n\n${req.context}` },
-        { role: "user", content: req.prompt },
-      ],
-    }),
-  });
+// ---------- Grok (xAI, Chat Completions-style REST API) ----------
+
+class XaiError extends Error {}
+
+async function* streamXai(req: CompletionRequest): AsyncGenerator<ProviderEvent> {
+  const system = [req.instructions, req.manuscript, req.project].filter(Boolean).join("\n\n");
+  let res: Response;
+  try {
+    res = await fetch("https://api.x.ai/v1/chat/completions", {
+      method: "POST",
+      signal: req.signal,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.XAI_API_KEY}` },
+      body: JSON.stringify({
+        model: process.env.XAI_MODEL || "grok-4",
+        stream: true,
+        max_tokens: 16000,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: req.prompt },
+        ],
+      }),
+    });
+  } catch (e) {
+    if ((e as Error).name === "AbortError") throw e;
+    throw new XaiError("No se pudo conectar con Grok.");
+  }
   if (!res.ok || !res.body) {
-    throw new Error(`xAI respondió ${res.status}: ${await res.text().catch(() => "")}`);
+    const reason =
+      res.status === 401 || res.status === 403
+        ? "la API key de xAI no es válida"
+        : res.status === 429
+          ? "límite de uso alcanzado"
+          : `error ${res.status}`;
+    throw new XaiError(`Grok: ${reason}.`);
   }
 
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = "";
+  let finish: string | null = null;
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -96,8 +147,19 @@ async function* streamXai(req: CompletionRequest): AsyncGenerator<string> {
     for (const line of lines) {
       const data = line.startsWith("data:") ? line.slice(5).trim() : "";
       if (!data || data === "[DONE]") continue;
-      const delta = JSON.parse(data).choices?.[0]?.delta?.content;
-      if (delta) yield delta as string;
+      let chunk;
+      try {
+        chunk = JSON.parse(data);
+      } catch {
+        continue;
+      }
+      if (chunk.error) throw new XaiError("Grok devolvió un error durante la respuesta.");
+      const choice = chunk.choices?.[0];
+      if (choice?.delta?.content) yield { type: "text", text: choice.delta.content };
+      if (choice?.finish_reason) finish = choice.finish_reason;
     }
   }
+
+  if (finish === "content_filter") yield { type: "refusal", message: "Grok no respondió a esta solicitud." };
+  else if (finish === "length") yield { type: "truncated" };
 }

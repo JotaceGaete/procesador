@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Character, Project, ProviderId } from "@/lib/types";
-import CharacterSidebar from "./CharacterSidebar";
-import CharacterModal from "./CharacterModal";
+import { api, readPref, writePref } from "@/lib/client";
+import { useAutosave, type SaveState } from "./useAutosave";
+import CharactersModal from "./CharactersModal";
 import ProjectModal from "./ProjectModal";
 import AnalysisPanel from "./AnalysisPanel";
 
@@ -13,144 +14,140 @@ export interface Selection {
   text: string;
 }
 
-type SaveState = "saved" | "dirty" | "saving" | "error";
+interface Loaded {
+  project: Project;
+  characters: Character[];
+  providers: ProviderId[];
+  defaultProvider: ProviderId | null;
+}
 
-const AUTOSAVE_MS = 1200;
+const SAVE_LABELS: Record<SaveState, string> = {
+  saved: "Guardado",
+  pending: "Sin guardar",
+  saving: "Guardando…",
+  error: "No se pudo guardar · reintentando",
+  conflict: "Cambió en otro lugar",
+};
 
 export default function Workspace() {
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [loadError, setLoadError] = useState("");
   const [project, setProject] = useState<Project | null>(null);
   const [characters, setCharacters] = useState<Character[]>([]);
-  const [providers, setProviders] = useState<ProviderId[]>([]);
-  const [defaultProvider, setDefaultProvider] = useState<ProviderId | null>(null);
-  const [loadError, setLoadError] = useState("");
-
   const [content, setContent] = useState("");
-  const [saveState, setSaveState] = useState<SaveState>("saved");
   const [selection, setSelection] = useState<Selection | null>(null);
+
+  const [panelOpen, setPanelOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
-  const [editing, setEditing] = useState<Character | "new" | null>(null);
-  const [editingProject, setEditingProject] = useState(false);
+  const [modal, setModal] = useState<"characters" | "project" | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef(content);
-  const lastSavedRef = useRef("");
   contentRef.current = content;
 
+  const initial = useMemo(
+    () => (loaded ? { content: loaded.project.content, revision: loaded.project.revision } : null),
+    [loaded],
+  );
+  const autosave = useAutosave(content, initial);
+  const saveNow = autosave.save;
+
   useEffect(() => {
-    fetch("/api/project")
-      .then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+    api<Loaded>("/api/project")
+      .then((data) => {
+        setLoaded(data);
         setProject(data.project);
         setCharacters(data.characters);
-        setProviders(data.providers);
-        setDefaultProvider(data.defaultProvider);
         setContent(data.project.content);
-        lastSavedRef.current = data.project.content;
       })
       .catch((e: Error) => setLoadError(e.message));
+    // Panel open by default on wide screens only; remembered afterwards.
+    const pref = readPref("panelOpen");
+    setPanelOpen(pref ? pref === "1" : window.matchMedia("(min-width: 1000px)").matches);
   }, []);
 
-  const save = useCallback(async (keepalive = false) => {
-    const text = contentRef.current;
-    if (text === lastSavedRef.current) return;
-    setSaveState("saving");
-    try {
-      const res = await fetch("/api/project", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: text }),
-        keepalive,
-      });
-      if (!res.ok) throw new Error();
-      lastSavedRef.current = text;
-      setSaveState(contentRef.current === text ? "saved" : "dirty");
-    } catch {
-      setSaveState("error");
-    }
+  const togglePanel = useCallback(() => {
+    setPanelOpen((open) => {
+      writePref("panelOpen", open ? "0" : "1");
+      return !open;
+    });
   }, []);
 
-  // Debounced autosave.
-  useEffect(() => {
-    if (!project || content === lastSavedRef.current) return;
-    setSaveState("dirty");
-    const t = setTimeout(() => save(), AUTOSAVE_MS);
-    return () => clearTimeout(t);
-  }, [content, project, save]);
-
-  // Flush when the tab is hidden or closed.
-  useEffect(() => {
-    const flush = () => {
-      if (document.visibilityState === "hidden") save(true);
-    };
-    const warn = (e: BeforeUnloadEvent) => {
-      if (contentRef.current !== lastSavedRef.current) {
-        save(true);
-        e.preventDefault();
-      }
-    };
-    document.addEventListener("visibilitychange", flush);
-    window.addEventListener("beforeunload", warn);
-    return () => {
-      document.removeEventListener("visibilitychange", flush);
-      window.removeEventListener("beforeunload", warn);
-    };
-  }, [save]);
-
-  // Ctrl/Cmd+S saves now; Esc leaves focus mode.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key === "s") {
         e.preventDefault();
-        save();
-      } else if (e.key === "Escape" && focusMode && !editing && !editingProject) {
+        saveNow();
+      } else if (mod && e.key === ".") {
+        e.preventDefault();
+        setFocusMode((f) => !f);
+      } else if (e.key === "Escape" && focusMode && !modal) {
         setFocusMode(false);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [save, focusMode, editing, editingProject]);
+  }, [saveNow, focusMode, modal]);
 
-  function updateSelection() {
+  const updateSelection = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
     const { selectionStart: start, selectionEnd: end } = el;
-    setSelection(end > start ? { start, end, text: el.value.slice(start, end) } : null);
-  }
+    setSelection((prev) => {
+      if (end <= start) return null;
+      if (prev && prev.start === start && prev.end === end) return prev;
+      return { start, end, text: el.value.slice(start, end) };
+    });
+  }, []);
 
-  /** Replaces the original fragment, wherever it is now, with the rewrite. */
-  function applyRewrite(original: Selection, rewrite: string): boolean {
-    const current = contentRef.current;
-    let start = original.start;
-    if (current.slice(start, original.end) !== original.text) {
-      start = current.indexOf(original.text);
-      if (start === -1) return false;
-    }
-    const end = start + original.text.length;
-    setContent(current.slice(0, start) + rewrite + current.slice(end));
-    setSelection(null);
-    requestAnimationFrame(() => {
+  /**
+   * Replaces the original fragment with the proposal, only when the author asks.
+   * Uses insertText so Ctrl+Z in the editor undoes it.
+   */
+  const applyRewrite = useCallback(
+    (original: Selection, rewrite: string): boolean => {
       const el = textareaRef.current;
-      if (!el) return;
+      const current = contentRef.current;
+      if (!el) return false;
+      let start = original.start;
+      if (current.slice(start, original.end) !== original.text) {
+        // The text moved since the analysis: take the occurrence closest to where it was.
+        let best = -1;
+        for (let i = current.indexOf(original.text); i !== -1; i = current.indexOf(original.text, i + 1)) {
+          if (best === -1 || Math.abs(i - original.start) < Math.abs(best - original.start)) best = i;
+        }
+        if (best === -1) return false;
+        start = best;
+      }
+      const end = start + original.text.length;
       el.focus();
-      el.setSelectionRange(start, start + rewrite.length);
-      updateSelection();
-    });
-    return true;
-  }
+      el.setSelectionRange(start, end);
+      if (!document.execCommand("insertText", false, rewrite)) {
+        setContent(current.slice(0, start) + rewrite + current.slice(end));
+      }
+      requestAnimationFrame(() => {
+        el.setSelectionRange(start, start + rewrite.length);
+        updateSelection();
+      });
+      return true;
+    },
+    [updateSelection],
+  );
 
-  function onCharacterSaved(saved: Character) {
-    setCharacters((list) => {
-      const exists = list.some((c) => c.id === saved.id);
-      return exists ? list.map((c) => (c.id === saved.id ? saved : c)) : [...list, saved];
-    });
-    setEditing(null);
-  }
+  const getContent = useCallback(() => contentRef.current, []);
 
-  function onCharacterDeleted(id: string) {
-    setCharacters((list) => list.filter((c) => c.id !== id));
-    setEditing(null);
-  }
+  // Counting words in a whole novel on every keystroke is noticeable: do it once typing pauses.
+  const [stats, setStats] = useState({ words: 0, chars: 0 });
+  useEffect(() => {
+    const delay = stats.chars ? 400 : 0;
+    const t = setTimeout(() => setStats({ words: (content.match(/\S+/g) ?? []).length, chars: content.length }), delay);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the first count is immediate
+  }, [content]);
+  const words = stats.words;
+  // Rounded so the panel doesn't re-render for every few characters.
+  const manuscriptChars = Math.round(stats.chars / 1000) * 1000;
 
   if (loadError) {
     return (
@@ -161,30 +158,28 @@ export default function Workspace() {
       </main>
     );
   }
-  if (!project) return <main className="fatal muted">Cargando…</main>;
+  if (!loaded || !project) return <main className="fatal muted">Cargando…</main>;
 
-  const words = content.trim() ? content.trim().split(/\s+/).length : 0;
+  const showPanel = panelOpen && !focusMode;
 
   return (
-    <div className={`workspace${focusMode ? " focus" : ""}`}>
-      <CharacterSidebar
-        project={project}
-        characters={characters}
-        onEditProject={() => setEditingProject(true)}
-        onEdit={(c) => setEditing(c)}
-        onNew={() => setEditing("new")}
-      />
-
+    <div className={`workspace${focusMode ? " focus" : ""}${showPanel ? " with-panel" : ""}`}>
       <main className="editor-col">
-        <header className="editor-bar">
-          <span className="project-title">{project.title}</span>
+        <header className="topbar">
+          <button className="link title" onClick={() => setModal("project")} title="Sinopsis y notas de estilo">
+            {project.title}
+          </button>
           <span className="spacer" />
-          <span className="muted small">{words.toLocaleString("es")} palabras</span>
-          <span className={`save-state ${saveState}`}>
-            {{ saved: "Guardado", dirty: "Sin guardar", saving: "Guardando…", error: "Error al guardar" }[saveState]}
-          </span>
-          <button className="btn ghost small" onClick={() => setFocusMode((f) => !f)} title="Modo concentración (Esc para salir)">
-            {focusMode ? "Salir de concentración" : "Concentración"}
+          <span className="meta words">{words.toLocaleString("es")} palabras</span>
+          <SaveStatus state={autosave.state} onRetry={autosave.save} onOverwrite={autosave.overwrite} />
+          <button className="link" onClick={() => setModal("characters")}>
+            Personajes
+          </button>
+          <button className={`link${showPanel ? " on" : ""}`} onClick={togglePanel} aria-pressed={showPanel}>
+            Análisis
+          </button>
+          <button className="link focus-toggle" onClick={() => setFocusMode((f) => !f)} title="Ctrl/⌘ + .  ·  Esc para salir">
+            {focusMode ? "Salir" : "Concentración"}
           </button>
         </header>
         <textarea
@@ -200,36 +195,74 @@ export default function Workspace() {
           onKeyUp={updateSelection}
           placeholder="Empieza a escribir…"
           spellCheck
+          autoFocus
+          aria-label="Manuscrito"
         />
       </main>
 
       <AnalysisPanel
-        content={content}
+        hidden={!showPanel}
+        onClose={togglePanel}
+        getContent={getContent}
+        manuscriptChars={manuscriptChars}
         selection={selection}
         characters={characters}
-        providers={providers}
-        defaultProvider={defaultProvider}
+        providers={loaded.providers}
+        defaultProvider={loaded.defaultProvider}
         onApply={applyRewrite}
       />
 
-      {editing && (
-        <CharacterModal
-          character={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)}
-          onSaved={onCharacterSaved}
-          onDeleted={onCharacterDeleted}
-        />
+      {modal === "characters" && (
+        <CharactersModal characters={characters} onChange={setCharacters} onClose={() => setModal(null)} />
       )}
-      {editingProject && (
+      {modal === "project" && (
         <ProjectModal
           project={project}
-          onClose={() => setEditingProject(false)}
+          onClose={() => setModal(null)}
           onSaved={(p) => {
             setProject((prev) => (prev ? { ...prev, ...p } : prev));
-            setEditingProject(false);
+            setModal(null);
           }}
         />
       )}
     </div>
+  );
+}
+
+function SaveStatus({ state, onRetry, onOverwrite }: { state: SaveState; onRetry: () => void; onOverwrite: () => void }) {
+  if (state === "conflict") {
+    return (
+      <span className="meta save conflict" role="status">
+        {SAVE_LABELS.conflict} ·{" "}
+        <button
+          className="link"
+          onClick={() => {
+            if (
+              confirm(
+                "Se descartarán los cambios de esta pestaña que no se guardaron y se cargará la versión guardada. ¿Continuar?",
+              )
+            )
+              window.location.reload();
+          }}
+        >
+          Cargar esa versión
+        </button>{" "}
+        ·{" "}
+        <button className="link" onClick={onOverwrite}>
+          Conservar la mía
+        </button>
+      </span>
+    );
+  }
+  return (
+    <span className={`meta save ${state}`} role="status" aria-live="polite">
+      {state === "error" ? (
+        <button className="link" onClick={onRetry}>
+          {SAVE_LABELS.error}
+        </button>
+      ) : (
+        SAVE_LABELS[state]
+      )}
+    </span>
   );
 }

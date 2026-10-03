@@ -1,19 +1,56 @@
-// Runs in both the Node runtime and the proxy, so it only uses Web Crypto.
+// Used by the proxy and by route handlers, so it only relies on Web Crypto.
+import { NextResponse } from "next/server";
+
 export const SESSION_COOKIE = "procesador_session";
+export const SESSION_DAYS = 30;
 
-export async function sessionToken(password: string): Promise<string> {
-  const data = new TextEncoder().encode(`procesador:${password}`);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+const encoder = new TextEncoder();
+
+async function hmac(secret: string, message: string): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(message));
+  return Array.from(new Uint8Array(sig), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export function authEnabled(): boolean {
-  return Boolean(process.env.APP_PASSWORD);
+export function safeEqual(a: string, b: string): boolean {
+  const x = encoder.encode(a);
+  const y = encoder.encode(b);
+  let diff = x.length ^ y.length;
+  for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
+  return diff === 0;
 }
 
-export async function isValidSession(cookie: string | undefined): Promise<boolean> {
+/** Token `<expiry>.<hmac>`, signed with the password: changing APP_PASSWORD revokes every session. */
+export async function createSessionToken(password: string): Promise<string> {
+  const expires = Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000;
+  return `${expires}.${await hmac(password, `session:${expires}`)}`;
+}
+
+type AuthState = "ok" | "denied" | "misconfigured";
+
+export async function checkSession(token: string | undefined): Promise<AuthState> {
   const password = process.env.APP_PASSWORD;
-  if (!password) return true;
-  if (!cookie) return false;
-  return cookie === (await sessionToken(password));
+  if (!password) {
+    // Open only for local development. A deploy without a password fails closed.
+    return process.env.NODE_ENV === "production" ? "misconfigured" : "ok";
+  }
+  const [expires, sig] = token?.split(".") ?? [];
+  if (!expires || !sig || Number(expires) < Date.now()) return "denied";
+  return safeEqual(sig, await hmac(password, `session:${expires}`)) ? "ok" : "denied";
+}
+
+function readCookie(request: Request): string | undefined {
+  const header = request.headers.get("cookie") ?? "";
+  const match = header.split(/;\s*/).find((c) => c.startsWith(`${SESSION_COOKIE}=`));
+  return match?.slice(SESSION_COOKIE.length + 1);
+}
+
+/** Defense in depth for API routes: returns an error response, or null when authorized. */
+export async function requireAuth(request: Request): Promise<NextResponse | null> {
+  const state = await checkSession(readCookie(request));
+  if (state === "ok") return null;
+  if (state === "misconfigured") {
+    return NextResponse.json({ error: "Falta configurar APP_PASSWORD en el servidor." }, { status: 503 });
+  }
+  return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 }

@@ -1,21 +1,37 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
-export default function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+interface Props {
+  title: string;
+  onClose: () => void;
+  onBack?: () => void;
+  children: React.ReactNode;
+}
+
+export default function Modal({ title, onClose, onBack, children }: Props) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && closeRef.current();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, []);
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-label={title}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
         <header>
+          {onBack && (
+            <button className="link" onClick={onBack} aria-label="Volver">
+              ←
+            </button>
+          )}
           <h2>{title}</h2>
-          <button className="btn ghost small" onClick={onClose} aria-label="Cerrar">
-            ✕
+          <span className="spacer" />
+          <button className="link" onClick={onClose} aria-label="Cerrar">
+            Cerrar
           </button>
         </header>
         {children}
