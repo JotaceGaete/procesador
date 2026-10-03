@@ -39,7 +39,8 @@ export function handleAI(req, res, body, log) {
             content: [],
             stop_reason: null,
             stop_sequence: null,
-            usage: { input_tokens: 1, output_tokens: 0 },
+            // A cached prefix: 1000 tokens read from cache, 200 fresh.
+            usage: { input_tokens: 200, cache_read_input_tokens: 1000, cache_creation_input_tokens: 0, output_tokens: 0 },
           },
         },
       ],
@@ -51,7 +52,7 @@ export function handleAI(req, res, body, log) {
         {
           type: "message_delta",
           delta: { stop_reason: system.includes("REFUSE-ME") ? "refusal" : "end_turn", stop_sequence: null },
-          usage: { output_tokens: 3 },
+          usage: { output_tokens: 30 },
         },
       ],
       ["message_stop", { type: "message_stop" }],
@@ -106,7 +107,18 @@ export function handleAI(req, res, body, log) {
               },
             ],
           ]),
-      ["response.completed", { type: "response.completed", sequence_number: n++, response: { id: "r", status: "completed" } }],
+      [
+        "response.completed",
+        {
+          type: "response.completed",
+          sequence_number: n++,
+          response: {
+            id: "r",
+            status: "completed",
+            usage: { input_tokens: 1200, input_tokens_details: { cached_tokens: 1000 }, output_tokens: 30, total_tokens: 1230 },
+          },
+        },
+      ],
     ]);
     return true;
   }
@@ -122,6 +134,9 @@ export function handleAI(req, res, body, log) {
   const finish = system.includes("REFUSE-ME") ? "content_filter" : "stop";
   res.write(
     `data: ${JSON.stringify({ choices: [{ delta: { content: system.includes("<escena>") ? SCENE : EDIT }, finish_reason: finish }] })}\n\n`,
+  );
+  res.write(
+    `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 1200, completion_tokens: 30, prompt_tokens_details: { cached_tokens: 1000 } } })}\n\n`,
   );
   res.end("data: [DONE]\n\n");
   return true;

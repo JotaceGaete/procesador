@@ -271,6 +271,9 @@ async function main() {
     XAI_API_KEY: "test-x",
     XAI_BASE_URL: `${STACK}/xai`,
     AI_PROVIDER: "anthropic",
+    // The Consejero answers with its own model; only the writing model has a price.
+    ANTHROPIC_MODEL_ADVISE: "claude-consejero-e2e",
+    AI_PRICES: JSON.stringify({ "claude-opus-5-5": { input: 5, cached: 0.5, output: 25 } }),
   };
   const mainPort = await freePort();
   const closedPort = await freePort();

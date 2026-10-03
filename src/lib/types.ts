@@ -229,15 +229,45 @@ export const CHARACTER_KEYS = CHARACTER_SECTIONS.flatMap((s) => s.fields.map((f)
 
 export type EditAction = "redaccion" | "dialogo" | "expandir" | "acortar" | "consistencia" | "personaje" | "evolucion";
 
-export const EDIT_ACTIONS: { id: EditAction; label: string; character: "required" | "optional"; rewrites: boolean }[] = [
-  { id: "redaccion", label: "Redacción", character: "optional", rewrites: true },
-  { id: "dialogo", label: "Diálogo", character: "optional", rewrites: true },
-  { id: "expandir", label: "Expandir", character: "optional", rewrites: true },
-  { id: "acortar", label: "Acortar", character: "optional", rewrites: true },
-  { id: "consistencia", label: "Consistencia", character: "optional", rewrites: false },
-  { id: "personaje", label: "Personaje", character: "required", rewrites: false },
-  { id: "evolucion", label: "Evolución", character: "required", rewrites: false },
+/**
+ * Where each action lives (docs/consejero.md): the Asistente writes with the author
+ * (it proposes text); the Consejero thinks with the author (analysis, never text to apply).
+ */
+export type AIPanelSection = "assistant" | "advisor";
+
+export const EDIT_ACTIONS: {
+  id: EditAction;
+  label: string;
+  character: "required" | "optional";
+  rewrites: boolean;
+  section: AIPanelSection;
+}[] = [
+  { id: "redaccion", label: "Redacción", character: "optional", rewrites: true, section: "assistant" },
+  { id: "dialogo", label: "Diálogo", character: "optional", rewrites: true, section: "assistant" },
+  { id: "expandir", label: "Expandir", character: "optional", rewrites: true, section: "assistant" },
+  { id: "acortar", label: "Acortar", character: "optional", rewrites: true, section: "assistant" },
+  { id: "consistencia", label: "Consistencia", character: "optional", rewrites: false, section: "advisor" },
+  { id: "personaje", label: "Personaje", character: "required", rewrites: false, section: "advisor" },
+  { id: "evolucion", label: "Evolución", character: "required", rewrites: false, section: "advisor" },
 ];
+
+/** Which model a request uses: each is configured separately (docs/consejero.md). */
+export type AIRole = "write" | "advise" | "digest";
+
+/** One piece of what was sent to the model, shown to the author ("Leí: …"). */
+export interface ContextPart {
+  label: string;
+  tokens: number;
+}
+
+/** Real usage reported by the provider, and its cost when the model's prices are configured. */
+export interface Usage {
+  model: string;
+  input: number;
+  cached: number;
+  output: number;
+  costUsd: number | null;
+}
 
 export type SceneLength = "breve" | "media" | "larga" | "libre";
 
@@ -257,4 +287,8 @@ export type AssistEvent =
   | { type: "text"; text: string }
   | { type: "refusal"; message: string }
   | { type: "truncated" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  /** First event: what the request reads. */
+  | { type: "context"; parts: ContextPart[] }
+  /** Last event before refusal/truncated: tokens and cost. */
+  | ({ type: "usage" } & Usage);

@@ -1,7 +1,8 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
-import type { AssistEvent, ProviderId } from "../types";
+import type { AIRole, AssistEvent, ProviderId } from "../types";
+import { costUsd, modelFor } from "./models";
 
 /**
  * What every provider receives. The editor tools build this without knowing
@@ -17,9 +18,16 @@ export interface CompletionRequest {
   /** Passages, nearby text, selection or argument, and the task. */
   prompt: string;
   signal: AbortSignal;
+  /** Which configured model answers: writing (default), advice or the cheaper analysis one. */
+  role?: AIRole;
 }
 
-type ProviderEvent = Exclude<AssistEvent, { type: "error" }>;
+type ProviderEvent = Exclude<AssistEvent, { type: "error" } | { type: "context" }>;
+
+/** The usage event every provider yields once, before a refusal or truncation. */
+function usage(model: string, input: number, cached: number, output: number): ProviderEvent {
+  return { type: "usage", model, input, cached, output, costUsd: costUsd(model, input, cached, output) };
+}
 
 interface Provider {
   configured(): boolean;
@@ -90,9 +98,10 @@ async function* streamAnthropic(req: CompletionRequest): AsyncGenerator<Provider
   }
   system.push({ type: "text", text: req.project });
 
+  const model = modelFor("anthropic", req.role);
   const stream = anthropic.messages.stream(
     {
-      model: process.env.ANTHROPIC_MODEL || "claude-opus-5-5",
+      model,
       max_tokens: 16000,
       output_config: { effort: (process.env.ANTHROPIC_EFFORT as Effort) || "medium" },
       system,
@@ -108,6 +117,10 @@ async function* streamAnthropic(req: CompletionRequest): AsyncGenerator<Provider
   }
 
   const final = await stream.finalMessage();
+  const u = final.usage;
+  // Anthropic counts cache reads and writes apart from input_tokens; the total input is their sum.
+  const cached = u.cache_read_input_tokens ?? 0;
+  yield usage(model, u.input_tokens + cached + (u.cache_creation_input_tokens ?? 0), cached, u.output_tokens);
   if (final.stop_reason === "refusal") {
     yield { type: "refusal", message: "Claude no respondió a esta solicitud." };
   } else if (final.stop_reason === "max_tokens") {
@@ -122,9 +135,10 @@ let openai: OpenAI | null = null;
 
 async function* streamOpenAI(req: CompletionRequest): AsyncGenerator<ProviderEvent> {
   openai ??= new OpenAI();
+  const model = modelFor("openai", req.role);
   const stream = await openai.responses.create(
     {
-      model: process.env.OPENAI_MODEL || "gpt-5.5",
+      model,
       instructions: [req.instructions, req.manuscript, req.project].filter(Boolean).join("\n\n"),
       input: req.prompt,
       max_output_tokens: 16000,
@@ -134,18 +148,26 @@ async function* streamOpenAI(req: CompletionRequest): AsyncGenerator<ProviderEve
   );
 
   let refused = false;
+  let truncated = false;
+  let used: ProviderEvent | null = null;
   for await (const event of stream) {
+    if ((event.type === "response.completed" || event.type === "response.incomplete") && event.response.usage) {
+      const u = event.response.usage;
+      used = usage(model, u.input_tokens, u.input_tokens_details?.cached_tokens ?? 0, u.output_tokens);
+    }
     if (event.type === "response.output_text.delta") yield { type: "text", text: event.delta };
     else if (event.type === "response.refusal.delta") refused = true;
     else if (event.type === "response.incomplete") {
       const reason = event.response.incomplete_details?.reason;
       if (reason === "content_filter") refused = true;
-      else if (reason === "max_output_tokens") yield { type: "truncated" };
+      else if (reason === "max_output_tokens") truncated = true;
     } else if (event.type === "response.failed" || event.type === "error") {
       throw new OpenAIStreamError("GPT no pudo completar la respuesta.");
     }
   }
+  if (used) yield used;
   if (refused) yield { type: "refusal", message: "GPT no respondió a esta solicitud." };
+  else if (truncated) yield { type: "truncated" };
 }
 
 // ---------- Grok (xAI, Chat Completions-style REST API) ----------
@@ -153,6 +175,7 @@ async function* streamOpenAI(req: CompletionRequest): AsyncGenerator<ProviderEve
 class XaiError extends Error {}
 
 async function* streamXai(req: CompletionRequest): AsyncGenerator<ProviderEvent> {
+  const model = modelFor("xai", req.role);
   const system = [req.instructions, req.manuscript, req.project].filter(Boolean).join("\n\n");
   let res: Response;
   try {
@@ -161,8 +184,9 @@ async function* streamXai(req: CompletionRequest): AsyncGenerator<ProviderEvent>
       signal: req.signal,
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.XAI_API_KEY}` },
       body: JSON.stringify({
-        model: process.env.XAI_MODEL || "grok-4",
+        model,
         stream: true,
+        stream_options: { include_usage: true },
         max_tokens: 16000,
         messages: [
           { role: "system", content: system },
@@ -187,6 +211,7 @@ async function* streamXai(req: CompletionRequest): AsyncGenerator<ProviderEvent>
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = "";
   let finish: string | null = null;
+  let used: ProviderEvent | null = null;
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -203,12 +228,17 @@ async function* streamXai(req: CompletionRequest): AsyncGenerator<ProviderEvent>
         continue;
       }
       if (chunk.error) throw new XaiError("Grok devolvió un error durante la respuesta.");
+      if (chunk.usage) {
+        const u = chunk.usage;
+        used = usage(model, u.prompt_tokens ?? 0, u.prompt_tokens_details?.cached_tokens ?? 0, u.completion_tokens ?? 0);
+      }
       const choice = chunk.choices?.[0];
       if (choice?.delta?.content) yield { type: "text", text: choice.delta.content };
       if (choice?.finish_reason) finish = choice.finish_reason;
     }
   }
 
+  if (used) yield used;
   if (finish === "content_filter") yield { type: "refusal", message: "Grok no respondió a esta solicitud." };
   else if (finish === "length") yield { type: "truncated" };
 }

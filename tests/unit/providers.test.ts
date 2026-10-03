@@ -30,16 +30,20 @@ before(async () => {
 });
 after(() => server.close());
 
-async function collect(id: "anthropic" | "openai" | "xai", req: { instructions?: string; manuscript?: string | null } = {}) {
-  const events: { type: string; text?: string }[] = [];
+async function collect(
+  id: "anthropic" | "openai" | "xai",
+  req: { instructions?: string; manuscript?: string | null; role?: "write" | "advise" | "digest" } = {},
+) {
+  const events: { type: string; text?: string; [k: string]: unknown }[] = [];
   const stream = providers.getProvider(id)!.stream({
     instructions: req.instructions ?? "INSTRUCCIONES",
     manuscript: req.manuscript ?? null,
     project: "GUIA Y MEMORIA",
     prompt: "TAREA",
     signal: new AbortController().signal,
+    role: req.role,
   });
-  for await (const e of stream) events.push(e);
+  for await (const e of stream) events.push(e as (typeof events)[number]);
   return { events, text: events.map((e) => e.text ?? "").join(""), sent: log.at(-1)!.body };
 }
 
@@ -84,6 +88,50 @@ test("refusals become a 'refusal' event on every provider", async () => {
     const { events } = await collect(id, { instructions: "REFUSE-ME" });
     assert.equal(events.at(-1)?.type, "refusal", id);
   }
+});
+
+test("every provider reports real usage (input includes cached), before a refusal", async () => {
+  for (const id of ["anthropic", "openai", "xai"] as const) {
+    const { events } = await collect(id);
+    const u = events.find((e) => e.type === "usage");
+    assert.ok(u, id);
+    assert.equal(u.input, 1200, id);
+    assert.equal(u.cached, 1000, id);
+    assert.equal(u.output, 30, id);
+    assert.equal(u.costUsd, null, `${id}: sin AI_PRICES no hay costo`);
+    const refused = await collect(id, { instructions: "REFUSE-ME" });
+    assert.deepEqual(refused.events.slice(-2).map((e) => e.type), ["usage", "refusal"], id);
+  }
+  assert.equal(log.at(-1)!.body.stream_options.include_usage, true);
+});
+
+test("roles pick their own model, falling back to the writing one; prices give a cost", async () => {
+  const models = await import("@/lib/ai/models");
+  assert.equal(models.modelFor("anthropic", "advise"), "claude-opus-5-5");
+  process.env.ANTHROPIC_MODEL_ADVISE = "modelo-consejero";
+  process.env.OPENAI_MODEL_DIGEST = "modelo-barato";
+  process.env.AI_PRICES = JSON.stringify({ "modelo-consejero": { input: 10, cached: 1, output: 50 } });
+  try {
+    assert.equal(models.modelFor("anthropic", "advise"), "modelo-consejero");
+    assert.equal(models.modelFor("anthropic", "digest"), "claude-opus-5-5");
+    assert.equal(models.modelFor("openai", "digest"), "modelo-barato");
+    assert.equal(models.modelFor("openai"), "gpt-5.5");
+    const { events, sent } = await collect("anthropic", { role: "advise" });
+    assert.equal(sent.model, "modelo-consejero");
+    const u = events.find((e) => e.type === "usage")!;
+    // 200 fresh × 10 + 1000 cached × 1 + 30 out × 50, per million.
+    assert.ok(Math.abs((u.costUsd as number) - 4500 / 1e6) < 1e-12);
+    process.env.AI_PRICES = "not json";
+    assert.equal(models.costUsd("modelo-consejero", 1, 0, 1), null);
+  } finally {
+    delete process.env.ANTHROPIC_MODEL_ADVISE;
+    delete process.env.OPENAI_MODEL_DIGEST;
+    delete process.env.AI_PRICES;
+  }
+  assert.equal(models.confirmTokens(), 150_000);
+  process.env.AI_CONFIRM_TOKENS = "5000";
+  assert.equal(models.confirmTokens(), 5000);
+  delete process.env.AI_CONFIRM_TOKENS;
 });
 
 test("a rejected key gives a readable error", async () => {

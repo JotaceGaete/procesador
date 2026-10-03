@@ -593,6 +593,93 @@ input:focus,
 .retry-with {
   margin: 10px 0 0;
 }
+.usage-line {
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+
+/* ---------- Asistente | Consejero ---------- */
+.sections {
+  display: flex;
+  gap: 14px;
+}
+.sections button {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+}
+.sections button.on {
+  color: var(--text);
+}
+.overview {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.overview[aria-busy="true"] {
+  opacity: 0.7;
+}
+.overview-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.overview h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.overview ul,
+.overview ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.presence li {
+  display: flex;
+  flex-direction: column;
+  padding: 3px 0;
+}
+.tabs.small {
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.repetitions > li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--faint);
+}
+.repetitions p {
+  margin: 0 0 4px;
+}
+.repetitions .phrase {
+  font-family: var(--serif);
+}
+.repetitions ol li {
+  font-size: 13px;
+  padding: 2px 0;
+}
+.repetitions .snippet {
+  color: var(--muted);
+  font-family: var(--serif);
+}
+.novel-map li {
+  padding: 3px 0;
+}
+.novel-map li.current .map-title {
+  font-weight: 600;
+}
+.map-who {
+  display: block;
+}
+.usage-month {
+  margin: 0;
+}
 .compare-actions {
   flex-wrap: wrap;
 }

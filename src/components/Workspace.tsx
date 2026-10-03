@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Chapter, ChapterInfo, CharacterImage, ManuscriptImage, Memory, Novel, ProviderId } from "@/lib/types";
+import type { AIPanelSection, Chapter, ChapterInfo, CharacterImage, ManuscriptImage, Memory, Novel, ProviderId } from "@/lib/types";
 import { api, readPref, writePref } from "@/lib/client";
 import { chapterLabel } from "@/lib/ai/context";
 import type { SaveState } from "./useAutosave";
@@ -23,6 +23,7 @@ interface Loaded {
   manuscriptImages: ManuscriptImage[];
   providers: ProviderId[];
   defaultProvider: ProviderId | null;
+  confirmTokens: number;
 }
 
 const SAVE_LABELS: Record<SaveState, string> = {
@@ -76,6 +77,9 @@ export default function Workspace({ novelId }: { novelId: string }) {
 
   const [navOpen, setNavOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [section, setSection] = useState<AIPanelSection>("assistant");
+  // A Consejero "Ir" into another chapter: applied once that chapter's editor is mounted.
+  const pendingGoTo = useRef<{ chapterId: string; start: number; end: number; text: string } | null>(null);
   const [focusMode, setFocusMode] = useState(false);
   const [modal, setModal] = useState<"novel" | "memory" | "images" | null>(null);
   const editorRef = useRef<EditorHandle>(null);
@@ -108,6 +112,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
     const panelPref = readPref("panelOpen");
     setPanelOpen(panelPref ? panelPref === "1" : wide);
     setNavOpen(wide && readPref("navOpen") === "1");
+    if (readPref("panelSection") === "advisor") setSection("advisor");
   }, [novelId, openChapter]);
 
   // Keep the chapter list's counts in step with the chapter being written.
@@ -134,6 +139,42 @@ export default function Workspace({ novelId }: { novelId: string }) {
     },
     [chapter?.id, leaveChapter, openChapter],
   );
+
+  const chooseSection = useCallback((s: AIPanelSection) => {
+    setSection(s);
+    writePref("panelSection", s);
+  }, []);
+
+  /** The topbar's Asistente and Consejero: open the panel on that section, or close it if already there. */
+  const openSection = (s: AIPanelSection) => {
+    if (panelOpen && !focusMode && section === s) return toggle("panelOpen", setPanelOpen);
+    chooseSection(s);
+    if (!panelOpen) toggle("panelOpen", setPanelOpen);
+  };
+
+  const goTo = useCallback(
+    async (chapterId: string, start: number, end: number, text: string) => {
+      if (narrow()) setPanelOpen(false);
+      if (chapterId === chapter?.id) {
+        editorRef.current?.selectRange(start, end, text);
+        return;
+      }
+      pendingGoTo.current = { chapterId, start, end, text };
+      if (!(await leaveChapter())) {
+        pendingGoTo.current = null;
+        return;
+      }
+      await openChapter(chapterId);
+    },
+    [chapter?.id, leaveChapter, openChapter],
+  );
+
+  useEffect(() => {
+    const p = pendingGoTo.current;
+    if (!p || p.chapterId !== chapter?.id) return;
+    pendingGoTo.current = null;
+    requestAnimationFrame(() => editorRef.current?.selectRange(p.start, p.end, p.text));
+  }, [chapter?.id]);
 
   const toggle = (key: "navOpen" | "panelOpen", set: (fn: (v: boolean) => boolean) => void) => {
     // On a phone the drawer and the bottom sheet would cover each other: one at a time.
@@ -321,11 +362,18 @@ export default function Workspace({ novelId }: { novelId: string }) {
             Memoria
           </button>
           <button
-            className={`link${showPanel ? " on" : ""}`}
-            onClick={() => toggle("panelOpen", setPanelOpen)}
-            aria-pressed={showPanel}
+            className={`link${showPanel && section === "assistant" ? " on" : ""}`}
+            onClick={() => openSection("assistant")}
+            aria-pressed={showPanel && section === "assistant"}
           >
             Asistente
+          </button>
+          <button
+            className={`link${showPanel && section === "advisor" ? " on" : ""}`}
+            onClick={() => openSection("advisor")}
+            aria-pressed={showPanel && section === "advisor"}
+          >
+            Consejero
           </button>
           <button className="link focus-toggle" onClick={() => setFocusMode((f) => !f)} title="Ctrl/⌘ + .  ·  Esc para salir">
             {focusMode ? "Salir" : "Concentración"}
@@ -406,6 +454,10 @@ export default function Workspace({ novelId }: { novelId: string }) {
 
       <AssistantPanel
         hidden={!showPanel}
+        section={section}
+        onSection={chooseSection}
+        confirmTokens={loaded.confirmTokens}
+        onGoTo={goTo}
         onClose={() => toggle("panelOpen", setPanelOpen)}
         novelId={novel.id}
         chapterId={chapter.id}

@@ -6,19 +6,30 @@ import {
   EDIT_ACTIONS,
   PROVIDER_LABELS,
   SCENE_LENGTHS,
+  type AIPanelSection,
   type AssistEvent,
+  type ContextPart,
   type EditAction,
   type Memory,
   type ProviderId,
   type SceneLength,
+  type Usage,
 } from "@/lib/types";
 import { estimateTokens } from "@/lib/ai/context";
 import { readPref, writePref } from "@/lib/client";
 import { appendImages, protectImages, restoreImages } from "@/lib/manuscript";
 import type { Selection } from "./ChapterEditor";
+import AdvisorOverview from "./AdvisorOverview";
+import { formatTokens, formatUsd } from "./format";
 
 interface Props {
   hidden: boolean;
+  /** Asistente (writes with the author) or Consejero (thinks with the author). */
+  section: AIPanelSection;
+  onSection(section: AIPanelSection): void;
+  /** Requests above this many tokens ask before going out (AI_CONFIRM_TOKENS). */
+  confirmTokens: number;
+  onGoTo(chapterId: string, start: number, end: number, text: string): void;
   onClose(): void;
   novelId: string;
   chapterId: string;
@@ -39,14 +50,12 @@ type Notice = { kind: "refusal" | "error" | "truncated"; message: string } | nul
 
 /** What a run was asked, so "Otra versión" and "Probar con…" repeat it exactly. */
 interface Request {
+  section: AIPanelSection;
   mode: Mode;
   action: EditAction;
   target: Selection | null;
   body: Record<string, unknown>;
 }
-
-/** Above this, a request asks for confirmation before going out. */
-const LARGE_CONTEXT_TOKENS = 30_000;
 
 // ---------- output parsing ----------
 
@@ -92,13 +101,13 @@ function parse(output: string, mode: Mode) {
   };
 }
 
-function formatTokens(n: number) {
-  return n >= 1000 ? `${(Math.round(n / 100) / 10).toLocaleString("es")} mil` : String(n);
-}
-
 function AssistantPanel(props: Props) {
   const {
     hidden,
+    section,
+    onSection,
+    confirmTokens,
+    onGoTo,
     onClose,
     novelId,
     chapterId,
@@ -114,8 +123,17 @@ function AssistantPanel(props: Props) {
     onClearSelection,
   } = props;
 
-  const [mode, setMode] = useState<Mode>("edit");
-  const [action, setAction] = useState<EditAction>("redaccion");
+  const [assistantMode, setMode] = useState<Mode>("edit");
+  const [advisorView, setAdvisorView] = useState<"selection" | "overview">("selection");
+  // Each section remembers its own action.
+  const [actions, setActions] = useState<Record<AIPanelSection, EditAction>>({
+    assistant: "redaccion",
+    advisor: "consistencia",
+  });
+  const action = actions[section];
+  const setAction = (a: EditAction) => setActions((all) => ({ ...all, [section]: a }));
+  // The Consejero only analyses a selection: it never writes scenes.
+  const mode: Mode = section === "advisor" ? "edit" : assistantMode;
   const [characterId, setCharacterId] = useState("");
   const [provider, setProvider] = useState<ProviderId | null>(defaultProvider);
   const [includeManuscript, setIncludeManuscript] = useState(false);
@@ -133,7 +151,10 @@ function AssistantPanel(props: Props) {
   const [applied, setApplied] = useState<"" | "ok" | "missing" | "inserted">("");
   // A rewrite that dropped images of the book: never applied without asking.
   const [lostImages, setLostImages] = useState<{ text: string; missing: string[] } | null>(null);
-  const [estimate, setEstimate] = useState<{ total: number; manuscript: number } | null>(null);
+  const [estimate, setEstimate] = useState<{ total: number; manuscript: number; parts?: ContextPart[] } | null>(null);
+  // What the last request read and what it cost, as the server and the provider reported it.
+  const [readParts, setReadParts] = useState<ContextPart[] | null>(null);
+  const [usage, setUsage] = useState<Usage | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const current = EDIT_ACTIONS.find((a) => a.id === action)!;
@@ -167,6 +188,7 @@ function AssistantPanel(props: Props) {
     if (mode === "scene") {
       if (!argument.trim()) return null;
       return {
+        section,
         mode,
         action,
         target: null,
@@ -183,6 +205,7 @@ function AssistantPanel(props: Props) {
     }
     if (!selection) return null;
     return {
+      section,
       mode,
       action,
       target: selection,
@@ -199,7 +222,7 @@ function AssistantPanel(props: Props) {
 
   // Live estimate of what would be sent (dry run on the server, same context builder).
   useEffect(() => {
-    if (hidden) return;
+    if (hidden || (section === "advisor" && advisorView === "overview")) return;
     const req = buildRequest();
     if (!req) {
       setEstimate(null);
@@ -224,6 +247,8 @@ function AssistantPanel(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- inputs that change the context
   }, [
     hidden,
+    section,
+    advisorView,
     mode,
     action,
     characterId,
@@ -238,11 +263,9 @@ function AssistantPanel(props: Props) {
   ]);
 
   async function run(req: Request, using: ProviderId) {
+    // Normal queries go out without asking; only an exceptionally large one is confirmed.
     const size = estimate?.total ?? 0;
-    if (
-      size > LARGE_CONTEXT_TOKENS &&
-      !confirm(`Esta consulta enviará unos ${formatTokens(size)} tokens de contexto. ¿Continuar?`)
-    )
+    if (size > confirmTokens && !confirm(`Esta consulta enviará unos ${formatTokens(size)} tokens de contexto. ¿Continuar?`))
       return;
 
     abortRef.current?.abort();
@@ -252,6 +275,8 @@ function AssistantPanel(props: Props) {
     setNotice(null);
     setApplied("");
     setLostImages(null);
+    setReadParts(null);
+    setUsage(null);
     setLast({ ...req, provider: using });
     setRunning(true);
 
@@ -286,6 +311,8 @@ function AssistantPanel(props: Props) {
           else if (event.type === "refusal") setNotice({ kind: "refusal", message: event.message });
           else if (event.type === "error") setNotice({ kind: "error", message: event.message });
           else if (event.type === "truncated") setNotice({ kind: "truncated", message: "La respuesta se cortó por longitud." });
+          else if (event.type === "context") setReadParts(event.parts);
+          else if (event.type === "usage") setUsage(event);
         }
       }
     } catch (e) {
@@ -302,9 +329,12 @@ function AssistantPanel(props: Props) {
     setLast(null);
     setApplied("");
     setLostImages(null);
+    setReadParts(null);
+    setUsage(null);
   };
 
-  const showResult = last && last.mode === mode && (output || running || notice);
+  const overview = section === "advisor" && advisorView === "overview";
+  const showResult = !overview && last && last.section === section && last.mode === mode && (output || running || notice);
   const parsed = last ? parse(output, last.mode) : null;
   const others = providers.filter((p) => p !== last?.provider);
   const req = buildRequest();
@@ -343,7 +373,10 @@ function AssistantPanel(props: Props) {
         </span>
       </label>
       {estimate && (
-        <p className={`estimate${estimate.total > LARGE_CONTEXT_TOKENS ? " large" : ""}`}>
+        <p
+          className={`estimate${estimate.total > confirmTokens ? " large" : ""}`}
+          title={estimate.parts?.map((p) => `${p.label}: ≈${formatTokens(p.tokens)}`).join("\n")}
+        >
           Contexto de esta consulta: ≈{formatTokens(estimate.total)} tokens
         </p>
       )}
@@ -351,28 +384,58 @@ function AssistantPanel(props: Props) {
   );
 
   return (
-    <aside className="panel" hidden={hidden} aria-label="Asistente">
+    <aside className="panel" hidden={hidden} aria-label={section === "advisor" ? "Consejero" : "Asistente"}>
       <header className="panel-head">
-        <span className="panel-title">Asistente</span>
+        <nav className="sections" aria-label="Sección">
+          <button
+            className={section === "assistant" ? "on" : undefined}
+            aria-pressed={section === "assistant"}
+            onClick={() => onSection("assistant")}
+            title="Escribe contigo: redacta, desarrolla y transforma el texto"
+          >
+            Asistente
+          </button>
+          <button
+            className={section === "advisor" ? "on" : undefined}
+            aria-pressed={section === "advisor"}
+            onClick={() => onSection("advisor")}
+            title="Piensa contigo: coherencia, personajes, ritmo y repeticiones"
+          >
+            Consejero
+          </button>
+        </nav>
         <span className="spacer" />
         <button className="link" onClick={onClose}>
           Ocultar
         </button>
       </header>
 
-      <nav className="tabs" aria-label="Modo">
-        <button className={mode === "edit" ? "on" : undefined} onClick={() => setMode("edit")}>
-          Editar selección
-        </button>
-        <button className={mode === "scene" ? "on" : undefined} onClick={() => setMode("scene")}>
-          Escribir escena
-        </button>
-      </nav>
+      {section === "assistant" ? (
+        <nav className="tabs" aria-label="Modo">
+          <button className={mode === "edit" ? "on" : undefined} onClick={() => setMode("edit")}>
+            Editar selección
+          </button>
+          <button className={mode === "scene" ? "on" : undefined} onClick={() => setMode("scene")}>
+            Escribir escena
+          </button>
+        </nav>
+      ) : (
+        <nav className="tabs" aria-label="Vista">
+          <button className={!overview ? "on" : undefined} onClick={() => setAdvisorView("selection")}>
+            Sobre la selección
+          </button>
+          <button className={overview ? "on" : undefined} onClick={() => setAdvisorView("overview")}>
+            Panorama
+          </button>
+        </nav>
+      )}
 
-      {mode === "edit" ? (
+      {overview ? (
+        !hidden && <AdvisorOverview novelId={novelId} chapterId={chapterId} memory={memory} getContent={getContent} onGoTo={onGoTo} />
+      ) : mode === "edit" ? (
         <>
           <div className="actions" role="group" aria-label="Acción">
-            {EDIT_ACTIONS.map((a) => (
+            {EDIT_ACTIONS.filter((a) => a.section === section).map((a) => (
               <button
                 key={a.id}
                 className={a.id === action ? "on" : undefined}
@@ -482,9 +545,9 @@ function AssistantPanel(props: Props) {
         </>
       )}
 
-      {!provider && <p className="error">No hay proveedor de IA configurado.</p>}
+      {!overview && !provider && <p className="error">No hay proveedor de IA configurado.</p>}
 
-      <div className="run">
+      <div className="run" hidden={overview}>
         <button className="btn primary" onClick={() => req && provider && run(req, provider)} disabled={!canRun}>
           {running
             ? mode === "scene"
@@ -527,6 +590,7 @@ function AssistantPanel(props: Props) {
           )}
 
           {notice && <p className={`notice ${notice.kind}`}>{notice.message}</p>}
+          {!running && (readParts || usage) && <UsageLine parts={readParts} usage={usage} />}
 
           {!running && (
             <div className="compare-actions">
@@ -616,6 +680,26 @@ function AssistantPanel(props: Props) {
         </section>
       )}
     </aside>
+  );
+}
+
+/** Discreet: what the AI read (estimated) and what the provider reported it used. */
+function UsageLine({ parts, usage }: { parts: ContextPart[] | null; usage: Usage | null }) {
+  const read = parts
+    ?.filter((p) => p.tokens > 0)
+    .map((p) => `${p.label.toLowerCase()} ≈${formatTokens(p.tokens)}`)
+    .join(" · ");
+  return (
+    <p className="usage-line muted small">
+      {read && <span>Leyó: {read}.</span>}{" "}
+      {usage && (
+        <span title={usage.model}>
+          {formatTokens(usage.input)} tokens de entrada
+          {usage.cached > 0 && ` (${formatTokens(usage.cached)} en caché)`} → {formatTokens(usage.output)} de salida
+          {usage.costUsd != null && ` · ≈ ${formatUsd(usage.costUsd)}`}
+        </span>
+      )}
+    </p>
   );
 }
 

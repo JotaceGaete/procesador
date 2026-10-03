@@ -1,6 +1,6 @@
 # Consejero literario
 
-> Estado: **diseño aprobado como base. Sin implementar.** Decisiones del autor en "Decisiones tomadas", al final; prevalecen sobre el resto del documento.
+> Estado: **diseño aprobado. Fase 1 implementada** (ver "Estado de la implementación", al final). Decisiones del autor en "Decisiones tomadas", al final; prevalecen sobre el resto del documento.
 
 ## Qué es, y qué no es
 
@@ -323,10 +323,10 @@ create table public.ai_usage (
 
 | Fase | Contenido | IA nueva |
 |---|---|---|
-| **1 · Base sin IA** | Índice de menciones y estadísticas (última aparición, presencia por capítulo), informe léxico de repeticiones, mapa de la novela. Pestañas *Asistente / Consejero* en el panel. Proveedores con roles, salida estructurada validada y registro de uso (`ai_usage`). | Ninguna |
+| **1 · Base sin IA** | Índice de menciones y estadísticas (última aparición, presencia por capítulo), informe léxico de repeticiones, mapa de la novela. Pestañas *Asistente / Consejero* en el panel, con *Consistencia, Personaje y Evolución* ya en el Consejero. Proveedores con roles y registro de uso (`ai_usage`). **Hecha.** | Ninguna |
 | **2 · Lectura de la novela** | `chapter_digests`, `story_threads`, `novel_digests`; vigencia por revisión y hash de párrafos; generación perezosa con estimación; sección *Cabos y lecturas* editable. | Fichas y global, con el modelo económico |
 | **3 · Acciones del Consejero** | Recetas de contexto y planificador determinista; *Analizar capítulo*, *¿Cómo seguir?*, *Repeticiones*, *Cabos pendientes*, *Coherencia*, *Personajes*; tarjetas tipificadas con citas verificadas e *Ir al texto*. | Respuestas del Consejero |
-| **4 · Conversación** | Conversaciones persistentes con compactación; guardar y descartar observaciones; *Proponer hecho* (hecho `suggested`); acciones sobre cabos; *Volver a comprobar* tras editar. Opcional: trasladar *Consistencia, Personaje y Evolución* del Asistente. | — |
+| **4 · Conversación** | Conversaciones persistentes con compactación; guardar y descartar observaciones; *Proponer hecho* (hecho `suggested`); acciones sobre cabos; *Volver a comprobar* tras editar. | — |
 | **5 · Lectura profunda** | Herramientas de sólo lectura para que el modelo pida fichas, pasajes o capítulos (con topes); análisis de la novela completa con caché; integración con la Cronología cuando exista. | Consultas con herramientas |
 
 Cada fase es usable por sí misma. La 1 ya responde sin coste "¿hace cuánto que no aparece X?" y "¿qué expresiones repito?".
@@ -348,4 +348,44 @@ Cada fase es usable por sí misma. La 1 ya responde sin coste "¿hace cuánto qu
    - Se muestra, de forma discreta, qué contexto se usó, los tokens y, cuando sea posible, el coste estimado o real.
    - Sólo se pide confirmación en operaciones excepcionalmente grandes que superen un **umbral configurable**, como la lectura profunda de una novela extensa.
    - Esto sustituye la confirmación previa de las secciones 3 y 7.
-5. **Evidencia:** las observaciones deben ser verificables (pendiente de completar con el resto de la indicación del autor).
+5. **Evidencia:**
+   - Las observaciones deben ser verificables. Cuando el Consejero señale una repetición, contradicción, problema de coherencia, cabo pendiente u otra observación basada en el manuscrito, muestra las referencias o citas siempre que sea posible.
+   - Las referencias son **pulsables** y llevan al fragmento del manuscrito.
+   - **Nunca se inventa una cita.** Si una observación no puede verificarse directamente en el texto, se indica con claridad.
+6. **¿Cómo seguir?:** el Consejero **no continúa escribiendo**. Propone varios caminos razonables y explica brevemente qué aprovecha cada uno. Por ejemplo: continuar el conflicto actual, recuperar un cabo anterior, cambiar temporalmente de personaje, o introducir una consecuencia de algo ya ocurrido. El autor elige; si quiere desarrollar una alternativa, la envía al Asistente.
+7. **No duplicar la Memoria:** no se crean copias de lo que ya pertenece a Personajes, Relaciones, Hechos, Lugares o la Guía Maestra. Las fichas del Consejero son índices y resúmenes de lectura, no una segunda Memoria.
+8. **Fases:** se implementa por fases (sección 10), cada una con sus pruebas, sin pasar a la siguiente con regresiones en la anterior.
+
+## Estado de la implementación
+
+### Fase 1 · Base sin IA (implementada)
+
+- **Panel con dos secciones**, *Asistente* y *Consejero*, con un botón para cada una en la barra superior.
+  - El Asistente conserva *Redacción, Diálogo, Expandir, Acortar* y *Escribir escena*.
+  - El Consejero tiene dos vistas:
+    - *Sobre la selección*, con *Consistencia, Personaje* y *Evolución* (trasladadas);
+    - *Panorama*.
+- ***Panorama***, calculado en el servidor sin IA ni almacenamiento (`src/lib/advisor/stats.ts`, `POST /api/novels/{id}/advisor`). Usa el texto abierto aunque no esté guardado y se recalcula al abrirlo o con *Actualizar*, nunca mientras se escribe. Muestra:
+  - **Personajes:** última aparición, medida desde el capítulo abierto: hace cuántos capítulos y cuántas palabras. Primero los que llevan más tiempo ausentes; también los que aún no aparecen.
+  - **Repeticiones** del capítulo y entre capítulos:
+    - frases de 3 o más palabras con al menos dos palabras de contenido; una repetición larga se informa una sola vez y entera, no en trozos;
+    - ecos: la misma palabra de contenido a menos de unas 40 palabras de distancia, sin contar nombres ni palabras funcionales.
+  - **Evidencia en cada repetición:** cada aparición lleva su fragmento y un botón ***Ir*** que la selecciona en el editor, abriendo otro capítulo si hace falta. Si el texto cambió, selecciona la aparición más cercana.
+  - **Mapa de la novela:** capítulos, palabras y quién y dónde aparece.
+  - **Uso de la IA** en el mes.
+- **Un modelo por función:**
+  - `{PROVEEDOR}_MODEL` para la escritura;
+  - `{PROVEEDOR}_MODEL_ADVISE` para el Consejero;
+  - `{PROVEEDOR}_MODEL_DIGEST` para el análisis económico.
+
+  Si una función no tiene modelo propio, usa el de escritura (`src/lib/ai/models.ts`). Las tres acciones de análisis ya usan el modelo del Consejero.
+- **Uso y coste:**
+  - Cada proveedor informa del uso real: entrada, en caché y salida.
+  - La respuesta empieza con el contexto enviado, por partes. Bajo el resultado se ve una línea discreta: «Leyó: … · tokens de entrada (en caché) → salida · ≈ US$».
+  - Cada consulta queda en `ai_usage`. Esa tabla no se copia al duplicar una novela y se borra con ella.
+  - El coste aparece sólo si hay precios en `AI_PRICES`: no se incluyen precios en el código porque cambian.
+  - Las consultas normales ya no piden confirmación. Sólo la piden las que superan `AI_CONFIRM_TOKENS` (150.000 por defecto).
+- **Aplazado:** la salida estructurada validada (JSON) pasa a la Fase 2, donde la usan por primera vez las fichas.
+- **Pruebas:**
+  - unitarias de estadísticas, repeticiones, modelos por función, precios y uso por proveedor;
+  - E2E de `tests/e2e/advisor.test.mjs`: Panorama, eventos de contexto y uso, filas de `ai_usage`, aislamiento, interfaz e *Ir* entre capítulos.

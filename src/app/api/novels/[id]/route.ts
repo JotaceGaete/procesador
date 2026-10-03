@@ -4,6 +4,7 @@ import { assertId, db, getMemory, getNovel, getOutline } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { cleanGuide } from "@/lib/guide";
 import { availableProviders, defaultProvider } from "@/lib/ai/providers";
+import { confirmTokens } from "@/lib/ai/models";
 import { getManuscriptImages, getNovelImages, novelFiles, removeFiles } from "@/lib/assets-server";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -25,7 +26,16 @@ export const GET = handler<Ctx>(async (_request, { params }) => {
     getManuscriptImages(novel.id),
   ]);
   return NextResponse.json(
-    { novel, chapters, memory, images, manuscriptImages, providers: availableProviders(), defaultProvider: defaultProvider() },
+    {
+      novel,
+      chapters,
+      memory,
+      images,
+      manuscriptImages,
+      providers: availableProviders(),
+      defaultProvider: defaultProvider(),
+      confirmTokens: confirmTokens(),
+    },
     { headers: { "Cache-Control": "no-store" } },
   );
 });

@@ -23,6 +23,7 @@ const ROUTES = [
   ["PATCH", `/api/memory/characters/${U}`],
   ["DELETE", `/api/memory/facts/${U}`],
   ["POST", "/api/assist"],
+  ["POST", `/api/novels/${U}/advisor`],
   ["POST", `/api/novels/${U}/assets`],
   ["POST", `/api/assets/${U}/complete`],
   ["GET", `/api/assets/${U}/thumb?v=1`],
@@ -115,6 +116,7 @@ test("the public (anon) key can't read tables or call functions", async () => {
     "assets",
     "character_images",
     "manuscript_images",
+    "ai_usage",
   ]) {
     const res = await fetch(`${STACK}/rest/v1/${table}`, { headers });
     assert.ok([401, 403].includes(res.status), `${table}: ${res.status}`);

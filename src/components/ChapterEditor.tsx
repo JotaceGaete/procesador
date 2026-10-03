@@ -28,6 +28,11 @@ export interface EditorHandle {
   removeImage(id: string): void;
   /** Puts the cursor on an image's marker (shows its card). */
   selectImage(id: string): boolean;
+  /**
+   * Selects a range and brings it into view (the Consejero's "Ir"). If the text moved
+   * since the range was measured, the nearest occurrence of `expected` is selected.
+   */
+  selectRange(start: number, end: number, expected?: string): boolean;
   /** Saves and waits; true when nothing is left unsaved. */
   flush(): Promise<boolean>;
 }
@@ -242,6 +247,29 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
         el.setSelectionRange(block.start, block.start);
         // Bring it into view: a rough line height from the font size.
         const lines = contentRef.current.slice(0, block.start).split("\n").length;
+        el.scrollTop = Math.max(0, lines * parseFloat(getComputedStyle(el).lineHeight || "28") - el.clientHeight / 3);
+        updateSelection();
+        return true;
+      },
+      selectRange(start, end, expected) {
+        const el = textareaRef.current;
+        if (!el) return false;
+        const text = contentRef.current;
+        if (expected && text.slice(start, end).toLocaleLowerCase() !== expected.toLocaleLowerCase()) {
+          const lower = text.toLocaleLowerCase();
+          const needle = expected.toLocaleLowerCase();
+          let best = -1;
+          for (let i = lower.indexOf(needle); i !== -1; i = lower.indexOf(needle, i + 1)) {
+            if (best === -1 || Math.abs(i - start) < Math.abs(best - start)) best = i;
+          }
+          if (best === -1) return false;
+          start = best;
+          end = best + expected.length;
+        }
+        if (end > text.length) return false;
+        el.focus();
+        el.setSelectionRange(start, end);
+        const lines = text.slice(0, start).split("\n").length;
         el.scrollTop = Math.max(0, lines * parseFloat(getComputedStyle(el).lineHeight || "28") - el.clientHeight / 3);
         updateSelection();
         return true;

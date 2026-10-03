@@ -14,9 +14,17 @@ Procesador de textos personal para escribir novelas con asistencia de IA. Tú im
 - **Memoria**: Personajes, Relaciones (Juan → hermano de → Pedro), Lugares y Hechos de continuidad, estos últimos ligados opcionalmente a personajes, capítulo, lugar y fecha. Cada novela tiene la suya.
   - **Memoria visual de Personajes**: tarjetas con la imagen principal (o las iniciales), y en la ficha la imagen principal y una *Galería* de referencias. Se suben con el selector o arrastrando, y se ven ampliadas con su pie y su etapa. Subir, eliminar, elegir la principal y ordenar se guardan al momento. Se conserva el original; la app sólo carga miniaturas y versiones reducidas. Reemplazar un archivo pregunta, si está compartido, si es sólo en esa imagen o en todos sus usos. Un archivo repetido nunca se guarda dos veces: se reutiliza. Las imágenes no se envían al asistente.
 - **Asistente** (panel derecho; en móvil, hoja inferior). Tiene dos modos:
-  - *Editar selección*: Redacción, Diálogo, Expandir, Acortar, Consistencia, Personaje, Evolución. Es conservador: preserva hechos, intención, voz y regionalismos. Las propuestas se muestran como **Original / Propuesta**.
+  - *Editar selección*: Redacción, Diálogo, Expandir, Acortar. Es conservador: preserva hechos, intención, voz y regionalismos. Las propuestas se muestran como **Original / Propuesta**.
   - *Escribir escena*: escribes el argumento y pulsas **Desarrollar escena**. Puedes marcar quién está en escena, el lugar y la extensión. Tu argumento es la autoridad sobre lo que ocurre; la IA sólo decide cómo contarlo. La escena se puede **insertar en el cursor**.
   - Nada se escribe en el manuscrito sin tu clic. Cada propuesta ofrece *Otra versión*, *Copiar*, *Descartar* y *Probar con* otro proveedor. Reemplazar e insertar se deshacen con `Ctrl/⌘+Z`.
+  - Bajo cada respuesta, una línea discreta indica qué se leyó, los tokens usados y, si hay precios en `AI_PRICES`, el coste aproximado. Sólo se pide confirmación por encima de `AI_CONFIRM_TOKENS`.
+- **Consejero** (mismo panel; [diseño](docs/consejero.md)): piensa contigo sobre la novela, nunca escribe en el manuscrito.
+  - *Sobre la selección*: Consistencia, Personaje y Evolución, con el modelo del Consejero.
+  - *Panorama*, sin IA, medido en el texto:
+    - cuánto hace que no aparece cada personaje;
+    - frases repetidas y ecos de palabras, en el capítulo o entre capítulos, cada aparición con *Ir* al fragmento;
+    - mapa de la novela;
+    - uso de la IA en el mes.
 - **Imágenes del manuscrito** (contenido del libro): botón *Imágenes*, pegar o arrastrar una imagen sobre el texto. Cada imagen es un párrafo marcador `[[imagen:…]]`; al poner el cursor encima aparece su tarjeta: texto alternativo (o *decorativa*), pie, crédito, disposición (en el texto o página propia), alineación, ancho y aviso de resolución calculado con el original. *Quitar del capítulo* la deja *sin colocar*, conservada. *Lectura* muestra el capítulo con sus imágenes. Una imagen de una galería se inserta sin copiar el archivo. El asistente sólo ve `[Imagen: …]`, y una reescritura que pierde una imagen no se aplica sin avisar.
 - **Concentración** (`Ctrl/⌘ + .`, `Esc` para salir): sólo el texto y el cursor.
 - **Guardado**: automático, por capítulo.
@@ -56,6 +64,10 @@ Sólo lo relevante. El manuscrito completo nunca se envía por defecto.
 | `OPENAI_MODEL` | no | `gpt-5.5` |
 | `XAI_MODEL` | no | `grok-4` |
 | `AI_PROVIDER` | no | Proveedor inicial |
+| `ANTHROPIC_MODEL_ADVISE` / `OPENAI_MODEL_ADVISE` / `XAI_MODEL_ADVISE` | no | Modelo del Consejero. Por defecto, el de escritura |
+| `ANTHROPIC_MODEL_DIGEST` / `OPENAI_MODEL_DIGEST` / `XAI_MODEL_DIGEST` | no | Modelo económico de análisis y resúmenes. Por defecto, el de escritura |
+| `AI_PRICES` | no | JSON con los precios en US$ por millón de tokens, para mostrar el coste. Ej.: `{"claude-opus-5-5":{"input":5,"cached":0.5,"output":25}}` |
+| `AI_CONFIRM_TOKENS` | no | Umbral para pedir confirmación antes de enviar. Por defecto `150000` |
 
 3. **Local**: `npm install`, `npm run dev`, `npm run typecheck`, `npm run build`.
 4. **Vercel**: importa el repositorio y añade las variables. `/api/assist` declara `maxDuration = 300` s.

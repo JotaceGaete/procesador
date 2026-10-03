@@ -225,6 +225,24 @@ create index if not exists manuscript_images_novel_idx on public.manuscript_imag
 create index if not exists manuscript_images_asset_idx on public.manuscript_images(asset_id);
 create index if not exists manuscript_images_chapter_idx on public.manuscript_images(chapter_id);
 
+-- Registro de uso de la IA (docs/consejero.md): una fila por consulta, con los tokens que
+-- informó el proveedor y su costo estimado (null si no hay precios configurados).
+-- purpose: 'assist' (Asistente), 'advise' (Consejero), 'digest' (resúmenes de capítulo).
+-- No se copia al duplicar una novela.
+create table if not exists public.ai_usage (
+  id             uuid primary key default gen_random_uuid(),
+  novel_id       uuid not null references public.novels(id) on delete cascade,
+  purpose        text not null check (purpose in ('assist', 'advise', 'digest')),
+  provider       text not null,
+  model          text not null,
+  input_tokens   integer not null default 0 check (input_tokens >= 0),
+  cached_tokens  integer not null default 0 check (cached_tokens >= 0),
+  output_tokens  integer not null default 0 check (output_tokens >= 0),
+  cost_usd       numeric(12, 6),
+  created_at     timestamptz not null default now()
+);
+create index if not exists ai_usage_novel_idx on public.ai_usage(novel_id, created_at);
+
 -- ---------------------------------------------------------------------------
 -- Triggers
 -- ---------------------------------------------------------------------------
@@ -594,7 +612,7 @@ do $$
 declare t text;
 begin
   foreach t in array array['novels', 'chapters', 'characters', 'relationships', 'places', 'facts', 'fact_characters',
-                           'assets', 'character_images', 'manuscript_images'] loop
+                           'assets', 'character_images', 'manuscript_images', 'ai_usage'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('revoke all on public.%I from anon, authenticated', t);
     execute format('grant all on public.%I to service_role', t);

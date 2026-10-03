@@ -18,7 +18,15 @@ import {
 } from "@/lib/ai/context";
 import { EDIT_INSTRUCTIONS, WRITE_INSTRUCTIONS, editPrompt, memoryBlock, scenePrompt } from "@/lib/ai/prompts";
 import { getProvider, type CompletionRequest } from "@/lib/ai/providers";
-import { EDIT_ACTIONS, SCENE_LENGTHS, type AssistEvent, type ProviderId, type SceneLength } from "@/lib/types";
+import { recordUsage, type UsagePurpose } from "@/lib/ai/usage";
+import {
+  EDIT_ACTIONS,
+  SCENE_LENGTHS,
+  type AssistEvent,
+  type ContextPart,
+  type ProviderId,
+  type SceneLength,
+} from "@/lib/types";
 
 export const maxDuration = 300;
 
@@ -38,20 +46,33 @@ export const POST = handler(async (request) => {
   const provider = getProvider(body.provider as ProviderId);
   if (!provider && !body.dryRun) throw new HttpError(400, "Ese proveedor de IA no está configurado.");
 
-  const completion = await buildRequest(body, request.signal);
+  const { novelId, purpose, ...completion } = await buildRequest(body, request.signal);
+  const parts = contextParts(completion);
 
   if (body.dryRun) {
-    const tokens = (s: string | null) => estimateTokens(s?.length ?? 0);
     return NextResponse.json({
-      total:
-        tokens(completion.instructions) + tokens(completion.manuscript) + tokens(completion.project) + tokens(completion.prompt),
-      manuscript: tokens(completion.manuscript),
+      total: parts.reduce((n, p) => n + p.tokens, 0),
+      manuscript: estimateTokens(completion.manuscript?.length ?? 0),
+      parts,
     });
   }
-  return streamResponse(provider!, completion);
+  return streamResponse(provider!, completion, parts, (u) => recordUsage(novelId, purpose, body.provider as ProviderId, u));
 });
 
-async function buildRequest(body: Record<string, unknown>, signal: AbortSignal): Promise<CompletionRequest> {
+/** What the request carries, in estimated tokens, so the panel can say what the AI read. */
+function contextParts(c: CompletionRequest): ContextPart[] {
+  const part = (label: string, s: string | null) => ({ label, tokens: estimateTokens(s?.length ?? 0) });
+  return [
+    part("Instrucciones", c.instructions),
+    part("Guía y memoria", c.project),
+    part("Texto y tarea", c.prompt),
+    ...(c.manuscript ? [part("Manuscrito completo", c.manuscript)] : []),
+  ];
+}
+
+type BuiltRequest = CompletionRequest & { novelId: string; purpose: UsagePurpose };
+
+async function buildRequest(body: Record<string, unknown>, signal: AbortSignal): Promise<BuiltRequest> {
   const novel = await getNovel(String(body.novelId ?? ""));
   const outline = await getOutline(novel.id);
   const chapterIndex = outline.findIndex((c) => c.id === body.chapterId);
@@ -121,6 +142,9 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
         after,
       }),
       signal,
+      role: "write",
+      novelId: novel.id,
+      purpose: "assist",
     };
   }
 
@@ -178,21 +202,36 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       images: protectedSelection.ids.length,
     }),
     signal,
+    // Rewrites are the Asistente's; the analyses belong to the Consejero and use its model.
+    role: action.section === "advisor" ? "advise" : "write",
+    novelId: novel.id,
+    purpose: action.section === "advisor" ? "advise" : "assist",
   };
 }
 
-function streamResponse(provider: NonNullable<ReturnType<typeof getProvider>>, completion: CompletionRequest) {
+function streamResponse(
+  provider: NonNullable<ReturnType<typeof getProvider>>,
+  completion: CompletionRequest,
+  parts: ContextPart[],
+  onUsage: (u: Extract<AssistEvent, { type: "usage" }>) => Promise<void>,
+) {
   const encoder = new TextEncoder();
   const send = (controller: ReadableStreamDefaultController<Uint8Array>, event: AssistEvent) =>
     controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
 
   const generator = provider.stream(completion);
   const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      send(controller, { type: "context", parts });
+    },
     async pull(controller) {
       try {
         const { value, done } = await generator.next();
         if (done) controller.close();
-        else send(controller, value);
+        else {
+          if (value.type === "usage") await onUsage(value);
+          send(controller, value);
+        }
       } catch (e) {
         if (!completion.signal.aborted) {
           console.error("[assist]", e instanceof Error ? e.message : e);
