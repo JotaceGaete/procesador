@@ -1,6 +1,8 @@
 # Personajes · Memoria visual (imagen principal y galería)
 
-> Estado: **aprobada como Prioridad 2.** Servidor implementado sobre la [arquitectura común de archivos](archivos.md), compartida con las [imágenes del manuscrito](manuscrito-imagenes.md). Falta la interfaz.
+> Estado: **implementada (Prioridad 2)**, servidor e interfaz, sobre la [arquitectura común de archivos](archivos.md), compartida con las [imágenes del manuscrito](manuscrito-imagenes.md).
+>
+> Pendiente de esta parte: reemplazar un archivo por una nueva versión, el aviso de archivos repetidos y, con la Cronología, `story_at`.
 > Compatible con [Cronología · Tratamiento de edades](cronologia-edades.md): la asociación temporal usa el tiempo narrativo, nunca una edad fija.
 
 ## Objetivo

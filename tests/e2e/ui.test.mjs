@@ -64,7 +64,7 @@ test("memory: add characters, a relationship and a fact through the UI", async (
     await page.getByRole("button", { name: "Añadir" }).click();
     await label("Nombre").fill(name);
     await page.getByRole("button", { name: "Guardar" }).click();
-    await page.waitForSelector(".item-list");
+    await page.waitForSelector(".character-cards");
     await page.keyboard.press("Escape");
   }
   await openMemory();
@@ -272,7 +272,7 @@ test("isolation: a second novel starts empty, without the first one's memory", a
   await editor().waitFor();
   assert.equal(await editor().inputValue(), "");
   await openMemory();
-  assert.equal(await page.locator(".item-list").count(), 0);
+  assert.equal(await page.locator(".item-list, .character-cards").count(), 0);
   await page.keyboard.press("Escape");
 });
 
@@ -333,15 +333,22 @@ test("long chapter (~1M characters): typing stays fluid and autosave works", asy
   await call(`/api/chapters/${chId}`, "PATCH", { content, revision: 0 });
   await page.goto(`${BASE}/novela/${id}`);
   await editor().waitFor();
-  await editor().evaluate((el) => {
-    el.focus();
-    el.setSelectionRange(500_000, 500_000);
-  });
-  const t0 = Date.now();
-  await page.keyboard.type("abcdefghijklmnopqrst", { delay: 0 });
-  const perKey = (Date.now() - t0) / 20;
+  // Median of three bursts of 20 keys, so one burst slowed down by the machine doesn't decide.
+  const bursts = [];
+  const keys = ["abcdefghijklmnopqrst", "ABCDEFGHIJKLMNOPQRST", "01234567890123456789"];
+  for (const k of keys) {
+    await editor().evaluate((el) => {
+      el.focus();
+      el.setSelectionRange(500_000, 500_000);
+    });
+    const t0 = Date.now();
+    await page.keyboard.type(k, { delay: 0 });
+    bursts.push((Date.now() - t0) / 20);
+  }
+  const perKey = [...bursts].sort((a, b) => a - b)[1];
   // Generous bound: headless Chromium without GPU; a plain textarea alone is ~28 ms here.
-  assert.ok(perKey < 80, `${perKey.toFixed(1)} ms per keystroke`);
+  assert.ok(perKey < 80, `${perKey.toFixed(1)} ms per keystroke (bursts: ${bursts.map((b) => b.toFixed(1)).join(", ")})`);
   await savedState();
-  assert.ok((await api(`/api/chapters/${chId}`)).content.includes("abcdefghijklmnopqrst"));
+  const saved = (await api(`/api/chapters/${chId}`)).content;
+  for (const k of keys) assert.ok(saved.includes(k), k);
 });

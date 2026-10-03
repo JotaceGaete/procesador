@@ -1,4 +1,5 @@
 // Shared by the E2E tests. Environment comes from tests/e2e/run.mjs.
+import zlib from "node:zlib";
 export const BASE = process.env.E2E_BASE;
 export const CLOSED = process.env.E2E_CLOSED;
 export const STACK = process.env.E2E_STACK;
@@ -54,3 +55,28 @@ export const events = (ndjson) =>
     .split("\n")
     .filter(Boolean)
     .map((l) => JSON.parse(l));
+
+/** A real (grey) PNG of the given size. */
+export function png(width, height) {
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(zlib.crc32(body));
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 0; // greyscale
+  const raw = Buffer.alloc((width + 1) * height, 0x80);
+  for (let y = 0; y < height; y++) raw[y * (width + 1)] = 0;
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", zlib.deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}

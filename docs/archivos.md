@@ -154,7 +154,6 @@ El código de la galería que estaba a medio hacer guarda las rutas en `characte
 
 **Pendiente:**
 
-- Interfaz: generar derivados en el navegador, tarjetas, sección *Galería* y visor.
 - `POST /api/assets/{id}/replace` (nueva versión). El esquema y las rutas ya están versionados.
 - Aviso de archivos repetidos por `sha256`.
 - `manuscript_images` (Prioridad 2b).

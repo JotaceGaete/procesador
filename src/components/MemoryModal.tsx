@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   CHARACTER_SECTIONS,
   type Character,
+  type CharacterImage,
   type ChapterInfo,
   type Fact,
   type Memory,
@@ -14,12 +15,17 @@ import {
 import { api } from "@/lib/client";
 import { chapterLabel } from "@/lib/ai/context";
 import Modal from "./Modal";
+import { CharacterCard, CharacterVisual } from "./CharacterGallery";
 
 interface Props {
   novelId: string;
   memory: Memory;
   chapters: ChapterInfo[];
+  /** Gallery images of every character (kept apart from `memory`, which feeds the assistant). */
+  images: CharacterImage[];
   onChange(memory: Memory): void;
+  /** A character's gallery changed on the server (upload, delete, main image, order…). */
+  onImagesChange(characterId: string, images: CharacterImage[]): void;
   onClose(): void;
 }
 
@@ -62,13 +68,14 @@ const RELATION_SUGGESTIONS = [
 type Draft = Record<string, string | string[] | null>;
 
 /** Narrative memory of one novel: a list per kind; picking an item swaps the list for its form. */
-export default function MemoryModal({ novelId, memory, chapters, onChange, onClose }: Props) {
+export default function MemoryModal({ novelId, memory, chapters, images, onChange, onImagesChange, onClose }: Props) {
   const [tab, setTab] = useState<MemoryKind>("characters");
   const [editing, setEditing] = useState<{ id: string | null; draft: Draft; original: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const names = new Map(memory.characters.map((c) => [c.id, c.name]));
+  const galleryOf = (id: string) => images.filter((i) => i.character_id === id);
   const placeNames = new Map(memory.places.map((p) => [p.id, p.name]));
   const dirty = editing ? JSON.stringify(editing.draft) !== editing.original : false;
 
@@ -101,7 +108,11 @@ export default function MemoryModal({ novelId, memory, chapters, onChange, onClo
 
   async function remove() {
     if (!editing?.id) return;
-    const extra = tab === "characters" ? " Se eliminarán también sus relaciones y sus vínculos con hechos." : "";
+    const count = tab === "characters" ? galleryOf(editing.id).length : 0;
+    const extra =
+      tab === "characters"
+        ? ` Se eliminarán también sus relaciones, sus vínculos con hechos${count ? ` y ${count === 1 ? "su imagen" : `sus ${count} imágenes`}` : ""}.`
+        : "";
     if (!confirm(`¿Eliminar este elemento de la memoria?${extra} No se puede deshacer.`)) return;
     setBusy(true);
     try {
@@ -112,6 +123,7 @@ export default function MemoryModal({ novelId, memory, chapters, onChange, onClo
         // Mirror the database cascade.
         next.relationships = next.relationships.filter((r) => r.from_id !== id && r.to_id !== id);
         next.facts = next.facts.map((f) => ({ ...f, character_ids: f.character_ids.filter((c) => c !== id) }));
+        onImagesChange(id, []);
       }
       if (tab === "places") next.facts = next.facts.map((f) => (f.place_id === id ? { ...f, place_id: null } : f));
       onChange(next);
@@ -182,23 +194,46 @@ export default function MemoryModal({ novelId, memory, chapters, onChange, onClo
           }}
         >
           {tab === "characters" &&
-            CHARACTER_SECTIONS.map((section) => (
-              <details key={section.title} className="group" open={section.open}>
-                <summary>{section.title}</summary>
-                {section.fields.map((f) => (
-                  <Field
-                    key={f.key}
-                    label={f.label}
-                    hint={f.hint}
-                    rows={f.rows}
-                    value={String(d[f.key] ?? "")}
-                    onChange={(v) => set(f.key, v)}
-                    required={f.key === "name"}
-                    autoFocus={f.key === "name" && !editing.id}
-                  />
-                ))}
-              </details>
-            ))}
+            (() => {
+              const sections = CHARACTER_SECTIONS.map((section) => (
+                <details key={section.title} className="group" open={section.open}>
+                  <summary>{section.title}</summary>
+                  {section.fields.map((f) => (
+                    <Field
+                      key={f.key}
+                      label={f.label}
+                      hint={f.hint}
+                      rows={f.rows}
+                      value={String(d[f.key] ?? "")}
+                      onChange={(v) => set(f.key, v)}
+                      required={f.key === "name"}
+                      autoFocus={f.key === "name" && !editing.id}
+                    />
+                  ))}
+                </details>
+              ));
+              const saved = editing.id ? memory.characters.find((c) => c.id === editing.id) : null;
+              if (!saved) {
+                return (
+                  <>
+                    {sections[0]}
+                    <div className="group static">
+                      <span className="group-title">Galería</span>
+                      <p className="muted small">Guarda la ficha para añadir la imagen principal y referencias visuales.</p>
+                    </div>
+                    {sections.slice(1)}
+                  </>
+                );
+              }
+              return (
+                <>
+                  <CharacterVisual key={saved.id} novelId={novelId} character={saved} images={galleryOf(saved.id)} onImages={onImagesChange}>
+                    {sections[0]}
+                  </CharacterVisual>
+                  {sections.slice(1)}
+                </>
+              );
+            })()}
           {tab === "characters" && editing.id && <CharacterRelations id={editing.id} memory={memory} />}
 
           {tab === "relationships" && (
@@ -353,7 +388,7 @@ export default function MemoryModal({ novelId, memory, chapters, onChange, onClo
   }
 
   return (
-    <Modal title="Memoria narrativa" onClose={onClose}>
+    <Modal title="Memoria narrativa" onClose={onClose} wide={tab === "characters"}>
       <nav className="tabs" aria-label="Memoria">
         {TABS.map((t) => (
           <button key={t.id} className={t.id === tab ? "on" : undefined} onClick={() => setTab(t.id)}>
@@ -362,7 +397,15 @@ export default function MemoryModal({ novelId, memory, chapters, onChange, onClo
           </button>
         ))}
       </nav>
-      {items.length ? (
+      {tab === "characters" && items.length ? (
+        <ul className="character-cards">
+          {memory.characters.map((c) => (
+            <li key={c.id}>
+              <CharacterCard character={c} images={galleryOf(c.id)} onOpen={() => open(c.id, toDraft(c))} />
+            </li>
+          ))}
+        </ul>
+      ) : items.length ? (
         <ul className="item-list">
           {items.map((item) => {
             const [title, sub] = label(item);

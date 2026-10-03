@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Chapter, ChapterInfo, Memory, Novel, ProviderId } from "@/lib/types";
+import type { Chapter, ChapterInfo, CharacterImage, Memory, Novel, ProviderId } from "@/lib/types";
 import { api, readPref, writePref } from "@/lib/client";
 import { chapterLabel } from "@/lib/ai/context";
 import type { SaveState } from "./useAutosave";
@@ -16,6 +16,7 @@ interface Loaded {
   novel: Novel;
   chapters: ChapterInfo[];
   memory: Memory;
+  images: CharacterImage[];
   providers: ProviderId[];
   defaultProvider: ProviderId | null;
 }
@@ -34,6 +35,13 @@ export default function Workspace({ novelId }: { novelId: string }) {
   const [novel, setNovel] = useState<Novel | null>(null);
   const [chapters, setChapters] = useState<ChapterInfo[]>([]);
   const [memory, setMemory] = useState<Memory>({ characters: [], relationships: [], places: [], facts: [] });
+  // Character galleries: never part of `memory`, which is what the assistant receives.
+  const [images, setImages] = useState<CharacterImage[]>([]);
+  const onImagesChange = useCallback(
+    (characterId: string, list: CharacterImage[]) =>
+      setImages((all) => [...all.filter((i) => i.character_id !== characterId), ...list]),
+    [],
+  );
   const [chapter, setChapter] = useState<Chapter | null>(null);
 
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -64,6 +72,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
         setNovel(data.novel);
         setChapters(data.chapters);
         setMemory(data.memory);
+        setImages(data.images);
         writePref("lastNovel", novelId);
         // Continue where the author left off in this novel.
         const last = readPref(`chapter:${novelId}`);
@@ -257,7 +266,15 @@ export default function Workspace({ novelId }: { novelId: string }) {
         />
       )}
       {modal === "memory" && (
-        <MemoryModal novelId={novel.id} memory={memory} chapters={chapters} onChange={setMemory} onClose={() => setModal(null)} />
+        <MemoryModal
+          novelId={novel.id}
+          memory={memory}
+          chapters={chapters}
+          images={images}
+          onChange={setMemory}
+          onImagesChange={onImagesChange}
+          onClose={() => setModal(null)}
+        />
       )}
     </div>
   );
