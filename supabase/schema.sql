@@ -14,7 +14,13 @@ do $$ begin
              where table_schema = 'public' and table_name = 'characters' and column_name = 'project_id') then
     drop table public.characters;
   end if;
-  drop table if exists public.projects;
+  -- Sólo la tabla del MVP (reconocible por sus columnas), nunca otra que se llame igual.
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'projects' and column_name = 'style_notes')
+     and exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'projects' and column_name = 'singleton') then
+    drop table public.projects;
+  end if;
   -- Borrador de la galería (sin publicar) que guardaba las rutas en character_images.
   if exists (select 1 from information_schema.columns
              where table_schema = 'public' and table_name = 'character_images' and column_name = 'storage_path') then

@@ -64,7 +64,11 @@ Sólo lo relevante. El manuscrito completo nunca se envía por defecto.
 
 1. **Supabase**:
    - Crea un proyecto.
-   - En **SQL Editor**, ejecuta [`supabase/schema.sql`](supabase/schema.sql). Es idempotente y elimina las tablas de la etapa anterior si existen. También crea el bucket privado `novel-files` de Storage.
+   - En **SQL Editor**, ejecuta [`supabase/schema.sql`](supabase/schema.sql). También crea el bucket privado `novel-files` de Storage.
+     - Es idempotente y conserva los datos: sólo crea lo que falta (tablas, columnas, índices, funciones, triggers, RLS y permisos).
+     - Sólo borra las tablas de la primera etapa (MVP), reconociéndolas por sus columnas.
+     - Al actualizar la app, vuelve a ejecutarlo.
+     - [`supabase/verificar.sql`](supabase/verificar.sql) (sólo lectura) lista lo que le falta a una base existente; vacío = al día.
    - Copia la *Project URL* y la clave **secret / service_role**. La clave *publishable* no sirve: el esquema le niega todo acceso.
 2. **Variables** (`cp .env.example .env.local`):
 
