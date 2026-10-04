@@ -78,7 +78,7 @@ test("escena: el inventario dice qué va y por qué; nada de lo que no va", asyn
     [
       ["Héctor", "elegido en «En escena»"],
       ["Pilar", "nombrado en el argumento"],
-      ["Anaís", "nombrado justo antes del cursor"],
+      ["Anaís", "nombrado en el texto anterior"],
     ],
   );
   assert.deepEqual(sec.places.items.map((i) => i.label), ["El puerto"]);

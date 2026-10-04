@@ -121,7 +121,7 @@ test("escena en el capítulo 4: caps. 1–3 sí, 5–6 no; hilos abiertos en est
 
 test("con la novela completa: sin fichas, pero con lo que saben y los hilos", async () => {
   const dry = (await call("/api/assist", "POST", { ...scene({ includeManuscript: true }), dryRun: true })).data;
-  assert.deepEqual(dry.sections.map((x) => x.id), ["chapter", "previous", "guide", "characters", "knowledge", "threads", "argument", "manuscript"]);
+  assert.deepEqual(dry.sections.map((x) => x.id), ["chapter", "guide", "characters", "knowledge", "threads", "argument", "manuscript"]);
   assert.ok(!dry.notices.some((n) => n.includes("ficha de lectura")));
 });
 

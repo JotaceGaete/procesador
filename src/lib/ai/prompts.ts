@@ -260,6 +260,11 @@ export function scenePrompt(opts: {
   previousChapterTail: string | null;
   before: string;
   after: string;
+  /** The current chapter from its start up to `before` (and how many words of it were left out). */
+  earlier?: string | null;
+  earlierOmitted?: number;
+  /** With the whole novel: the mark that says, inside it, where the scene goes. */
+  mark?: string | null;
   /** "La historia hasta aquí" (lib/ai/story.ts): previous chapters, knowledge, open threads. */
   story?: string | null;
   knowledge?: string | null;
@@ -277,13 +282,23 @@ export function scenePrompt(opts: {
   if (opts.previousChapterTail)
     parts.push(`Final del capítulo anterior:\n<capitulo_anterior>\n${opts.previousChapterTail}\n</capitulo_anterior>`);
   parts.push(`Estás escribiendo en: ${opts.chapter}.`);
-  parts.push(
-    opts.before.trim()
-      ? `Texto inmediatamente anterior (la escena empieza justo después):\n<antes>\n${opts.before}\n</antes>`
-      : "La escena va al principio del capítulo.",
-  );
-  if (opts.after.trim())
-    parts.push(`Texto que viene después (la escena debe poder enlazar con él):\n<despues>\n${opts.after}\n</despues>`);
+  if (opts.mark) {
+    parts.push(
+      `La escena va exactamente donde el manuscrito completo dice ${opts.mark}: continúa con naturalidad el texto que hay antes de esa marca y, si hay texto después, enlaza con él. No repitas ese texto ni incluyas la marca.`,
+    );
+  } else {
+    if (opts.earlier?.trim())
+      parts.push(
+        `El capítulo actual desde su comienzo${opts.earlierOmitted ? ` (se omite una parte intermedia de ≈${opts.earlierOmitted} palabras)` : ""}:\n<capitulo_hasta_aqui>\n${opts.earlier}${opts.earlierOmitted ? "\n[…]" : ""}\n</capitulo_hasta_aqui>`,
+      );
+    parts.push(
+      opts.before.trim()
+        ? `Texto inmediatamente anterior (la escena empieza justo después):\n<antes>\n${opts.before}\n</antes>`
+        : "La escena va al principio del capítulo.",
+    );
+    if (opts.after.trim())
+      parts.push(`Texto que viene después (la escena debe poder enlazar con él):\n<despues>\n${opts.after}\n</despues>`);
+  }
 
   const words = SCENE_LENGTHS.find((l) => l.id === opts.length)?.words;
   parts.push(`Argumento del autor (esto es lo que ocurre, y sólo esto):\n<argumento>\n${opts.argument.trim()}\n</argumento>`);

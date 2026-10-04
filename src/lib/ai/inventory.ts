@@ -61,6 +61,8 @@ export function memorySectionsFor(opts: {
   chosenCharacterReason: string;
   chosenPlaces?: string[];
   sources: NameSource[];
+  /** Included for another reason than being chosen or named (id → reason). */
+  extraReasons?: Map<string, string>;
 }): ContextSection[] {
   const { selected, memory, chapters } = opts;
   const blocks = memorySections(selected, memory, chapters, opts.currentChapterId);
@@ -83,6 +85,7 @@ export function memorySectionsFor(opts: {
           label: c.name,
           reason:
             reasonFor(c, opts.chosenCharacters, opts.chosenCharacterReason, opts.sources) ??
+            opts.extraReasons?.get(c.id) ??
             (other ? `por su relación con ${other}` : undefined),
           detail: characterSummary(c),
         };
@@ -154,19 +157,45 @@ export function sceneTextSections(opts: {
   chapterTitle: string;
   before: string;
   after: string;
+  /** The chapter from its start up to `before`, and the words of it left out. */
+  earlier?: string | null;
+  earlierOmitted?: number;
+  /** With the whole novel: the text around the cursor is not sent apart, only its place. */
+  inManuscript?: boolean;
   previousChapterTail: string | null;
   previousIndex: number;
   previousTitle: string;
   argument: string;
 }): { text: ContextSection[]; argument: ContextSection } {
   const label = chapterLabel(opts.chapterIndex, opts.chapterTitle);
-  const items: ContextItem[] = [
+  const argument: ContextSection = {
+    id: "argument",
+    label: "Tu argumento",
+    tokens: tokens(opts.argument),
+    items: [{ label: clip(opts.argument, 400) }],
+  };
+  if (opts.inManuscript)
+    return {
+      text: [{ id: "chapter", label, tokens: 0, items: [{ label: "El lugar del cursor, marcado en la novela completa" }] }],
+      argument,
+    };
+
+  const items: ContextItem[] = [];
+  if (opts.earlier?.trim())
+    items.push(
+      opts.earlierOmitted
+        ? { label: `Desde el inicio: ≈${wordsLabel(opts.earlier)}`, note: `se omiten ≈${opts.earlierOmitted.toLocaleString("es")} palabras intermedias` }
+        : { label: "Desde el inicio del capítulo" },
+    );
+  items.push(
     opts.before.trim()
       ? { label: `≈${wordsLabel(opts.before)} antes del cursor`, detail: `Empieza en: «${clip(opts.before.trim(), 120)}»` }
       : { label: "La escena va al principio del capítulo" },
-  ];
+  );
   if (opts.after.trim()) items.push({ label: `≈${wordsLabel(opts.after)} después del cursor` });
-  const text: ContextSection[] = [{ id: "chapter", label, tokens: tokens(opts.before, opts.after), items }];
+  const text: ContextSection[] = [
+    { id: "chapter", label, tokens: tokens(opts.earlier, opts.before, opts.after), items },
+  ];
   if (opts.previousChapterTail)
     text.push({
       id: "previous",
@@ -174,10 +203,7 @@ export function sceneTextSections(opts: {
       tokens: tokens(opts.previousChapterTail),
       items: [{ label: `${chapterLabel(opts.previousIndex, opts.previousTitle)}: últimas ≈${wordsLabel(opts.previousChapterTail)}` }],
     });
-  return {
-    text,
-    argument: { id: "argument", label: "Tu argumento", tokens: tokens(opts.argument), items: [{ label: clip(opts.argument, 400) }] },
-  };
+  return { text, argument };
 }
 
 export function selectionSection(selection: string, before: string, after: string): ContextSection {

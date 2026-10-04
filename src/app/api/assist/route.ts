@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { handler } from "@/lib/auth";
 import { db, getChapterTexts, getMemory, getNovel, getOutline } from "@/lib/supabase";
-import { describeImages, protectImages } from "@/lib/manuscript";
+import { countWords, describeImages, protectImages } from "@/lib/manuscript";
 import { HttpError, readJson } from "@/lib/http";
 import { compileGuide } from "@/lib/guide";
 import {
@@ -10,6 +10,7 @@ import {
   estimateTokens,
   excerpts,
   manuscriptRange,
+  nameMatcher,
   nearbyRange,
   relevantCharacters,
   selectMemory,
@@ -33,6 +34,7 @@ import {
   EDIT_ACTIONS,
   SCENE_LENGTHS,
   type AssistEvent,
+  type Character,
   type ContextPart,
   type ContextSection,
   type ProviderId,
@@ -47,6 +49,12 @@ const SCENE_BEFORE_CHARS = 6000;
 const SCENE_AFTER_CHARS = 1500;
 const PREVIOUS_CHAPTER_CHARS = 3000;
 const PASSAGE_BUDGET = 12_000;
+/** The current chapter before the text around the cursor: up to ~6.000 tokens. */
+const EARLIER_CHARS = 21_000;
+/** "Early in a chapter": the first ~1.500 words, where a scene goes on from the previous chapter. */
+const EARLY_IN_CHAPTER_CHARS = 9000;
+/** Where the scene goes, inside the whole novel when it is sent. */
+const SCENE_MARK = "⟦AQUÍ VA LA ESCENA NUEVA⟧";
 
 /**
  * One endpoint for every AI operation. `dryRun: true` returns the size of the
@@ -140,13 +148,8 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
     const near = nearbyRange(content, { start: cursor, end: cursor }, SCENE_BEFORE_CHARS, SCENE_AFTER_CHARS);
     const before = await plain(content.slice(near.start, cursor));
     const after = await plain(content.slice(cursor, near.end));
-
-    let previousChapterTail: string | null = null;
-    if (before.trim().length < 1500 && chapterIndex > 0) {
-      const prev = (await manuscript()).chapters[chapterIndex - 1];
-      previousChapterTail = (await plain(prev.content.slice(-PREVIOUS_CHAPTER_CHARS).trim())) || null;
-    }
     const length = (SCENE_LENGTHS.some((l) => l.id === body.length) ? body.length : "media") as SceneLength;
+
     // The Consejero's reading of the novel, as far as this point (docs/asistente-contexto.md).
     const [rows, digests, threads, global] = await Promise.all([
       chapterRows(novel.id),
@@ -154,14 +157,34 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       threadRows(novel.id),
       novelDigestRow(novel.id),
     ]);
-    const selected = selectMemory(memory, {
-      // Who is in the scene: the chosen ones, those named in the argument and those just on stage.
-      text: `${argument}\n${before.slice(-1500)}`,
-      characterIds,
+
+    // Who is in the scene: the chosen ones, those named in the argument or in the text before the
+    // cursor, and, early in a chapter, those on stage in the previous one (the scene goes on from there).
+    const previousDigest = chapterIndex > 0 ? digests.find((d) => d.chapter_id === outline[chapterIndex - 1].id) : null;
+    const continuing =
+      previousDigest && cursor <= EARLY_IN_CHAPTER_CHARS
+        ? previousDigest.presence
+            .filter((p) => p.kind === "present" && !characterIds.includes(p.character) && memory.characters.some((c) => c.id === p.character))
+            .map((p) => p.character)
+        : [];
+    const picked = selectMemory(memory, {
+      text: `${argument}\n${before}`,
+      characterIds: [...characterIds, ...continuing],
       placeIds,
       chapterId: chapter.id,
       chapterOrder,
     });
+    // Relationships of the people chosen in "En escena" go with anyone (the other one only by name).
+    const chosen = new Set(characterIds);
+    const extra = memory.relationships.filter(
+      (r) => (chosen.has(r.from_id) || chosen.has(r.to_id)) && !picked.relationships.some((x) => x.id === r.id),
+    );
+    // Listed (and sent) in order: chosen, named, then those carried over from the previous chapter.
+    const named = (c: Character) => Boolean(nameMatcher(c)?.test(`${argument}\n${before}`));
+    const rank = (c: Character) => (chosen.has(c.id) ? 0 : continuing.includes(c.id) && !named(c) ? 2 : 1);
+    const characters = [...picked.characters].sort((a, b) => rank(a) - rank(b));
+    const selected: SelectedMemory = { ...picked, characters, relationships: [...picked.relationships, ...extra] };
+
     const story = storySoFar({
       chapters: rows,
       currentIndex: chapterIndex,
@@ -177,31 +200,64 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       names: new Map(memory.characters.map((c) => [c.id, c.name])),
       includeManuscript,
     });
-    const whole = includeManuscript ? await plain((await manuscript()).text) : null;
+
+    // With the whole novel the text around the cursor is already there: the cursor is marked in it
+    // instead of sending that text twice. Without it, the chapter from its start, and the end of the
+    // previous one when the scene opens a chapter.
+    let whole: string | null = null;
+    let earlier: string | null = null;
+    let earlierOmitted = 0;
+    let previousChapterTail: string | null = null;
+    if (includeManuscript) {
+      const full = await manuscript();
+      const marked = `${content.slice(0, cursor)}\n\n${SCENE_MARK}\n\n${content.slice(cursor)}`;
+      whole = await plain(buildManuscript(full.chapters, { id: chapter.id, content: marked }).text);
+    } else {
+      const head = content.slice(0, near.start);
+      if (head.trim()) {
+        if (head.length <= EARLIER_CHARS) earlier = await plain(head);
+        else {
+          // The beginning of the chapter, cut at a paragraph; the middle is left out, said so.
+          const cut = head.lastIndexOf("\n", EARLIER_CHARS);
+          const end = cut > EARLIER_CHARS / 2 ? cut : EARLIER_CHARS;
+          earlier = await plain(head.slice(0, end));
+          earlierOmitted = countWords(head.slice(end));
+        }
+      }
+      if (before.trim().length < 1500 && !earlier && chapterIndex > 0) {
+        const prev = (await manuscript()).chapters[chapterIndex - 1];
+        previousChapterTail = (await plain(prev.content.slice(-PREVIOUS_CHAPTER_CHARS).trim())) || null;
+      }
+    }
+
     const prev = chapterIndex > 0 ? outline[chapterIndex - 1] : null;
     const texts = sceneTextSections({
       chapterIndex,
       chapterTitle: chapter.title,
       before,
       after,
+      earlier,
+      earlierOmitted,
+      inManuscript: includeManuscript,
       previousChapterTail,
       previousIndex: chapterIndex - 1,
       previousTitle: prev?.title ?? "",
       argument,
     });
     const memorySections = memorySectionsFor({
-        selected,
-        memory,
-        chapters: outline,
-        currentChapterId: chapter.id,
-        chosenCharacters: characterIds,
-        chosenCharacterReason: "elegido en «En escena»",
-        chosenPlaces: placeIds,
-        sources: [
-          { reason: "nombrado en el argumento", text: argument },
-          { reason: "nombrado justo antes del cursor", text: before.slice(-1500) },
-        ],
-      });
+      selected,
+      memory,
+      chapters: outline,
+      currentChapterId: chapter.id,
+      chosenCharacters: characterIds,
+      chosenCharacterReason: "elegido en «En escena»",
+      chosenPlaces: placeIds,
+      sources: [
+        { reason: "nombrado en el argumento", text: argument },
+        { reason: "nombrado en el texto anterior", text: before },
+      ],
+      extraReasons: new Map(continuing.map((id) => [id, "en escena en el capítulo anterior"])),
+    });
     const kind = (id: string) => memorySections.filter((x) => x.id === id);
     const sections: ContextSection[] = [
       ...texts.text,
@@ -227,8 +283,11 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
         length,
         chapter: chapterLabel(chapterIndex, chapter.title),
         previousChapterTail,
-        before,
-        after,
+        earlier,
+        earlierOmitted,
+        before: includeManuscript ? "" : before,
+        after: includeManuscript ? "" : after,
+        mark: includeManuscript ? SCENE_MARK : null,
         story: story.story,
         knowledge: story.knowledge,
         threads: story.threads,

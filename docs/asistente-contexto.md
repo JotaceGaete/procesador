@@ -1,6 +1,6 @@
 # Asistente: la historia hasta aquí, y «Ver contexto»
 
-> Estado: **fases 1 y 2 implementadas** («Ver contexto»; fichas anteriores, lo que saben e hilos abiertos). Fase 3 pendiente. Decisiones 1–4 y 6 tomadas con las propuestas (ver al final).
+> Estado: **fases 1, 2 y 3 implementadas.** Decisiones tomadas al final.
 
 ## El problema
 
