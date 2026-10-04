@@ -192,11 +192,15 @@ test("Desarrollar escena: estimate shown, proposal only, request carries guide a
   assert.match(system, /Juan estuvo con Marta/);
 });
 
-test("Desarrollar escena: insert at the cursor as new paragraphs; Ctrl+Z removes it", async () => {
+test("Desarrollar escena: insert at the cursor as new paragraphs; the proposal leaves the panel; Ctrl+Z removes it", async () => {
   await page.getByRole("button", { name: "Insertar en el cursor" }).click();
   const after = await editor().inputValue();
   assert.ok(after.startsWith(textBefore));
   assert.ok(after.includes("\n\nJuan dejó las llaves sobre la mesa."));
+  // Used: it leaves the panel; the cursor is right after the scene, in the manuscript.
+  assert.equal(await page.locator(".result").count(), 0);
+  assert.ok(await editor().evaluate((el) => document.activeElement === el && el.selectionStart === el.selectionEnd && el.value.slice(0, el.selectionStart).endsWith("—dijo él.")));
+  assert.match(await page.locator(".editor-notice.applied").innerText(), /Escena insertada en el cursor\. Deshacer \(Ctrl\/⌘\+Z\)/);
   await page.keyboard.press("Control+z");
   assert.equal(await editor().inputValue(), textBefore);
 });
@@ -220,16 +224,33 @@ test("edit: chosen provider answers; Original / Propuesta; replace; Ctrl+Z", asy
   const before = await editor().inputValue();
   await page.getByRole("button", { name: "Reemplazar selección" }).click();
   assert.ok((await editor().inputValue()).startsWith("Texto propuesto por el modelo."));
+  // Used: the proposal leaves the panel, the cursor is at the end of the new text (not selecting it).
+  assert.equal(await page.locator(".result").count(), 0);
+  assert.deepEqual(
+    await editor().evaluate((el) => [document.activeElement === el, el.selectionStart, el.selectionEnd]),
+    [true, "Texto propuesto por el modelo.".length, "Texto propuesto por el modelo.".length],
+  );
+  // Clearing the card doesn't take Ctrl+Z away.
   await page.keyboard.press("Control+z");
   assert.equal(await editor().inputValue(), before);
 });
 
-test("edit: 'Probar con Grok' re-runs with another provider; Descartar clears", async () => {
+test("edit: 'Probar con Grok' re-runs with another provider; Limpiar clears without using it", async () => {
+  await editor().evaluate((el) => {
+    el.focus();
+    el.setSelectionRange(0, 8);
+  });
+  await page.keyboard.press("Shift+ArrowRight");
+  await page.keyboard.press("Shift+ArrowLeft");
+  await page.getByRole("button", { name: "Proponer cambios" }).click();
+  await page.waitForSelector("text=Reemplazar selección");
+  const text = await editor().inputValue();
   await page.getByRole("button", { name: "Grok" }).click();
   await page.waitForSelector("text=Reemplazar selección");
   assert.equal((await aiLog()).at(-1).provider, "xai");
-  await page.getByRole("button", { name: "Descartar" }).click();
+  await page.getByRole("button", { name: "Limpiar" }).click();
   assert.equal(await page.locator(".result").count(), 0);
+  assert.equal(await editor().inputValue(), text, "the manuscript untouched");
 });
 
 // ---------------------------------------------------------------- conflicts

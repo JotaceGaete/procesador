@@ -17,7 +17,9 @@ export interface EditorHandle {
   /** Replaces the original fragment with the proposal (undoable with Ctrl/⌘+Z). */
   applyRewrite(original: Selection, rewrite: string): boolean;
   /** Inserts a scene at the cursor as its own paragraphs (undoable). */
-  insertAtCursor(text: string): void;
+  insertAtCursor(text: string): boolean;
+  /** The browser's own undo on the manuscript: the same history Ctrl/⌘+Z uses. */
+  undo(): void;
   /** Collapses the selection to its end, so nothing is selected. */
   clearSelection(): void;
   /** Inserts image markers at the cursor, each in its own paragraph (undoable). */
@@ -135,9 +137,23 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
     }
   }, [onSelection, onCaret]);
 
-  /** insertText keeps the browser's undo history, so Ctrl/⌘+Z reverts it. */
+  /** Scrolls the textarea so a position is in view (a rough line height from the font size). */
+  const reveal = useCallback((position: number) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const lines = contentRef.current.slice(0, position).split("\n").length;
+    const lineHeight = parseFloat(getComputedStyle(el).lineHeight || "28");
+    const y = lines * lineHeight;
+    if (y < el.scrollTop || y > el.scrollTop + el.clientHeight - lineHeight * 2) el.scrollTop = Math.max(0, y - el.clientHeight / 3);
+  }, []);
+
+  /**
+   * insertText keeps the browser's undo history, so Ctrl/⌘+Z reverts it. `caret: "end"`
+   * leaves the cursor right after the new text, ready to keep writing (the Asistente);
+   * otherwise the new text stays selected (images, whose card follows the selection).
+   */
   const replaceRange = useCallback(
-    (start: number, end: number, text: string) => {
+    (start: number, end: number, text: string, caret: "select" | "end" = "select") => {
       const el = textareaRef.current!;
       el.focus();
       el.setSelectionRange(start, end);
@@ -146,25 +162,37 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
         setContent(current.slice(0, start) + text + current.slice(end));
       }
       requestAnimationFrame(() => {
-        el.setSelectionRange(start, start + text.length);
+        if (caret === "end") {
+          el.setSelectionRange(start + text.length, start + text.length);
+          reveal(start + text.length);
+        } else el.setSelectionRange(start, start + text.length);
         updateSelection();
       });
     },
-    [updateSelection],
+    [updateSelection, reveal],
   );
 
   /** Inserts text as its own paragraphs at a position (blank lines around it, undoable). */
   const insertParagraphs = useCallback(
-    (text: string, position: number) => {
+    (text: string, position: number, caret: "select" | "end" = "select") => {
       const current = contentRef.current;
       const at = Math.min(position, current.length);
       const before = current.slice(0, at);
       const after = current.slice(at);
       const lead = !before ? "" : before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
       const tail = !after ? "" : after.startsWith("\n\n") ? "" : after.startsWith("\n") ? "\n" : "\n\n";
-      replaceRange(at, at, `${lead}${text.trim()}${tail}`);
+      // With the cursor at the end of the inserted text itself, not after the blank line that follows it.
+      const inserted = `${lead}${text.trim()}`;
+      replaceRange(at, at, `${inserted}${tail}`, caret);
+      if (caret === "end" && tail) {
+        requestAnimationFrame(() => {
+          const el = textareaRef.current!;
+          el.setSelectionRange(at + inserted.length, at + inserted.length);
+          updateSelection();
+        });
+      }
     },
-    [replaceRange],
+    [replaceRange, updateSelection],
   );
   const imageBlock = (id: string) =>
     blocks(contentRef.current).find((b) => b.kind === "image" && b.id === id) as { start: number; end: number } | undefined;
@@ -211,11 +239,19 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
           if (best === -1) return false;
           start = best;
         }
-        replaceRange(start, start + original.text.length, rewrite);
+        replaceRange(start, start + original.text.length, rewrite, "end");
         return true;
       },
       insertAtCursor(text) {
-        insertParagraphs(text, cursorRef.current);
+        insertParagraphs(text, cursorRef.current, "end");
+        return true;
+      },
+      undo() {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        document.execCommand("undo");
+        updateSelection();
       },
       insertImages(ids) {
         if (!ids.length) return;

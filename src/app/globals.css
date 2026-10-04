@@ -1891,3 +1891,182 @@ details.group > p {
   margin: 8px 0 0;
   font-size: 12px;
 }
+
+/* ---------- Asistente on a phone (≈360–430 px) ----------
+   A compact sheet: the manuscript stays the main thing on screen. Text that is read
+   (answers, proposals) stays comfortable; controls get smaller and share rows.
+   Fields keep 16 px so iOS doesn't zoom the page when they get the focus. */
+/* The panel scrolls as a whole: its blocks never shrink to fit (the selected fragment,
+   with overflow hidden, used to collapse to a sliver when an answer filled the panel). */
+.panel > * {
+  flex-shrink: 0;
+}
+.result-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+}
+@media (max-width: 640px) {
+  .panel {
+    /* --kb: what the on-screen keyboard covers (iOS; Android resizes the layout instead). */
+    bottom: var(--kb, 0px);
+    max-height: min(58dvh, calc(var(--vvh, 100dvh) - 56px));
+    padding: 0 14px calc(14px + env(safe-area-inset-bottom));
+    gap: 8px;
+    border-radius: 12px 12px 0 0;
+    overscroll-behavior: contain;
+  }
+  /* The header stays visible while the sheet scrolls: Ocultar is always one tap away. */
+  .panel-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--paper);
+    padding: 10px 0 4px;
+  }
+  .panel .tabs {
+    gap: 14px;
+    font-size: 13px;
+  }
+  .panel .tabs button {
+    padding: 4px 0 6px;
+  }
+  .panel .actions {
+    gap: 2px 12px;
+    font-size: 13px;
+  }
+  .panel .actions button {
+    padding: 4px 0;
+  }
+  /* Character and model side by side, label above, instead of a row each. */
+  .panel .controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 10px;
+  }
+  .panel .controls > label:not(.check) {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    min-width: 0;
+  }
+  .panel .controls > label:not(.check) > span:first-child {
+    font-size: 11px;
+  }
+  .panel .controls > label:not(.check) > .muted {
+    font-size: 12px;
+  }
+  .panel .controls > .check,
+  .panel .controls > fieldset,
+  .panel .controls > .estimate {
+    grid-column: 1 / -1;
+  }
+  .panel select {
+    font-size: 16px;
+    padding: 3px 6px;
+    height: 34px;
+    min-width: 0;
+    width: 100%;
+  }
+  .panel .controls > .check {
+    font-size: 13px;
+    align-items: flex-start;
+  }
+  .panel .checks legend {
+    font-size: 11px;
+  }
+  .panel .checks .check {
+    font-size: 13px;
+  }
+  .estimate {
+    font-size: 11px;
+  }
+  .argument textarea {
+    font-size: 16px;
+    line-height: 1.4;
+    max-height: 26dvh;
+    padding: 6px 8px;
+  }
+  .argument > span {
+    font-size: 11px;
+  }
+  .quote {
+    font-size: 14px;
+    line-height: 1.45;
+    max-height: 4.4em;
+  }
+  .quote-head {
+    margin-bottom: -4px;
+  }
+  .panel .btn {
+    padding: 6px 12px;
+    font-size: 14px;
+    min-height: 36px;
+  }
+  .panel .btn.ghost {
+    padding: 6px 4px;
+  }
+  /* The answer: readable, without headings and spacing meant for a wide column. */
+  .result {
+    line-height: 1.5;
+    font-size: 14px;
+  }
+  .markdown h1,
+  .markdown h2,
+  .markdown h3 {
+    font-size: 13px;
+    margin: 10px 0 2px;
+  }
+  .markdown p,
+  .markdown ul,
+  .markdown ol {
+    margin: 6px 0;
+  }
+  .compare h3 {
+    font-size: 11px;
+    margin: 10px 0 2px;
+  }
+  /* One scroll (the sheet's), not a box scrolling inside it. The original is a reminder: three lines. */
+  .prose {
+    max-height: none;
+    overflow: visible;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  .compare .original {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .compare-actions {
+    gap: 4px 10px;
+    margin-top: 8px;
+  }
+  .usage-line,
+  .retry-with {
+    font-size: 11px;
+  }
+  .kbd-hint {
+    display: none;
+  }
+  /* Notices (the confirmation after Reemplazar / Insertar): at the bottom, just above the
+     keyboard if it is open; never over the line where the cursor is, nor over the top bar. */
+  .editor-notice {
+    top: auto;
+    bottom: calc(var(--kb, 0px) + 12px + env(safe-area-inset-bottom));
+    left: 12px;
+    right: 12px;
+    transform: none;
+    max-width: none;
+    text-align: center;
+  }
+  /* Below the sticky header when the sheet scrolls to an answer; tall enough to get there
+     even when the answer is short (the controls stay just above, one swipe away). */
+  .result {
+    scroll-margin-top: 48px;
+    min-height: calc(min(58dvh, calc(var(--vvh, 100dvh) - 56px)) - 64px);
+  }
+}

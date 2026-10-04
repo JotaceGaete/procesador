@@ -239,11 +239,51 @@ export default function Workspace({ novelId }: { novelId: string }) {
   const onAutoDigest = useCallback((on: boolean) => setNovel((n) => (n ? { ...n, auto_digest: on } : n)), []);
   const getContent = useCallback(() => editorRef.current?.getContent() ?? "", []);
   const getCursor = useCallback(() => editorRef.current?.getCursor() ?? 0, []);
+  // A proposal of the Asistente reached the manuscript: say so next to the text, with
+  // Deshacer (the editor's own undo, as Ctrl/⌘+Z). On a phone the sheet closes, so the
+  // manuscript is in view with the cursor at the end of the new text.
+  const [applied, setApplied] = useState<string | null>(null);
+  useEffect(() => {
+    if (!applied) return;
+    const t = setTimeout(() => setApplied(null), 10_000);
+    return () => clearTimeout(t);
+  }, [applied]);
+  // iOS keeps fixed elements behind the on-screen keyboard (Android resizes the layout
+  // instead): the bottom sheet and the confirmation follow the visible area through
+  // --kb (what the keyboard covers) and --vvh (the visible height).
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const root = document.documentElement;
+    const sync = () => {
+      root.style.setProperty("--kb", `${Math.round(Math.max(0, window.innerHeight - vv.height - vv.offsetTop))}px`);
+      root.style.setProperty("--vvh", `${Math.round(vv.height)}px`);
+    };
+    sync();
+    vv.addEventListener("resize", sync);
+    vv.addEventListener("scroll", sync);
+    return () => {
+      vv.removeEventListener("resize", sync);
+      vv.removeEventListener("scroll", sync);
+    };
+  }, []);
+
+  const afterApply = useCallback((ok: boolean, message: string) => {
+    if (ok) {
+      setApplied(message);
+      if (narrow()) setPanelOpen(false);
+    }
+    return ok;
+  }, []);
   const applyRewrite = useCallback(
-    (original: Selection, text: string) => editorRef.current?.applyRewrite(original, text) ?? false,
-    [],
+    (original: Selection, text: string) =>
+      afterApply(editorRef.current?.applyRewrite(original, text) ?? false, "Reemplazado en el manuscrito."),
+    [afterApply],
   );
-  const insertAtCursor = useCallback((text: string) => editorRef.current?.insertAtCursor(text), []);
+  const insertAtCursor = useCallback(
+    (text: string) => afterApply(editorRef.current?.insertAtCursor(text) ?? false, "Escena insertada en el cursor."),
+    [afterApply],
+  );
   const clearSelection = useCallback(() => editorRef.current?.clearSelection(), []);
 
   /**
@@ -433,6 +473,24 @@ export default function Workspace({ novelId }: { novelId: string }) {
               requestAnimationFrame(() => editorRef.current?.selectImage(id));
             }}
           />
+        )}
+        {applied && !notice && (
+          <p className="editor-notice applied" role="status">
+            {applied}{" "}
+            <button
+              className="link"
+              onClick={() => {
+                editorRef.current?.undo();
+                setApplied(null);
+              }}
+            >
+              Deshacer
+            </button>
+            <span className="kbd-hint muted"> (Ctrl/⌘+Z)</span>{" "}
+            <button className="link muted" onClick={() => setApplied(null)} aria-label="Cerrar aviso">
+              ×
+            </button>
+          </p>
         )}
         {notice && (
           <p className="editor-notice" role="status">

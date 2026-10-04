@@ -51,13 +51,28 @@ interface Props {
   novelChars: number;
   getContent(): string;
   getCursor(): number;
+  /** Both return true when the text reached the manuscript. */
   onApply(original: Selection, rewrite: string): boolean;
-  onInsert(text: string): void;
+  onInsert(text: string): boolean;
   onClearSelection(): void;
 }
 
 type Mode = "edit" | "scene";
 type Notice = { kind: "refusal" | "error" | "truncated"; message: string } | null;
+
+/** A tab's pending result: what was asked, what came back, and what happened when using it. */
+interface Result {
+  output: string;
+  notice: Notice;
+  last: Request & { provider: ProviderId };
+  /** The original fragment was no longer in the text: nothing was replaced. */
+  applyError: boolean;
+  /** A rewrite that dropped images of the book: never applied without asking. */
+  lostImages: { text: string; missing: string[] } | null;
+  /** What the request read and what it cost, as the server and the provider reported it. */
+  readParts: ContextPart[] | null;
+  usage: Usage | null;
+}
 
 /** What a run was asked, so "Otra versión" and "Probar con…" repeat it exactly. */
 interface Request {
@@ -159,18 +174,33 @@ function AssistantPanel(props: Props) {
   const [placeId, setPlaceId] = useState("");
   const [length, setLength] = useState<SceneLength>("media");
 
-  const [output, setOutput] = useState("");
-  const [notice, setNotice] = useState<Notice>(null);
-  const [running, setRunning] = useState(false);
-  const [last, setLast] = useState<(Request & { provider: ProviderId }) | null>(null);
-  const [applied, setApplied] = useState<"" | "ok" | "missing" | "inserted">("");
-  // A rewrite that dropped images of the book: never applied without asking.
-  const [lostImages, setLostImages] = useState<{ text: string; missing: string[] } | null>(null);
+  // One pending result per tab (Editar selección, Escribir escena, the Consejero's analysis):
+  // generating in one never discards an unused proposal in another. Using a proposal
+  // (Reemplazar / Insertar) or "Limpiar" clears only its own.
+  const [results, setResults] = useState<Record<string, Result>>({});
+  const [runningSlot, setRunningSlot] = useState<string | null>(null);
   const [estimate, setEstimate] = useState<{ total: number; manuscript: number; parts?: ContextPart[] } | null>(null);
-  // What the last request read and what it cost, as the server and the provider reported it.
-  const [readParts, setReadParts] = useState<ContextPart[] | null>(null);
-  const [usage, setUsage] = useState<Usage | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const resultRef = useRef<HTMLElement | null>(null);
+
+  const slot = `${section}:${mode}`;
+  const result = results[slot] ?? null;
+  const output = result?.output ?? "";
+  const notice = result?.notice ?? null;
+  const last = result?.last ?? null;
+  const lostImages = result?.lostImages ?? null;
+  const readParts = result?.readParts ?? null;
+  const usage = result?.usage ?? null;
+  // One request at a time; its result goes to the tab it was asked from.
+  const running = runningSlot !== null;
+  const runningHere = runningSlot === slot;
+  const update = (key: string, f: (r: Result) => Partial<Result>) =>
+    setResults((all) => (all[key] ? { ...all, [key]: { ...all[key], ...f(all[key]) } } : all));
+  const clearResult = (key: string) =>
+    setResults((all) => {
+      const { [key]: _gone, ...rest } = all;
+      return rest;
+    });
 
   const current = EDIT_ACTIONS.find((a) => a.id === action)!;
   const character = memory.characters.find((c) => c.id === characterId) ?? null;
@@ -197,6 +227,7 @@ function AssistantPanel(props: Props) {
   }, [memory, characterId, current.character, placeId]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+
 
   function buildRequest(): Request | null {
     const base = { novelId, chapterId, includeManuscript, content: getContent() };
@@ -286,14 +317,12 @@ function AssistantPanel(props: Props) {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-    setOutput("");
-    setNotice(null);
-    setApplied("");
-    setLostImages(null);
-    setReadParts(null);
-    setUsage(null);
-    setLast({ ...req, provider: using });
-    setRunning(true);
+    const key = `${req.section}:${req.mode}`;
+    setResults((all) => ({
+      ...all,
+      [key]: { output: "", notice: null, last: { ...req, provider: using }, applyError: false, lostImages: null, readParts: null, usage: null },
+    }));
+    setRunningSlot(key);
 
     try {
       const res = await fetch("/api/assist", {
@@ -322,31 +351,47 @@ function AssistantPanel(props: Props) {
         for (const line of lines) {
           if (!line.trim()) continue;
           const event = JSON.parse(line) as AssistEvent;
-          if (event.type === "text") setOutput((o) => o + event.text);
-          else if (event.type === "refusal") setNotice({ kind: "refusal", message: event.message });
-          else if (event.type === "error") setNotice({ kind: "error", message: event.message });
-          else if (event.type === "truncated") setNotice({ kind: "truncated", message: "La respuesta se cortó por longitud." });
-          else if (event.type === "context") setReadParts(event.parts);
-          else if (event.type === "usage") setUsage(event);
+          if (event.type === "text") update(key, (r) => ({ output: r.output + event.text }));
+          else if (event.type === "refusal") update(key, () => ({ notice: { kind: "refusal", message: event.message } }));
+          else if (event.type === "error") update(key, () => ({ notice: { kind: "error", message: event.message } }));
+          else if (event.type === "truncated")
+            update(key, () => ({ notice: { kind: "truncated", message: "La respuesta se cortó por longitud." } }));
+          else if (event.type === "context") update(key, () => ({ readParts: event.parts }));
+          else if (event.type === "usage") update(key, () => ({ usage: event }));
         }
       }
     } catch (e) {
-      if ((e as Error).name !== "AbortError") setNotice({ kind: "error", message: (e as Error).message });
+      if ((e as Error).name !== "AbortError") update(key, () => ({ notice: { kind: "error", message: (e as Error).message } }));
     } finally {
-      if (abortRef.current === controller) setRunning(false);
+      if (abortRef.current === controller) setRunningSlot(null);
     }
   }
 
+  // On a phone the sheet scrolls to the answer as soon as it starts, instead of leaving it
+  // below the controls.
+  // Once per request, when its answer starts to arrive (before that there is nothing to scroll to).
+  const scrolledFor = useRef<string | null>(null);
+  const answering = runningHere && output.length > 0;
+  useEffect(() => {
+    if (!runningSlot) scrolledFor.current = null;
+    else if (answering && scrolledFor.current !== runningSlot && window.matchMedia("(max-width: 999px)").matches) {
+      scrolledFor.current = runningSlot;
+      resultRef.current?.scrollIntoView({ block: "start" });
+    }
+  }, [runningSlot, answering]);
+
+  /** "Limpiar": this tab's proposal goes; the others stay. */
   const discard = () => {
-    abortRef.current?.abort();
-    setOutput("");
-    setNotice(null);
-    setLast(null);
-    setApplied("");
-    setLostImages(null);
-    setReadParts(null);
-    setUsage(null);
+    if (runningHere) abortRef.current?.abort();
+    clearResult(slot);
   };
+
+  /**
+   * After the text reached the manuscript, the proposal has done its job: it leaves the
+   * panel (the editor already has the cursor at the end of it, and its undo history).
+   * If it could not be applied, it stays, with the reason.
+   */
+  const used = (ok: boolean) => (ok ? clearResult(slot) : update(slot, () => ({ applyError: true, lostImages: null })));
 
   // The author chose a path of "¿Cómo seguir?": the Asistente gets it as the argument of a scene.
   const sendToAssistant = (text: string) => {
@@ -357,7 +402,7 @@ function AssistantPanel(props: Props) {
 
   // Views of the Consejero that are not a request about the selection.
   const overview = section === "advisor" && advisorView !== "selection";
-  const showResult = !overview && last && last.section === section && last.mode === mode && (output || running || notice);
+  const showResult = !overview && last && (output || runningHere || notice);
   const parsed = last ? parse(output, last.mode) : null;
   const others = providers.filter((p) => p !== last?.provider);
   const req = buildRequest();
@@ -628,7 +673,7 @@ function AssistantPanel(props: Props) {
 
       <div className="run" hidden={overview}>
         <button className="btn primary" onClick={() => req && provider && run(req, provider)} disabled={!canRun}>
-          {running
+          {runningHere
             ? mode === "scene"
               ? "Escribiendo…"
               : "Analizando…"
@@ -638,7 +683,7 @@ function AssistantPanel(props: Props) {
                 ? "Proponer cambios"
                 : "Analizar"}
         </button>
-        {running && (
+        {runningHere && (
           <button className="btn ghost" onClick={() => abortRef.current?.abort()}>
             Detener
           </button>
@@ -646,20 +691,27 @@ function AssistantPanel(props: Props) {
       </div>
 
       {showResult && parsed && last && (
-        <section className="result" aria-live="polite">
+        <section className="result" aria-live="polite" ref={resultRef}>
+          <div className="result-head">
+            <span className="muted small">Respuesta del {last.section === "advisor" ? "Consejero" : "Asistente"}</span>
+            <span className="spacer" />
+            <button className="link small" onClick={discard} title="Quitar esta propuesta del panel sin usarla">
+              Limpiar
+            </button>
+          </div>
           {parsed.notes && (
             <div className="markdown">
               <ReactMarkdown>{parsed.notes}</ReactMarkdown>
             </div>
           )}
-          {running && !output && <p className="muted">{last.mode === "scene" ? "Escribiendo…" : "Pensando…"}</p>}
+          {runningHere && !output && <p className="muted">{last.mode === "scene" ? "Escribiendo…" : "Pensando…"}</p>}
 
           {parsed.proposal !== null && (
             <div className="compare">
               {last.mode === "edit" && last.target && (
                 <>
                   <h3>Original</h3>
-                  <p className="prose">{last.target.text}</p>
+                  <p className="prose original">{last.target.text}</p>
                 </>
               )}
               <h3>Propuesta</h3>
@@ -669,34 +721,26 @@ function AssistantPanel(props: Props) {
           )}
 
           {notice && <p className={`notice ${notice.kind}`}>{notice.message}</p>}
-          {!running && (readParts || usage) && <UsageLine parts={readParts} usage={usage} />}
+          {!runningHere && (readParts || usage) && <UsageLine parts={readParts} usage={usage} />}
 
-          {!running && (
+          {!runningHere && (
             <div className="compare-actions">
               {parsed.proposal && (parsed.complete || parsed.untagged) && last.mode === "edit" && last.target && (
                 <button
                   className="btn primary"
-                  disabled={applied === "ok"}
                   onClick={() => {
                     // The model saw [IMAGEN n]; put the real markers back before touching the text.
                     const restored = restoreImages(parsed.proposal!, protectImages(last.target!.text).ids);
-                    if (restored.missing.length) return setLostImages(restored);
-                    setApplied(onApply(last.target!, restored.text) ? "ok" : "missing");
+                    if (restored.missing.length) return update(slot, () => ({ lostImages: restored }));
+                    used(onApply(last.target!, restored.text));
                   }}
                 >
-                  {applied === "ok" ? "Reemplazado · Ctrl/⌘+Z deshace" : "Reemplazar selección"}
+                  Reemplazar selección
                 </button>
               )}
               {parsed.proposal && (parsed.complete || parsed.untagged) && last.mode === "scene" && (
-                <button
-                  className="btn primary"
-                  disabled={applied === "inserted"}
-                  onClick={() => {
-                    onInsert(parsed.proposal!);
-                    setApplied("inserted");
-                  }}
-                >
-                  {applied === "inserted" ? "Insertada · Ctrl/⌘+Z deshace" : "Insertar en el cursor"}
+                <button className="btn primary" onClick={() => used(onInsert(parsed.proposal!))}>
+                  Insertar en el cursor
                 </button>
               )}
               <button className="btn ghost" onClick={() => run(last, last.provider)}>
@@ -707,12 +751,9 @@ function AssistantPanel(props: Props) {
                   Copiar
                 </button>
               )}
-              <button className="btn ghost" onClick={discard}>
-                Descartar
-              </button>
             </div>
           )}
-          {!running && others.length > 0 && (
+          {!runningHere && others.length > 0 && (
             <p className="retry-with muted small">
               Probar con{" "}
               {others.map((p, i) => (
@@ -740,20 +781,17 @@ function AssistantPanel(props: Props) {
               <div className="compare-actions">
                 <button
                   className="btn"
-                  onClick={() => {
-                    setApplied(onApply(last.target!, appendImages(lostImages.text, lostImages.missing)) ? "ok" : "missing");
-                    setLostImages(null);
-                  }}
+                  onClick={() => used(onApply(last.target!, appendImages(lostImages.text, lostImages.missing)))}
                 >
                   Aplicar y colocar la imagen al final
                 </button>
-                <button className="btn ghost" onClick={() => setLostImages(null)}>
+                <button className="btn ghost" onClick={() => update(slot, () => ({ lostImages: null }))}>
                   Cancelar
                 </button>
               </div>
             </div>
           )}
-          {applied === "missing" && (
+          {result?.applyError && (
             <p className="error small">El fragmento original ya no está en el texto. Copia la propuesta y pégala a mano.</p>
           )}
         </section>

@@ -16,7 +16,10 @@ Procesador de textos personal para escribir novelas con asistencia de IA. Tú im
 - **Asistente** (panel derecho; en móvil, hoja inferior). Tiene dos modos:
   - *Editar selección*: Redacción, Diálogo, Expandir, Acortar. Es conservador: preserva hechos, intención, voz y regionalismos. Las propuestas se muestran como **Original / Propuesta**.
   - *Escribir escena*: escribes el argumento y pulsas **Desarrollar escena**. Puedes marcar quién está en escena, el lugar y la extensión. Tu argumento es la autoridad sobre lo que ocurre; la IA sólo decide cómo contarlo. La escena se puede **insertar en el cursor**.
-  - Nada se escribe en el manuscrito sin tu clic. Cada propuesta ofrece *Otra versión*, *Copiar*, *Descartar* y *Probar con* otro proveedor. Reemplazar e insertar se deshacen con `Ctrl/⌘+Z`.
+  - Nada se escribe en el manuscrito sin tu clic. Cada propuesta ofrece *Otra versión*, *Copiar*, *Limpiar* y *Probar con* otro proveedor.
+  - Al *Reemplazar* o *Insertar*, la propuesta sale del panel y el cursor queda al final del texto nuevo, listo para seguir escribiendo. Un aviso ofrece *Deshacer* (el mismo historial que `Ctrl/⌘+Z`). Si no se puede aplicar, la propuesta se queda con el motivo.
+  - Cada pestaña (*Editar selección*, *Escribir escena*) guarda su propia propuesta pendiente.
+  - En el teléfono el panel es una hoja inferior compacta, de hasta el 58 % de la pantalla, que se mantiene por encima del teclado. Al aplicar una propuesta se cierra para dejar el manuscrito a la vista.
   - Bajo cada respuesta, una línea discreta indica qué se leyó, los tokens usados y, si hay precios en `AI_PRICES`, el coste aproximado. Sólo se pide confirmación por encima de `AI_CONFIRM_TOKENS`.
 - **Consejero** (mismo panel; [diseño](docs/consejero.md)): piensa contigo sobre la novela, nunca escribe en el manuscrito.
   - *Consultar*: *Analizar capítulo*, *¿Cómo seguir?*, *Repeticiones*, *Cabos pendientes*, *Coherencia*, *Personajes*, o una pregunta libre.
