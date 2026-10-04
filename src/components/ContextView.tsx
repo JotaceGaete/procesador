@@ -4,7 +4,19 @@ import type { ContextSection, ContextSectionId } from "@/lib/types";
 import { formatTokens } from "./format";
 
 /** Sections that are lists of concrete things the author can unfold to check one by one. */
-const LISTS: ContextSectionId[] = ["guide", "characters", "places", "relationships", "facts", "passages"];
+const LISTS: ContextSectionId[] = [
+  "story",
+  "guide",
+  "characters",
+  "knowledge",
+  "places",
+  "relationships",
+  "facts",
+  "threads",
+  "passages",
+];
+/** Lists whose label already says what they hold. */
+const LABELLED: ContextSectionId[] = ["guide", "story", "knowledge"];
 /** Lists whose names fit in the line itself. */
 const NAMED: ContextSectionId[] = ["characters", "places"];
 
@@ -19,6 +31,7 @@ export default function ContextView({
   instructions,
   includeManuscript,
   updating,
+  notices = [],
 }: {
   sections: ContextSection[];
   total: number;
@@ -26,6 +39,8 @@ export default function ContextView({
   includeManuscript: boolean;
   /** The inputs changed and a new estimate is on its way. */
   updating?: boolean;
+  /** What the AI does not know and the author may want to fix (chapters without a digest…). */
+  notices?: string[];
 }) {
   return (
     <div className="context-view" role="region" aria-label="Contexto que recibirá la IA" aria-busy={updating}>
@@ -39,7 +54,7 @@ export default function ContextView({
               <details>
                 <summary>
                   {s.label}
-                  {NAMED.includes(s.id) ? `: ${s.items.map((i) => i.label).join(", ")}` : s.id === "guide" ? "" : `: ${s.items.length}`}
+                  {NAMED.includes(s.id) ? `: ${s.items.map((i) => i.label).join(", ")}` : LABELLED.includes(s.id) ? "" : `: ${s.items.length}`}
                   <span className="muted"> · ≈{formatTokens(s.tokens)}</span>
                 </summary>
                 <ul className="context-items">
@@ -67,6 +82,11 @@ export default function ContextView({
         Total aproximado: ≈{formatTokens(total)} tokens
         {instructions > 0 && `, de ellos ≈${formatTokens(instructions)} de instrucciones de Procesador al modelo`}.
       </p>
+      {notices.map((n) => (
+        <p key={n} className="muted small context-notice">
+          {n}
+        </p>
+      ))}
       {!includeManuscript && (
         <p className="muted small">No lee la novela completa: sólo lo que aparece aquí.</p>
       )}

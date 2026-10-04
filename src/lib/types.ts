@@ -284,6 +284,9 @@ export type ContextSectionId =
   | "places"
   | "relationships"
   | "facts"
+  | "story"
+  | "knowledge"
+  | "threads"
   | "argument"
   | "manuscript";
 export interface ContextSection {

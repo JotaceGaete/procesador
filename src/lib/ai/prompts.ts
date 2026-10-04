@@ -35,6 +35,7 @@ Eres libre en todo lo demás: descripción, diálogos, acciones menores, gestos,
 
 ${LITERARY_PRINCIPLES}
 - La escena debe continuar con naturalidad el texto anterior (mismo narrador, persona y tiempo verbal) y, si hay texto después, enlazar con él.
+- Si recibes la historia hasta aquí (fichas de lectura de los capítulos anteriores), lo que saben los personajes o los cabos abiertos, úsalos para la continuidad: nadie sabe lo que todavía no se le ha revelado, y los cabos abiertos siguen abiertos salvo que el argumento diga otra cosa. Son resúmenes derivados del texto: si contradicen la memoria narrativa o el manuscrito, mandan éstos. Una ficha marcada como versión anterior describe un texto que el autor cambió después.
 - Muestra antes que explicar. Un buen detalle concreto vale más que tres adjetivos.
 
 Formato de respuesta: la escena completa dentro de <escena></escena>, solo prosa, sin títulos ni comentarios. Si el argumento contradice algo de la memoria narrativa (por ejemplo, un personaje que ya murió), escribe igualmente lo que pide el argumento y añade después de la escena una sola línea dentro de <aviso></aviso> señalando la contradicción. No añadas nada más.`;
@@ -259,8 +260,20 @@ export function scenePrompt(opts: {
   previousChapterTail: string | null;
   before: string;
   after: string;
+  /** "La historia hasta aquí" (lib/ai/story.ts): previous chapters, knowledge, open threads. */
+  story?: string | null;
+  knowledge?: string | null;
+  threads?: string | null;
 }): string {
   const parts: string[] = [];
+  if (opts.story)
+    parts.push(`La historia hasta aquí, según las fichas de lectura de los capítulos anteriores:\n<historia_hasta_aqui>\n${opts.story}\n</historia_hasta_aqui>`);
+  if (opts.knowledge)
+    parts.push(`Lo que ya saben los personajes de la escena, por lo ocurrido hasta aquí:\n<lo_que_saben>\n${opts.knowledge}\n</lo_que_saben>`);
+  if (opts.threads)
+    parts.push(
+      `Cabos abiertos en este punto de la novela (no los resuelvas ni abras otros si el argumento no lo indica):\n<hilos_abiertos>\n${opts.threads}\n</hilos_abiertos>`,
+    );
   if (opts.previousChapterTail)
     parts.push(`Final del capítulo anterior:\n<capitulo_anterior>\n${opts.previousChapterTail}\n</capitulo_anterior>`);
   parts.push(`Estás escribiendo en: ${opts.chapter}.`);

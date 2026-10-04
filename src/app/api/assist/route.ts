@@ -27,6 +27,8 @@ import {
   selectionSection,
 } from "@/lib/ai/inventory";
 import { recordUsage, type UsagePurpose } from "@/lib/ai/usage";
+import { storySoFar } from "@/lib/ai/story";
+import { chapterRows, digestRows, novelDigestFresh, novelDigestRow, threadRows } from "@/lib/advisor/reading";
 import {
   EDIT_ACTIONS,
   SCENE_LENGTHS,
@@ -55,7 +57,7 @@ export const POST = handler(async (request) => {
   const provider = getProvider(body.provider as ProviderId);
   if (!provider && !body.dryRun) throw new HttpError(400, "Ese proveedor de IA no está configurado.");
 
-  const { novelId, purpose, sections, ...completion } = await buildRequest(body, request.signal);
+  const { novelId, purpose, sections, notices, ...completion } = await buildRequest(body, request.signal);
   const parts = contextParts(completion);
 
   if (body.dryRun) {
@@ -67,6 +69,7 @@ export const POST = handler(async (request) => {
       // "Ver contexto": the same request, said for the author. The rest of the total are
       // Procesador's own instructions to the model (how to write, the format).
       sections,
+      notices,
       instructions: Math.max(0, total - sections.reduce((n, x) => n + x.tokens, 0)),
     });
   }
@@ -84,7 +87,13 @@ function contextParts(c: CompletionRequest): ContextPart[] {
   ];
 }
 
-type BuiltRequest = CompletionRequest & { novelId: string; purpose: UsagePurpose; sections: ContextSection[] };
+type BuiltRequest = CompletionRequest & {
+  novelId: string;
+  purpose: UsagePurpose;
+  sections: ContextSection[];
+  /** What the author should know about the context (chapters without a digest…). */
+  notices: string[];
+};
 
 async function buildRequest(body: Record<string, unknown>, signal: AbortSignal): Promise<BuiltRequest> {
   const novel = await getNovel(String(body.novelId ?? ""));
@@ -138,6 +147,13 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       previousChapterTail = (await plain(prev.content.slice(-PREVIOUS_CHAPTER_CHARS).trim())) || null;
     }
     const length = (SCENE_LENGTHS.some((l) => l.id === body.length) ? body.length : "media") as SceneLength;
+    // The Consejero's reading of the novel, as far as this point (docs/asistente-contexto.md).
+    const [rows, digests, threads, global] = await Promise.all([
+      chapterRows(novel.id),
+      digestRows(novel.id),
+      threadRows(novel.id),
+      novelDigestRow(novel.id),
+    ]);
     const selected = selectMemory(memory, {
       // Who is in the scene: the chosen ones, those named in the argument and those just on stage.
       text: `${argument}\n${before.slice(-1500)}`,
@@ -145,6 +161,21 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       placeIds,
       chapterId: chapter.id,
       chapterOrder,
+    });
+    const story = storySoFar({
+      chapters: rows,
+      currentIndex: chapterIndex,
+      liveContent: content,
+      cursor,
+      digests,
+      threads,
+      global,
+      globalCurrent: global ? novelDigestFresh(global, digests) : false,
+      // The global summary tells the whole novel: only when nothing comes after what the request shows.
+      atEnd: near.end >= content.length && rows.slice(chapterIndex + 1).every((c) => !c.content.trim()),
+      characters: selected.characters,
+      names: new Map(memory.characters.map((c) => [c.id, c.name])),
+      includeManuscript,
     });
     const whole = includeManuscript ? await plain((await manuscript()).text) : null;
     const prev = chapterIndex > 0 ? outline[chapterIndex - 1] : null;
@@ -158,10 +189,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       previousTitle: prev?.title ?? "",
       argument,
     });
-    const sections: ContextSection[] = [
-      ...texts.text,
-      guideInventory,
-      ...memorySectionsFor({
+    const memorySections = memorySectionsFor({
         selected,
         memory,
         chapters: outline,
@@ -173,12 +201,24 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
           { reason: "nombrado en el argumento", text: argument },
           { reason: "nombrado justo antes del cursor", text: before.slice(-1500) },
         ],
-      }),
+      });
+    const kind = (id: string) => memorySections.filter((x) => x.id === id);
+    const sections: ContextSection[] = [
+      ...texts.text,
+      ...(story.sections.story ? [story.sections.story] : []),
+      guideInventory,
+      ...kind("characters"),
+      ...(story.sections.knowledge ? [story.sections.knowledge] : []),
+      ...kind("places"),
+      ...kind("relationships"),
+      ...kind("facts"),
+      ...(story.sections.threads ? [story.sections.threads] : []),
       texts.argument,
       ...(await wholeNovel(whole)),
     ];
     return {
       sections,
+      notices: story.notices,
       instructions: WRITE_INSTRUCTIONS,
       manuscript: whole,
       project: project(selected),
@@ -189,6 +229,9 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
         previousChapterTail,
         before,
         after,
+        story: story.story,
+        knowledge: story.knowledge,
+        threads: story.threads,
       }),
       signal,
       role: "write",
@@ -262,6 +305,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
   ];
   return {
     sections,
+    notices: [],
     instructions: EDIT_INSTRUCTIONS,
     manuscript: whole,
     project: project(selected),

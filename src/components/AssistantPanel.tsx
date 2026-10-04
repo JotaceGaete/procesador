@@ -188,6 +188,7 @@ function AssistantPanel(props: Props) {
     parts?: ContextPart[];
     sections?: ContextSection[];
     instructions?: number;
+    notices?: string[];
     /** The inputs changed since: a new estimate is on its way. */
     stale?: boolean;
   } | null>(null);
@@ -547,6 +548,7 @@ function AssistantPanel(props: Props) {
           instructions={estimate.instructions ?? 0}
           includeManuscript={includeManuscript}
           updating={Boolean(estimate.stale)}
+          notices={estimate.notices}
         />
       )}
     </>

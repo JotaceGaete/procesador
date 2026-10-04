@@ -1,6 +1,6 @@
 # Asistente: la historia hasta aquí, y «Ver contexto»
 
-> Estado: **fase 1 implementada** («Ver contexto» sobre lo que se envía hoy y el nuevo texto de la casilla). Fases 2 y 3 pendientes; decisiones abiertas al final.
+> Estado: **fases 1 y 2 implementadas** («Ver contexto»; fichas anteriores, lo que saben e hilos abiertos). Fase 3 pendiente. Decisiones 1–4 y 6 tomadas con las propuestas (ver al final).
 
 ## El problema
 
@@ -215,7 +215,17 @@ Proveedores, modelos y registro de uso no cambian.
 
 Cada fase con sus pruebas y sin regresiones. La 1 es útil sola y hace verificable la 2.
 
-## Decisiones abiertas
+## Decisiones
+
+Tomadas con las propuestas al pedir la fase 2:
+
+- **Resumen global:** sólo cuando la escena va al final de la novela (ningún capítulo posterior con texto y nada después del cursor más allá de lo que ya se envía).
+- **Hilos posibles sin confirmar:** no se envían; «Ver contexto» dice cuántos hay.
+- **Presupuesto:** 3.000 tokens para fichas, 1.500 para el resumen global, 600 para lo que saben, 800 para los hilos (hasta 12).
+- **Con la novela completa:** sin fichas ni resumen global; lo que saben y los hilos sí (se adelantó de la fase 3).
+- **Fases:** la 1 primero.
+
+Pendientes:
 
 1. **Resumen global:** ¿sólo en el último capítulo (propuesta) o nunca para escribir?
 2. **Hilos posibles, sin confirmar:** ¿se envían marcados como «posible» o se excluyen (propuesta: excluir, y mencionar cuántos hay en «Ver contexto»)?

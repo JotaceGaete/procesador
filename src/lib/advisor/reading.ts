@@ -153,7 +153,7 @@ export async function readingState(novelId: string): Promise<ReadingState> {
 }
 
 /** The summary is current while it was made from exactly the digests there are now. */
-function novelDigestFresh(global: NovelDigest, digests: ChapterDigest[]): boolean {
+export function novelDigestFresh(global: NovelDigest, digests: ChapterDigest[]): boolean {
   const based = global.based_on ?? {};
   if (Object.keys(based).length !== digests.length) return false;
   return digests.every(
