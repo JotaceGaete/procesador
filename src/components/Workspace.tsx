@@ -386,7 +386,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
         }}
       />
 
-      <main className="editor-col">
+      <main className="editor-col" data-origin="manuscrito (editor)">
         <header className="topbar">
           <Link
             href="/"

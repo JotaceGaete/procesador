@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { NovelSummary } from "@/lib/types";
 import { api, readPref } from "@/lib/client";
+import BuildStamp from "./BuildStamp";
 
 const dateFormat = new Intl.DateTimeFormat("es", { day: "numeric", month: "short", year: "numeric" });
 
@@ -178,6 +179,9 @@ export default function Library() {
           Nueva novela
         </button>
       )}
+      <footer className="library-foot">
+        <BuildStamp />
+      </footer>
     </main>
   );
 }

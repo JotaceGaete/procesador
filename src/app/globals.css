@@ -2070,3 +2070,26 @@ details.group > p {
     min-height: calc(min(58dvh, calc(var(--vvh, 100dvh) - 56px)) - 64px);
   }
 }
+
+/* Temporary diagnostics: build stamp and ?diag=1 overlay. */
+.library-foot { margin-top: 32px; text-align: center; }
+.build-stamp { font-size: 11px; }
+/* Fixed and untouchable: it never moves the layout nor takes a tap. */
+.diag {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  max-width: min(520px, 92vw);
+  max-height: 45vh;
+  overflow: hidden;
+  pointer-events: none;
+  font: 10px/1.3 ui-monospace, monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: rgba(255, 251, 230, 0.92);
+  color: #333;
+  border: 1px dashed #c9a400;
+  padding: 4px 6px;
+  margin: 0;
+}

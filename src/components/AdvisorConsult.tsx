@@ -317,7 +317,7 @@ export default function AdvisorConsult(p: Props) {
         )}
       </div>
       {history.length > 0 && (
-        <ol className="history" aria-label="Conversación">
+        <ol className="history" aria-label="Conversación" data-origin="consejero: historial (conversación guardada)">
           {history.map((m, k) =>
             m.role === "author" ? (
               <li key={m.id} className="turn author">
@@ -418,7 +418,7 @@ export default function AdvisorConsult(p: Props) {
       {!p.provider && <p className="error">No hay proveedor de IA configurado.</p>}
 
       {last && !stored && (
-        <section className="result advisor-result" aria-live="polite">
+        <section className="result advisor-result" aria-live="polite" data-origin="consejero: respuesta en curso (estado last/text de AdvisorConsult)">
           {plan && (
             <p className="muted small plan">
               {last.question ? "Entendí la pregunta como: " : ""}

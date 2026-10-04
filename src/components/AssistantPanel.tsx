@@ -19,6 +19,7 @@ import {
 } from "@/lib/types";
 import { estimateTokens } from "@/lib/ai/context";
 import { readPref, writePref } from "@/lib/client";
+import { BUILD, diagEnabled } from "@/lib/diag";
 import { appendImages, protectImages, restoreImages } from "@/lib/manuscript";
 import type { Selection } from "./ChapterEditor";
 import AdvisorOverview from "./AdvisorOverview";
@@ -194,6 +195,28 @@ function AssistantPanel(props: Props) {
   // One request at a time; its result goes to the tab it was asked from.
   const running = runningSlot !== null;
   const runningHere = runningSlot === slot;
+  // Temporary diagnostics (?diag=1): what the panel holds, and what happened to it.
+  const [diag, setDiag] = useState(false);
+  const [diagLog, setDiagLog] = useState<string[]>([]);
+  const [tapped, setTapped] = useState("");
+  const note = (s: string) =>
+    diag && setDiagLog((l) => [...l.slice(-9), `${new Date().toLocaleTimeString("es")} ${s}`]);
+  useEffect(() => setDiag(diagEnabled()), []);
+  useEffect(() => {
+    if (!diag) return;
+    // Tapping any text tells where it comes from: the nearest data-origin, or the element.
+    const onTap = (e: Event) => {
+      const el = e.target as HTMLElement | null;
+      if (!el?.closest) return;
+      const origin = el.closest<HTMLElement>("[data-origin]");
+      const path: string[] = [];
+      for (let n: HTMLElement | null = el; n && path.length < 4; n = n.parentElement)
+        path.push(`${n.tagName.toLowerCase()}${n.className && typeof n.className === "string" ? "." + n.className.trim().split(/\s+/).join(".") : ""}`);
+      setTapped(`${origin ? origin.dataset.origin : "(sin data-origin)"} ← ${path.join(" < ")} «${(el.textContent ?? "").trim().slice(0, 40)}»`);
+    };
+    document.addEventListener("pointerdown", onTap, true);
+    return () => document.removeEventListener("pointerdown", onTap, true);
+  }, [diag]);
   const update = (key: string, f: (r: Result) => Partial<Result>) =>
     setResults((all) => (all[key] ? { ...all, [key]: { ...all[key], ...f(all[key]) } } : all));
   const clearResult = (key: string) =>
@@ -318,6 +341,7 @@ function AssistantPanel(props: Props) {
     const controller = new AbortController();
     abortRef.current = controller;
     const key = `${req.section}:${req.mode}`;
+    note(`run → ${key}`);
     setResults((all) => ({
       ...all,
       [key]: { output: "", notice: null, last: { ...req, provider: using }, applyError: false, lostImages: null, readParts: null, usage: null },
@@ -364,6 +388,7 @@ function AssistantPanel(props: Props) {
       if ((e as Error).name !== "AbortError") update(key, () => ({ notice: { kind: "error", message: (e as Error).message } }));
     } finally {
       if (abortRef.current === controller) setRunningSlot(null);
+      note(`fin ${key}`);
     }
   }
 
@@ -382,6 +407,7 @@ function AssistantPanel(props: Props) {
 
   /** "Limpiar": this tab's proposal goes; the others stay. */
   const discard = () => {
+    note(`Limpiar → clearResult(${slot})`);
     if (runningHere) abortRef.current?.abort();
     clearResult(slot);
   };
@@ -391,10 +417,14 @@ function AssistantPanel(props: Props) {
    * panel (the editor already has the cursor at the end of it, and its undo history).
    * If it could not be applied, it stays, with the reason.
    */
-  const used = (ok: boolean) => (ok ? clearResult(slot) : update(slot, () => ({ applyError: true, lostImages: null })));
+  const used = (ok: boolean) => {
+    note(`usada ok=${ok} → ${ok ? `clearResult(${slot})` : "applyError"}`);
+    return ok ? clearResult(slot) : update(slot, () => ({ applyError: true, lostImages: null }));
+  };
 
   // The author chose a path of "¿Cómo seguir?": the Asistente gets it as the argument of a scene.
   const sendToAssistant = (text: string) => {
+    note(`Enviar al Asistente → argument (${text.length} car.)`);
     setArgument(text);
     setMode("scene");
     onSection("assistant");
@@ -477,6 +507,19 @@ function AssistantPanel(props: Props) {
           Ocultar
         </button>
       </header>
+      {diag && (
+        <pre className="diag" data-origin="diag">
+          {[
+            `build ${BUILD.sha} ${BUILD.time}${BUILD.deployment ? ` ${BUILD.deployment}` : ""}`,
+            `section=${section} mode=${mode} view=${advisorView} slot=${slot}`,
+            `showResult=${Boolean(showResult)} parsed=${Boolean(parsed)} last=${Boolean(last)} runningSlot=${runningSlot ?? "-"}`,
+            `results: ${Object.entries(results).map(([k, r]) => `${k}(${r.output.length} car.${r.notice ? `, ${r.notice.kind}` : ""}${r.applyError ? ", applyError" : ""})`).join(" · ") || "(vacío)"}`,
+            `argument: ${argument.length} car. (localStorage argument:${novelId})`,
+            `toque: ${tapped || "-"}`,
+            ...diagLog,
+          ].join("\n")}
+        </pre>
+      )}
 
       {section === "assistant" ? (
         <nav className="tabs" aria-label="Modo">
@@ -597,7 +640,7 @@ function AssistantPanel(props: Props) {
               </button>
             </div>
           )}
-          <blockquote className={`quote${selection ? "" : " empty"}`}>
+          <blockquote className={`quote${selection ? "" : " empty"}`} data-origin="selection (prop: selección del editor)">
             {selection
               ? selection.text.length > 400
                 ? `${selection.text.slice(0, 400)}…`
@@ -613,6 +656,7 @@ function AssistantPanel(props: Props) {
           <label className="argument">
             <span>Argumento</span>
             <textarea
+              data-origin={`argument (estado argument, localStorage argument:${novelId})`}
               rows={6}
               value={argument}
               onChange={(e) => setArgument(e.target.value)}
@@ -691,7 +735,7 @@ function AssistantPanel(props: Props) {
       </div>
 
       {showResult && parsed && last && (
-        <section className="result" aria-live="polite" ref={resultRef}>
+        <section className="result" aria-live="polite" ref={resultRef} data-origin={`results["${slot}"] (showResult && parsed && last)`}>
           <div className="result-head">
             <span className="muted small">Respuesta del {last.section === "advisor" ? "Consejero" : "Asistente"}</span>
             <span className="spacer" />

@@ -5,6 +5,7 @@ import type { Guide, GuideKey, Novel } from "@/lib/types";
 import { GUIDE_SECTIONS, compileGuide } from "@/lib/guide";
 import { api } from "@/lib/client";
 import Modal from "./Modal";
+import BuildStamp from "./BuildStamp";
 
 type Tab = "novela" | "guia";
 
@@ -127,6 +128,7 @@ export default function NovelModal({ novel, onClose, onSaved }: { novel: Novel; 
         )}
         {error && <p className="error">{error}</p>}
         <footer className="modal-foot">
+          <BuildStamp />
           <span className="spacer" />
           <button type="button" className="btn ghost" onClick={leave}>
             Cancelar
