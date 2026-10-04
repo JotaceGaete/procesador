@@ -1,6 +1,6 @@
 # Asistente: la historia hasta aquí, y «Ver contexto»
 
-> Estado: **diseño, pendiente de aprobación.** No hay código. Las decisiones abiertas están al final.
+> Estado: **fase 1 implementada** («Ver contexto» sobre lo que se envía hoy y el nuevo texto de la casilla). Fases 2 y 3 pendientes; decisiones abiertas al final.
 
 ## El problema
 

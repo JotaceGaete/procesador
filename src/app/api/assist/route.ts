@@ -18,12 +18,21 @@ import {
 } from "@/lib/ai/context";
 import { EDIT_INSTRUCTIONS, WRITE_INSTRUCTIONS, editPrompt, memoryBlock, scenePrompt } from "@/lib/ai/prompts";
 import { getProvider, type CompletionRequest } from "@/lib/ai/providers";
+import {
+  guideSection,
+  manuscriptSection,
+  memorySectionsFor,
+  passagesSection,
+  sceneTextSections,
+  selectionSection,
+} from "@/lib/ai/inventory";
 import { recordUsage, type UsagePurpose } from "@/lib/ai/usage";
 import {
   EDIT_ACTIONS,
   SCENE_LENGTHS,
   type AssistEvent,
   type ContextPart,
+  type ContextSection,
   type ProviderId,
   type SceneLength,
 } from "@/lib/types";
@@ -46,14 +55,19 @@ export const POST = handler(async (request) => {
   const provider = getProvider(body.provider as ProviderId);
   if (!provider && !body.dryRun) throw new HttpError(400, "Ese proveedor de IA no está configurado.");
 
-  const { novelId, purpose, ...completion } = await buildRequest(body, request.signal);
+  const { novelId, purpose, sections, ...completion } = await buildRequest(body, request.signal);
   const parts = contextParts(completion);
 
   if (body.dryRun) {
+    const total = parts.reduce((n, p) => n + p.tokens, 0);
     return NextResponse.json({
-      total: parts.reduce((n, p) => n + p.tokens, 0),
+      total,
       manuscript: estimateTokens(completion.manuscript?.length ?? 0),
       parts,
+      // "Ver contexto": the same request, said for the author. The rest of the total are
+      // Procesador's own instructions to the model (how to write, the format).
+      sections,
+      instructions: Math.max(0, total - sections.reduce((n, x) => n + x.tokens, 0)),
     });
   }
   return streamResponse(provider!, completion, parts, (u) => recordUsage(novelId, purpose, body.provider as ProviderId, u));
@@ -70,7 +84,7 @@ function contextParts(c: CompletionRequest): ContextPart[] {
   ];
 }
 
-type BuiltRequest = CompletionRequest & { novelId: string; purpose: UsagePurpose };
+type BuiltRequest = CompletionRequest & { novelId: string; purpose: UsagePurpose; sections: ContextSection[] };
 
 async function buildRequest(body: Record<string, unknown>, signal: AbortSignal): Promise<BuiltRequest> {
   const novel = await getNovel(String(body.novelId ?? ""));
@@ -88,6 +102,9 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
   const guide = compileGuide(novel);
   const project = (selected: SelectedMemory) =>
     [guide, memoryBlock(selected, memory, outline, chapter.id)].filter(Boolean).join("\n\n");
+  const guideInventory = guideSection(novel, guide);
+  const wholeNovel = async (text: string | null) =>
+    text ? [manuscriptSection(text, (await manuscript()).chapters.length)] : [];
 
   // Other chapters are read from the database only when the request needs them.
   let ms: Manuscript | null = null;
@@ -129,9 +146,41 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       chapterId: chapter.id,
       chapterOrder,
     });
+    const whole = includeManuscript ? await plain((await manuscript()).text) : null;
+    const prev = chapterIndex > 0 ? outline[chapterIndex - 1] : null;
+    const texts = sceneTextSections({
+      chapterIndex,
+      chapterTitle: chapter.title,
+      before,
+      after,
+      previousChapterTail,
+      previousIndex: chapterIndex - 1,
+      previousTitle: prev?.title ?? "",
+      argument,
+    });
+    const sections: ContextSection[] = [
+      ...texts.text,
+      guideInventory,
+      ...memorySectionsFor({
+        selected,
+        memory,
+        chapters: outline,
+        currentChapterId: chapter.id,
+        chosenCharacters: characterIds,
+        chosenCharacterReason: "elegido en «En escena»",
+        chosenPlaces: placeIds,
+        sources: [
+          { reason: "nombrado en el argumento", text: argument },
+          { reason: "nombrado justo antes del cursor", text: before.slice(-1500) },
+        ],
+      }),
+      texts.argument,
+      ...(await wholeNovel(whole)),
+    ];
     return {
+      sections,
       instructions: WRITE_INSTRUCTIONS,
-      manuscript: includeManuscript ? await plain((await manuscript()).text) : null,
+      manuscript: whole,
       project: project(selected),
       prompt: scenePrompt({
         argument,
@@ -167,6 +216,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
 
   let selected: SelectedMemory;
   let passages: string | null = null;
+  let passageList: { name: string; text: string }[] = [];
   if (action.id === "consistencia") {
     selected = selectMemory(memory, base);
   } else if (action.id === "personaje" || action.id === "evolucion") {
@@ -182,22 +232,45 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
     const exclude = manuscriptRange(ms, chapter.id, near);
     // The chosen character, or (for a general check) up to three people named in the selection itself.
     const who = character ? [character] : relevantCharacters(memory.characters, [], selection).slice(0, 3);
-    const found = who.map((c) => excerpts(ms, c, exclude, Math.floor(PASSAGE_BUDGET / Math.max(1, who.length)))).filter(Boolean);
-    passages = found.length ? await plain(found.join("\n\n---\n\n")) : null;
+    const found = who
+      .map((c) => ({ name: c.name, text: excerpts(ms, c, exclude, Math.floor(PASSAGE_BUDGET / Math.max(1, who.length))) }))
+      .filter((f): f is { name: string; text: string } => Boolean(f.text));
+    passageList = found;
+    passages = found.length ? await plain(found.map((f) => f.text).join("\n\n---\n\n")) : null;
   }
 
   // Images in the selection travel as [IMAGEN n]; the panel puts the real markers back.
   const protectedSelection = protectImages(selection);
+  const whole = includeManuscript ? await plain((await manuscript()).text) : null;
+  const before = await plain(content.slice(near.start, start));
+  const after = await plain(content.slice(end, near.end));
+  const passageSection = passagesSection(passageList);
+  const sections: ContextSection[] = [
+    selectionSection(protectedSelection.text, before, after),
+    ...(passageSection ? [passageSection] : []),
+    guideInventory,
+    ...memorySectionsFor({
+      selected,
+      memory,
+      chapters: outline,
+      currentChapterId: chapter.id,
+      chosenCharacters: character ? [character.id] : [],
+      chosenCharacterReason: "elegido en «Personaje»",
+      sources: [{ reason: "nombrado en el texto", text: nearText }],
+    }),
+    ...(await wholeNovel(whole)),
+  ];
   return {
+    sections,
     instructions: EDIT_INSTRUCTIONS,
-    manuscript: includeManuscript ? await plain((await manuscript()).text) : null,
+    manuscript: whole,
     project: project(selected),
     prompt: editPrompt({
       action: action.id,
       character,
       selection: protectedSelection.text,
-      before: await plain(content.slice(near.start, start)),
-      after: await plain(content.slice(end, near.end)),
+      before,
+      after,
       passages,
       images: protectedSelection.ids.length,
     }),

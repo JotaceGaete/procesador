@@ -262,6 +262,37 @@ export interface ContextPart {
   tokens: number;
 }
 
+/**
+ * What a request to the Asistente carries, for the author ("Ver contexto"): built by the same
+ * code that builds the request, so it lists exactly what is sent and nothing else.
+ */
+export interface ContextItem {
+  label: string;
+  /** What the author sees when the item is unfolded (the fact, the relationship's note…). */
+  detail?: string;
+  /** Why it was included: "elegido", "nombrado en el argumento"… */
+  reason?: string;
+  note?: string;
+}
+export type ContextSectionId =
+  | "chapter"
+  | "previous"
+  | "selection"
+  | "passages"
+  | "guide"
+  | "characters"
+  | "places"
+  | "relationships"
+  | "facts"
+  | "argument"
+  | "manuscript";
+export interface ContextSection {
+  id: ContextSectionId;
+  label: string;
+  tokens: number;
+  items: ContextItem[];
+}
+
 /** Real usage reported by the provider, and its cost when the model's prices are configured. */
 export interface Usage {
   model: string;

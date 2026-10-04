@@ -102,6 +102,44 @@ function formatFact(
   return `- ${f.text.trim()}${meta.length ? ` [${meta.join(" · ")}]` : ""}${f.note.trim() ? ` — ${f.note.trim()}` : ""}`;
 }
 
+export interface MemorySections {
+  characters: string;
+  relationships: string;
+  places: string;
+  facts: string;
+}
+
+/** Each kind of memory as its own block ("" when nothing of it goes), so its size can be told apart. */
+export function memorySections(
+  selected: SelectedMemory,
+  all: Memory,
+  chapters: { id: string; title: string }[],
+  currentChapterId: string | null,
+): MemorySections {
+  const names = new Map(all.characters.map((c) => [c.id, c.name]));
+  const places = new Map(all.places.map((p) => [p.id, p.name]));
+  const currentIndex = chapters.findIndex((c) => c.id === currentChapterId);
+  const others = all.characters.length - selected.characters.length;
+  return {
+    characters: selected.characters.length
+      ? `## Personajes\n\n${selected.characters.map(formatCharacter).join("\n\n")}` +
+        (others > 0 ? `\n\n(La novela tiene ${others} personajes más que no intervienen aquí.)` : "")
+      : "",
+    relationships: selected.relationships.length
+      ? `## Relaciones\n${selected.relationships.map((r) => formatRelationship(r, names)).join("\n")}`
+      : "",
+    places: selected.places.length ? `## Lugares\n\n${selected.places.map(formatPlace).join("\n\n")}` : "",
+    facts: selected.facts.length
+      ? `## Hechos de continuidad\n${selected.facts.map((f) => formatFact(f, { names, places, chapters, currentIndex })).join("\n")}` +
+        (selected.facts.some(
+          (f) => f.chapter_id && chapters.findIndex((c) => c.id === f.chapter_id) > currentIndex && currentIndex >= 0,
+        )
+          ? "\n(Los hechos marcados como posteriores al capítulo actual todavía no han ocurrido en este punto del relato: úsalos sólo para no contradecirlos.)"
+          : "")
+      : "",
+  };
+}
+
 /** The narrative memory relevant to this request, as one readable block. */
 export function memoryBlock(
   selected: SelectedMemory,
@@ -109,32 +147,8 @@ export function memoryBlock(
   chapters: { id: string; title: string }[],
   currentChapterId: string | null,
 ): string {
-  const names = new Map(all.characters.map((c) => [c.id, c.name]));
-  const places = new Map(all.places.map((p) => [p.id, p.name]));
-  const currentIndex = chapters.findIndex((c) => c.id === currentChapterId);
-  const parts: string[] = [];
-
-  if (selected.characters.length) {
-    const others = all.characters.length - selected.characters.length;
-    parts.push(
-      `## Personajes\n\n${selected.characters.map(formatCharacter).join("\n\n")}` +
-        (others > 0 ? `\n\n(La novela tiene ${others} personajes más que no intervienen aquí.)` : ""),
-    );
-  }
-  if (selected.relationships.length) {
-    parts.push(`## Relaciones\n${selected.relationships.map((r) => formatRelationship(r, names)).join("\n")}`);
-  }
-  if (selected.places.length) parts.push(`## Lugares\n\n${selected.places.map(formatPlace).join("\n\n")}`);
-  if (selected.facts.length) {
-    parts.push(
-      `## Hechos de continuidad\n${selected.facts.map((f) => formatFact(f, { names, places, chapters, currentIndex })).join("\n")}` +
-        (selected.facts.some(
-          (f) => f.chapter_id && chapters.findIndex((c) => c.id === f.chapter_id) > currentIndex && currentIndex >= 0,
-        )
-          ? "\n(Los hechos marcados como posteriores al capítulo actual todavía no han ocurrido en este punto del relato: úsalos sólo para no contradecirlos.)"
-          : ""),
-    );
-  }
+  const m = memorySections(selected, all, chapters, currentChapterId);
+  const parts = [m.characters, m.relationships, m.places, m.facts].filter(Boolean);
   return parts.length ? `# Memoria narrativa\n\n${parts.join("\n\n")}` : "";
 }
 

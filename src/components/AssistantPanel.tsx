@@ -11,6 +11,7 @@ import {
   type ChapterInfo,
   type Fact,
   type ContextPart,
+  type ContextSection,
   type EditAction,
   type Memory,
   type ProviderId,
@@ -28,6 +29,7 @@ import AdvisorConsult from "./AdvisorConsult";
 import AdvisorSaved from "./AdvisorSaved";
 import { formatTokens } from "./format";
 import UsageLine from "./UsageLine";
+import ContextView from "./ContextView";
 
 interface Props {
   hidden: boolean;
@@ -180,7 +182,18 @@ function AssistantPanel(props: Props) {
   // (Reemplazar / Insertar) or "Limpiar" clears only its own.
   const [results, setResults] = useState<Record<string, Result>>({});
   const [runningSlot, setRunningSlot] = useState<string | null>(null);
-  const [estimate, setEstimate] = useState<{ total: number; manuscript: number; parts?: ContextPart[] } | null>(null);
+  const [estimate, setEstimate] = useState<{
+    total: number;
+    manuscript: number;
+    parts?: ContextPart[];
+    sections?: ContextSection[];
+    instructions?: number;
+    /** The inputs changed since: a new estimate is on its way. */
+    stale?: boolean;
+  } | null>(null);
+  // "Ver contexto" open; opening it asks again (the manuscript may have changed meanwhile).
+  const [showContext, setShowContext] = useState(false);
+  const [contextAsked, setContextAsked] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const resultRef = useRef<HTMLElement | null>(null);
   const argumentRef = useRef<HTMLTextAreaElement | null>(null);
@@ -298,6 +311,7 @@ function AssistantPanel(props: Props) {
       setEstimate(null);
       return;
     }
+    setEstimate((e) => (e && !e.stale ? { ...e, stale: true } : e));
     const controller = new AbortController();
     const t = setTimeout(async () => {
       try {
@@ -305,7 +319,8 @@ function AssistantPanel(props: Props) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
-          body: JSON.stringify({ ...req.body, dryRun: true }),
+          // The text on screen now, as the real request will send it.
+          body: JSON.stringify({ ...req.body, content: getContent(), dryRun: true }),
         });
         if (res.ok) setEstimate(await res.json());
       } catch {}
@@ -316,6 +331,7 @@ function AssistantPanel(props: Props) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- inputs that change the context
   }, [
+    contextAsked,
     hidden,
     section,
     advisorView,
@@ -491,23 +507,47 @@ function AssistantPanel(props: Props) {
 
   const contextControls = (
     <>
-      <label
-        className="check"
-        title="Por defecto sólo se envía lo relevante: el texto cercano, la Guía Maestra y la memoria de quienes intervienen."
-      >
+      <label className="check">
         <input type="checkbox" checked={includeManuscript} onChange={(e) => setIncludeManuscript(e.target.checked)} />
         <span>
-          Incluir la novela completa
+          Leer también la novela completa
           {novelChars > 0 && <span className="muted"> · ≈{formatTokens(manuscriptTokens)} tokens más por consulta</span>}
         </span>
       </label>
+      <p className="muted small check-help">
+        {includeManuscript
+          ? "Lee todo el manuscrito: más coherencia, más coste."
+          : "Desactivada, la IA no lee todo el manuscrito: trabaja sólo con el contexto seleccionado."}
+      </p>
       {estimate && (
-        <p
-          className={`estimate${estimate.total > confirmTokens ? " large" : ""}`}
-          title={estimate.parts?.map((p) => `${p.label}: ≈${formatTokens(p.tokens)}`).join("\n")}
-        >
+        <p className={`estimate${estimate.total > confirmTokens ? " large" : ""}`}>
           Contexto de esta consulta: ≈{formatTokens(estimate.total)} tokens
+          {estimate.sections && (
+            <>
+              {" · "}
+              <button
+                type="button"
+                className="link small"
+                aria-expanded={showContext}
+                onClick={() => {
+                  if (!showContext) setContextAsked((n) => n + 1);
+                  setShowContext(!showContext);
+                }}
+              >
+                {showContext ? "Ocultar contexto" : "Ver contexto"}
+              </button>
+            </>
+          )}
         </p>
+      )}
+      {showContext && estimate?.sections && (
+        <ContextView
+          sections={estimate.sections}
+          total={estimate.total}
+          instructions={estimate.instructions ?? 0}
+          includeManuscript={includeManuscript}
+          updating={Boolean(estimate.stale)}
+        />
       )}
     </>
   );

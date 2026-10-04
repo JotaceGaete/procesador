@@ -590,6 +590,50 @@ input:focus,
 .estimate.large {
   color: var(--danger);
 }
+.estimate .link {
+  font-size: inherit;
+}
+.check-help {
+  margin: -4px 0 0 24px;
+  font-size: 12px;
+}
+/* "Ver contexto": what the AI will take into account, in the author's terms. */
+.context-view {
+  border-left: 2px solid var(--faint);
+  padding: 2px 0 2px 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.context-view .context-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+.context-view ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.context-sections > li {
+  padding: 2px 0;
+}
+.context-view summary {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.context-items {
+  padding: 2px 0 4px 14px !important;
+}
+.context-items > li {
+  padding: 2px 0;
+}
+.context-items .item-detail {
+  display: block;
+  font-size: 12px;
+  white-space: pre-line;
+}
+.context-view > p {
+  margin: 6px 0 0;
+}
 .retry-with {
   margin: 10px 0 0;
 }
@@ -1960,7 +2004,9 @@ details.group > p {
   }
   .panel .controls > .check,
   .panel .controls > fieldset,
-  .panel .controls > .estimate {
+  .panel .controls > .estimate,
+  .panel .controls > .check-help,
+  .panel .controls > .context-view {
     grid-column: 1 / -1;
   }
   .panel select {
