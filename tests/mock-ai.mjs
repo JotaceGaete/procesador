@@ -69,6 +69,19 @@ function readingReply(system, user) {
  */
 function adviceReply(system, user) {
   if (!system.includes("<consejero>")) return null;
+  // Lectura profunda hooks, in the author's question:
+  //   PEDIR: [..]           first round asks for this
+  //   PEDIR2: [..]          second round asks for this
+  //   PEDIR-SIEMPRE: [..]   asks every time it is allowed to
+  //   TEXTO-ANTES           writes a sentence before the request (taken back by the server)
+  const question = (user.match(/Pregunta del autor: ([^\n]*)/) ?? [])[1] ?? "";
+  const rounds = (user.match(/<material ronda=/g) ?? []).length;
+  const last = user.includes("Ya no puedes pedir más material");
+  const hook = (name) => (question.match(new RegExp(`${name}: (\\[.*?\\])(?= [A-Z]|$)`)) ?? [])[1];
+  const wanted = !last && (hook("PEDIR-SIEMPRE") ?? (rounds === 0 ? hook("PEDIR") : rounds === 1 ? hook("PEDIR2") : null));
+  if (wanted && system.includes("<lectura-profunda>")) {
+    return `${question.includes("TEXTO-ANTES") ? "Déjame revisar antes un capítulo. " : ""}<solicitar>\n${wanted}\n</solicitar>`;
+  }
   const m = user.match(/<capitulo-actual numero="(\d+)"[^>]*>\n([\s\S]*?)\n<\/capitulo-actual>/);
   const n = m ? Number(m[1]) : 1;
   const text = m ? m[2] : "";
@@ -79,6 +92,16 @@ function adviceReply(system, user) {
     { kind: "problem", title: "Una impresión", body: "Algo no termina de encajar.", confidence: "high", refs: [{ chapter: n, quote: "una cita que el modelo inventó" }] },
     { kind: "opportunity", title: "Mal atribuida", body: "Cita del capítulo abierto, con otro número.", confidence: "low", refs: [{ chapter: n === 1 ? 2 : 1, quote }] },
   ];
+  // With material: a card that connects what it read, quoting it.
+  if (rounds) {
+    const refs = [];
+    for (const m of user.matchAll(/\[Capítulo (\d+)[^\]]*\]\n([^\n]+)/g)) refs.push({ chapter: Number(m[1]), quote: m[2].split(/\s+/).slice(0, 6).join(" ").replace(/[.,;:!?]+$/, "") });
+    for (const m of user.matchAll(/<capitulo numero="(\d+)"[^>]*>\n([^\n]+)/g)) refs.push({ chapter: Number(m[1]), quote: m[2].split(/\s+/).slice(0, 6).join(" ").replace(/[.,;:!?]+$/, "") });
+    cards.push({ kind: "contradiction", title: "Lo leído en profundidad", body: `Conecta ${refs.length} pasajes de ${rounds} rondas.`, confidence: "high", refs: refs.slice(0, 4).concat([{ chapter: n, quote }]) });
+  }
+  if (last && question.includes("PEDIR-SIEMPRE")) {
+    return `<solicitar>\n${hook("PEDIR-SIEMPRE")}\n</solicitar>`;
+  }
   if (task.includes("Revisa los cabos")) {
     cards.push({ kind: "thread", title: "La carta de Marta sigue abierta", body: "No aparece desde hace tiempo.", confidence: "medium", refs: [] });
     cards.push({ kind: "thread", title: "El viaje a Cartagena", body: "Se insinúa y no se retoma.", confidence: "low", refs: [] });

@@ -126,7 +126,14 @@ export async function saveExchange(opts: {
   title: string;
   question: string;
   answer: string;
-  context: { parts: ContextPart[]; plan: { label: string; detail: string }; model: string | null; usage: Usage | null };
+  context: {
+    parts: ContextPart[];
+    plan: { label: string; detail: string };
+    model: string | null;
+    usage: Usage | null;
+    material?: { label: string; tokens: number }[];
+    rounds?: number;
+  };
   observations: Observation[];
   /** Chapters the whole answer relied on (the focus and any read complete). */
   basedOn: Record<string, number>;

@@ -298,7 +298,13 @@ export type AssistEvent =
   | { type: "plan"; action: string; label: string; detail: string }
   | { type: "observations"; items: Observation[]; invalid?: boolean }
   /** Consejero: the exchange is stored; ids to act on the cards. */
-  | { type: "saved"; conversationId: string; messageId: string; observationIds: string[] };
+  | { type: "saved"; conversationId: string; messageId: string; observationIds: string[] }
+  /** Lectura profunda: what was served in a round, what it read in all, and a pause to ask. */
+  | { type: "reading"; round: number; items: string[] }
+  | { type: "material"; rounds: number; items: { label: string; tokens: number }[] }
+  | { type: "confirm"; tokens: number; requests: unknown[]; items: string[] }
+  /** Discard the text shown so far (it turned out to be a request for material). */
+  | { type: "reset" };
 
 // ---------------------------------------------------------------------------
 // Consejero: the reading of the novel (docs/consejero.md, phase 2)
@@ -449,7 +455,14 @@ export interface AdvisorMessage {
   id: string;
   role: "author" | "advisor";
   content: string;
-  context: { parts?: ContextPart[]; plan?: { label: string; detail: string }; model?: string; usage?: Usage | null } | null;
+  context: {
+    parts?: ContextPart[];
+    plan?: { label: string; detail: string };
+    model?: string;
+    usage?: Usage | null;
+    material?: { label: string; tokens: number }[];
+    rounds?: number;
+  } | null;
   created_at: string;
   observations: StoredObservation[];
 }

@@ -1,6 +1,6 @@
 # Consejero literario
 
-> Estado: **diseño aprobado. Fases 1 a 4 implementadas** (ver "Estado de la implementación", al final). Decisiones del autor en "Decisiones tomadas", al final; prevalecen sobre el resto del documento.
+> Estado: **diseño aprobado. Fases 1 a 5 implementadas** (ver "Estado de la implementación", al final). Decisiones del autor en "Decisiones tomadas", al final; prevalecen sobre el resto del documento.
 
 ## Qué es, y qué no es
 
@@ -327,7 +327,7 @@ create table public.ai_usage (
 | **2 · Lectura de la novela** | `chapter_digests`, `story_threads`, `novel_digests`; vigencia por revisión y hash de párrafos; generación perezosa con estimación; sección *Cabos y lecturas* editable. **Hecha.** | Fichas y global, con el modelo económico |
 | **3 · Acciones del Consejero** | Recetas de contexto y planificador determinista; *Analizar capítulo*, *¿Cómo seguir?*, *Repeticiones*, *Cabos pendientes*, *Coherencia*, *Personajes*; tarjetas tipificadas con citas verificadas e *Ir al texto*. **Hecha.** | Respuestas del Consejero |
 | **4 · Conversación** | Conversaciones persistentes con compactación; guardar y descartar observaciones; *Proponer hecho* (hecho `suggested`); acciones sobre cabos; *Volver a comprobar* tras editar. **Hecha.** | — |
-| **5 · Lectura profunda** | Herramientas de sólo lectura para que el modelo pida fichas, pasajes o capítulos (con topes); análisis de la novela completa con caché; integración con la Cronología cuando exista. | Consultas con herramientas |
+| **5 · Lectura profunda** | Herramientas de sólo lectura para que el modelo pida fichas, pasajes o capítulos (con topes); análisis de la novela completa con caché; integración con la Cronología cuando exista. **Hecha** (salvo la Cronología, que aún no existe). | Consultas con herramientas |
 
 Cada fase es usable por sí misma. La 1 ya responde sin coste "¿hace cuánto que no aparece X?" y "¿qué expresiones repito?".
 
@@ -512,4 +512,72 @@ Cada fase es usable por sí misma. La 1 ya responde sin coste "¿hace cuánto qu
 - **Acciones sobre cabos** (tarjetas de cabo): si la observación nombra un cabo existente y abierto, *Marcar cabo «…» cerrado* (estado decidido por el autor); si no, *Crear cabo*.
 - **Ninguna acción escribe en el manuscrito.**
 - **Pruebas:** E2E de `tests/e2e/conversation.test.mjs`: intercambios guardados y su orden, continuación con los turnos anteriores, compactación con el modelo económico, aislamiento, estados de las observaciones, «versión anterior» y *Volver a comprobar*, hechos sugeridos fuera del canon hasta aprobarse, borrado y duplicado, y en el panel: conversación, *Guardar*, *Descartar*, seguimiento, selector, *Guardadas*, *Volver a comprobar*, *Proponer hecho* y las acciones sobre cabos.
+
+### Fase 5 · Lectura profunda (implementada)
+
+**Principio:** leer lo necesario, no la novela. La primera respuesta parte siempre del contexto jerárquico (fases 3 y 4). Sólo si el modelo descubre que le falta algo, pide material concreto. El servidor se lo da dentro de límites y vuelve a preguntar.
+
+- **Protocolo independiente del proveedor** (`src/lib/advisor/deep.ts`, `loop.ts`):
+  - en vez de responder, el modelo escribe sólo un bloque `<solicitar>[{ "tipo": …, … }]</solicitar>`;
+  - el servidor lo detecta, sirve el material en `<material ronda="N">` y repite la consulta;
+  - es texto plano, sin la llamada a herramientas propia de cada API, así que funciona igual con Claude, GPT, Grok o cualquier otro modelo;
+  - mientras el texto que llega puede ser un pedido, el servidor lo retiene. Si el modelo escribió algo y después pidió, el panel recibe `reset` y lo borra: el autor sólo ve la respuesta final.
+- **Herramientas, todas de sólo lectura** (ninguna puede modificar el manuscrito ni regenerar fichas):
+
+  | Pedido | Devuelve | Coste |
+  |---|---|---|
+  | `ficha` (capítulo) | Ficha guardada tal como está, con las correcciones del autor; marcada si es de una versión anterior | Bajo |
+  | `pasajes` (palabras, personaje, capítulos) | Hasta 8 párrafos literales de toda la novela, por puntuación léxica y por nombre o apodo, en el orden de la novela | Bajo |
+  | `revelaciones` (personaje) | Qué se reveló, a quién y dónde, según las fichas | Bajo |
+  | `personaje` (nombre) | Su ficha de Memoria, en qué capítulos aparece y los acontecimientos en que participa (el arco reconstruido de las fichas) | Bajo |
+  | `hechos` (personaje) | Sólo hechos **aprobados**; los sugeridos no son canon | Bajo |
+  | `relaciones` (personaje) | Relaciones de la Memoria | Bajo |
+  | `cabo` (título) | El cabo y los párrafos donde se abre, avanza o se cierra | Bajo |
+  | `capitulo` (número) | El texto completo, recortado a un tamaño máximo | **Alto**: sólo si lo demás no basta |
+
+- **Cómo decide el modelo:**
+  - las instrucciones le dicen que lo que recibe es una selección;
+  - que pida sólo si no puede responder con rigor, y primero fichas y pasajes;
+  - que pida un capítulo completo sólo si es imprescindible, y nunca la novela;
+  - si ya tiene lo necesario, responde sin pedir.
+- **Límites por consulta** (configurables):
+
+  | Límite | Variable | Valor por defecto |
+  |---|---|---|
+  | Rondas de pedidos | `DEEP_MAX_ROUNDS` | 3 |
+  | Pedidos por ronda | `DEEP_MAX_REQUESTS` | 6 |
+  | Material añadido | `DEEP_MAX_MATERIAL_TOKENS` | 40.000 tokens |
+  | Capítulos completos | `DEEP_MAX_CHAPTERS` | 2 |
+  | Tamaño de cada capítulo | `DEEP_CHAPTER_TOKENS` | 20.000 tokens |
+  | Coste, si hay precios en `AI_PRICES` | `DEEP_MAX_COST_USD` | 0,50 |
+
+  Un pedido repetido no se sirve dos veces. La última ronda le indica al modelo que responda con lo que tiene y diga qué no pudo comprobar. Si aun así pide, el panel muestra que no se completó la lectura: no hay bucles.
+- **Confirmación extraordinaria:**
+  - antes de cada ronda, el servidor suma lo que ya se envió (cada ronda reenvía el contexto) más lo que enviaría;
+  - si supera `AI_CONFIRM_TOKENS` y el autor no lo aprobó, se detiene sin guardar nada y avisa (`confirm`) con los tokens y lo ya pedido;
+  - si el autor acepta, la consulta se repite con ese material precargado (`preload`) y aprobado (`approvedTokens`): no vuelve a pagar la ronda en la que pidió.
+- **Trazabilidad:**
+  - cada ronda se registra en `ai_usage` y el uso que ve el autor es la suma de todas;
+  - el panel muestra cada ronda mientras ocurre y, bajo la respuesta, una línea discreta: «Consultó además: pasajes «mar» · Elena (2) — ≈43 tokens en 1 ronda». Queda guardada con el mensaje.
+- **Verificación y vigencia:**
+  - las citas se siguen verificando contra el manuscrito real, el material incluido;
+  - las observaciones guardan en `based_on` también las revisiones de los capítulos leídos en profundidad. Si cambia el capítulo 3 consultado desde el 27, la observación dice «basada en una versión anterior del capítulo 3».
+- **Novelas largas:**
+  - el marco crece unos 40 tokens por capítulo, y el resto de cada consulta está acotado por recetas y límites;
+  - una prueba con 120 capítulos (1,66 millones de caracteres, unas 1.000 páginas) envía unos 24.000 caracteres por ronda (1,5 %) y prepara la consulta en unos 300 ms;
+  - el servidor sí lee de la base todos los capítulos en cada consulta, para el mapa, las búsquedas y la verificación de citas. Si eso llegara a pesar, el siguiente paso sería un índice de párrafos en la base, sin cambiar el protocolo.
+- **Interruptor:** *Lectura profunda* en *Consultar*, activado por defecto. Sin él, el Consejero responde sólo con el contexto jerárquico.
+- **Pruebas:**
+  - unitarias de cada herramienta y de los límites (novela de 30 capítulos);
+  - E2E de `tests/e2e/deep.test.mjs`, con una novela de 28 capítulos:
+    - capítulo 3 ↔ 27 (contradicción citada en ambos y verificada);
+    - un personaje ausente desde el capítulo 2, con dos rondas;
+    - una revelación reciente contra un hecho del capítulo 4;
+    - correcciones del autor servidas sin pisarse;
+    - el límite de rondas;
+    - el texto retirado antes de un pedido;
+    - sin lectura profunda;
+    - la pausa con su reanudación;
+    - una novela de 120 capítulos;
+    - el panel con la línea de material y las confirmaciones.
 

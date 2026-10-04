@@ -26,6 +26,7 @@ Procesador de textos personal para escribir novelas con asistencia de IA. Tú im
     - Las consultas forman conversaciones que se pueden continuar; lo más antiguo se resume solo.
     - Cada observación se puede guardar, descartar, marcar resuelta, volver a comprobar tras editar o convertir en un hecho sugerido para la Memoria.
   - *Guardadas*: las observaciones que conservaste, con aviso si el capítulo cambió desde entonces.
+  - *Lectura profunda* (activada por defecto): si una pregunta lo requiere, el Consejero pide en rondas fichas, pasajes, datos de personajes, hechos, cabos o, como último recurso, un capítulo completo. Nunca la novela entera. Tiene límites de rondas, material y coste, y bajo la respuesta indica qué consultó.
   - *Sobre la selección*: Consistencia, Personaje y Evolución, con el modelo del Consejero.
   - *Panorama*, sin IA, medido en el texto:
     - cuánto hace que no aparece cada personaje;
@@ -81,6 +82,7 @@ Sólo lo relevante. El manuscrito completo nunca se envía por defecto.
 | `ANTHROPIC_MODEL_DIGEST` / `OPENAI_MODEL_DIGEST` / `XAI_MODEL_DIGEST` | no | Modelo económico de análisis y resúmenes. Por defecto, el de escritura |
 | `AI_PRICES` | no | JSON con los precios en US$ por millón de tokens, para mostrar el coste. Ej.: `{"claude-opus-5-5":{"input":5,"cached":0.5,"output":25}}` |
 | `AI_CONFIRM_TOKENS` | no | Umbral para pedir confirmación antes de enviar. Por defecto `150000` |
+| `DEEP_MAX_ROUNDS` / `DEEP_MAX_REQUESTS` / `DEEP_MAX_MATERIAL_TOKENS` / `DEEP_MAX_CHAPTERS` / `DEEP_CHAPTER_TOKENS` / `DEEP_MAX_COST_USD` | no | Límites de la lectura profunda por consulta: `3` rondas, `6` pedidos por ronda, `40000` tokens de material, `2` capítulos completos de hasta `20000` tokens, US$ `0.5` |
 | `DIGEST_CHANGE_PCT` / `DIGEST_CHANGE_MIN_WORDS` / `DIGEST_CHANGE_WORDS` | no | Cuándo un cambio es sustancial y desactualiza una ficha: `15` % del texto con al menos `40` palabras, o `300` palabras nuevas |
 
 3. **Local**: `npm install`, `npm run dev`, `npm run typecheck`, `npm run build`.

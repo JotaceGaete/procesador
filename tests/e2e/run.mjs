@@ -275,6 +275,8 @@ async function main() {
     ANTHROPIC_MODEL_ADVISE: "claude-consejero-e2e",
     ANTHROPIC_MODEL_DIGEST: "claude-lector-e2e",
     AI_PRICES: JSON.stringify({ "claude-opus-5-5": { input: 5, cached: 0.5, output: 25 } }),
+    // Low, so lectura profunda's pause before reading beyond it can be tested with real sizes.
+    AI_CONFIRM_TOKENS: "30000",
   };
   const mainPort = await freePort();
   const closedPort = await freePort();

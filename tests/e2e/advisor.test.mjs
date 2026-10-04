@@ -157,7 +157,7 @@ test("ai_usage: not copied when duplicating; deleted with its novel", async () =
 });
 
 test("the novel tells the panel when to ask before sending (AI_CONFIRM_TOKENS)", async () => {
-  assert.equal((await call(`/api/novels/${novel}`)).data.confirmTokens, 150000);
+  assert.equal((await call(`/api/novels/${novel}`)).data.confirmTokens, 30000, "AI_CONFIRM_TOKENS of the test stack");
 });
 
 // ---------------------------------------------------------------- panel

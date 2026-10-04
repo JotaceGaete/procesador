@@ -28,7 +28,15 @@ export interface CompletionRequest {
 
 type ProviderEvent = Exclude<
   AssistEvent,
-  { type: "error" } | { type: "context" } | { type: "plan" } | { type: "observations" } | { type: "saved" }
+  | { type: "error" }
+  | { type: "context" }
+  | { type: "plan" }
+  | { type: "observations" }
+  | { type: "saved" }
+  | { type: "reading" }
+  | { type: "material" }
+  | { type: "confirm" }
+  | { type: "reset" }
 >;
 
 /** The usage event every provider yields once, before a refusal or truncation. */

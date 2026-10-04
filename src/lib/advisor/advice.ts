@@ -13,6 +13,7 @@ import { freshness } from "./freshness";
 import { echoes, phraseRepetitions, presence } from "./stats";
 import { planQuestion, type Plan } from "./planner";
 import { ADVISE_INSTRUCTIONS, ADVISE_TASKS } from "./prompts";
+import { deepInstructions, deepLimits, type ToolContext } from "./deep";
 
 /**
  * Context for each Consejero action (docs/consejero.md §4): levels with a budget each,
@@ -57,6 +58,8 @@ export interface AdviceInput {
   characterIds?: string[];
   /** The conversation so far (summary and last turns), when continuing one. */
   conversation?: string;
+  /** Lectura profunda: the model may ask for more material in rounds (default on). */
+  deep?: boolean;
 }
 
 export interface Advice {
@@ -70,6 +73,8 @@ export interface Advice {
   chapters: { id: string; content: string }[];
   /** Revisions of the chapters the answer reads complete (the focus and named ones). */
   basedOn: Record<string, number>;
+  /** What the read-only tools of lectura profunda work on. */
+  tools: ToolContext;
   /** Chapters the recipe reads through their digest that have none, or a stale one. */
   unread: { id: string; title: string; estimate: number }[];
 }
@@ -328,7 +333,7 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
   return {
     novelId: novel.id,
     request: {
-      instructions: ADVISE_INSTRUCTIONS,
+      instructions: input.deep === false ? ADVISE_INSTRUCTIONS : `${ADVISE_INSTRUCTIONS}\n\n${deepInstructions(deepLimits())}`,
       manuscript: null,
       project: frame,
       prompt: blocks.join("\n\n"),
@@ -342,6 +347,14 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
     detail,
     chapters: chapters.map((c) => ({ id: c.id, content: c.content })),
     basedOn: Object.fromEntries([index, ...named].map((i) => [rows[i].id, rows[i].revision])),
+    tools: {
+      chapters: chapters.map((c, i) => ({ id: c.id, title: c.title, content: c.content, revision: rows[i].revision })),
+      digests: byChapter,
+      memory,
+      threads,
+      current: index,
+      plain,
+    },
     unread,
   };
 }

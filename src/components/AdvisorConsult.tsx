@@ -45,7 +45,27 @@ interface Props {
   onFactAdded(f: Fact): void;
 }
 
-type Ask = { action?: AdvisorAction; question?: string; useSelection: boolean };
+type Ask = {
+  action?: AdvisorAction;
+  question?: string;
+  useSelection: boolean;
+  /** After a pause: the material the author approved, and up to how many tokens. */
+  preload?: unknown[];
+  approvedTokens?: number;
+};
+type Material = { label: string; tokens: number }[];
+
+/** "Consultó además: …", discreet, under an answer that used lectura profunda. */
+function MaterialLine({ items, rounds }: { items: Material; rounds?: number }) {
+  if (!items.length) return null;
+  const tokens = items.reduce((n, i) => n + i.tokens, 0);
+  return (
+    <p className="material-line muted small">
+      Consultó además: {items.map((i) => i.label).join(" · ")} — ≈{formatTokens(tokens)} tokens
+      {rounds ? ` en ${rounds} ${rounds === 1 ? "ronda" : "rondas"}` : ""}
+    </p>
+  );
+}
 type Unread = { id: string; title: string; estimate: number };
 
 const OPEN_TAG = "<observaciones>";
@@ -76,6 +96,10 @@ export default function AdvisorConsult(p: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [parts, setParts] = useState<ContextPart[] | null>(null);
   const [usage, setUsage] = useState<Usage | null>(null);
+  const [rounds, setRounds] = useState<string[]>([]);
+  const [material, setMaterial] = useState<{ items: Material; rounds: number } | null>(null);
+  const [deep, setDeep] = useState(true);
+  useEffect(() => setDeep(readPref("deepReading") !== "0"), []);
   const abort = useRef<AbortController | null>(null);
   useEffect(() => () => abort.current?.abort(), []);
 
@@ -124,6 +148,9 @@ export default function AdvisorConsult(p: Props) {
       selection: ask.useSelection && p.selection ? { start: p.selection.start, end: p.selection.end } : null,
       provider: using,
       conversationId,
+      deep,
+      preload: ask.preload,
+      approvedTokens: ask.approvedTokens,
     };
   }
 
@@ -148,6 +175,9 @@ export default function AdvisorConsult(p: Props) {
     setParts(null);
     setUsage(null);
     setPlan(null);
+    setRounds([]);
+    setMaterial(null);
+    let pause: { tokens: number; requests: unknown[]; items: string[] } | null = null;
     let savedTo: string | null = null;
     try {
       await p.flush();
@@ -159,7 +189,10 @@ export default function AdvisorConsult(p: Props) {
       // Normal queries go out without asking; only an exceptionally large one is confirmed.
       if (dry.total + reading > p.confirmTokens) {
         const extra = unread.length ? ` (incluye leer ${unread.length} capítulos sin ficha)` : "";
-        if (!confirm(`Esta consulta enviará unos ${formatTokens(dry.total + reading)} tokens${extra}. ¿Continuar?`)) return;
+        if (!confirm(`Esta consulta enviará unos ${formatTokens(dry.total + reading)} tokens${extra}. ¿Continuar?`)) {
+          setNotice("Consulta cancelada: no se envió nada.");
+          return;
+        }
       }
       const failed: string[] = [];
       for (const [i, u] of unread.entries()) {
@@ -188,6 +221,11 @@ export default function AdvisorConsult(p: Props) {
           if (!line.trim()) continue;
           const e = JSON.parse(line) as AssistEvent;
           if (e.type === "text") setText((t) => t + e.text);
+          else if (e.type === "reset") setText("");
+          else if (e.type === "reading")
+            setRounds((r) => [...r, `${e.round ? `Ronda ${e.round}` : "Aprobado"}: ${e.items.join(" · ")}`]);
+          else if (e.type === "material") setMaterial({ items: e.items, rounds: e.rounds });
+          else if (e.type === "confirm") pause = e;
           else if (e.type === "context") setParts(e.parts);
           else if (e.type === "plan") setPlan({ label: e.label, detail: e.detail });
           else if (e.type === "usage") setUsage(e);
@@ -204,6 +242,16 @@ export default function AdvisorConsult(p: Props) {
     } finally {
       setProgress(null);
       if (abort.current === controller) setRunning(false);
+    }
+    // Paused before reading beyond the extraordinary threshold: the author decides.
+    if (pause) {
+      const p0 = pause as { tokens: number; requests: unknown[]; items: string[] };
+      const what = p0.items.length ? `\n\nYa pidió: ${p0.items.join(" · ")}.` : "";
+      if (confirm(`Para responder, el Consejero quiere seguir leyendo: la consulta llegaría a unos ${formatTokens(p0.tokens)} tokens.${what}\n\n¿Continuar?`)) {
+        return run({ ...ask, preload: p0.requests, approvedTokens: p0.tokens }, using);
+      }
+      setNotice("Lectura profunda detenida: no se leyó más material. Puedes preguntar sin lectura profunda.");
+      return;
     }
     // Stored: it now belongs to the conversation's history, where its cards can be acted on.
     if (savedTo) {
@@ -303,6 +351,7 @@ export default function AdvisorConsult(p: Props) {
                     ))}
                   </ul>
                 )}
+                {m.context?.material && <MaterialLine items={m.context.material} rounds={m.context.rounds} />}
                 {m === lastAdvisor && m.context?.parts && <UsageLine parts={m.context.parts} usage={m.context.usage ?? null} />}
               </li>
             ),
@@ -322,6 +371,17 @@ export default function AdvisorConsult(p: Props) {
           <span>Sobre la selección (Analizar y Coherencia)</span>
         </label>
       )}
+      <label className="check small" title="Si lo necesita, el Consejero pide fichas, pasajes o capítulos concretos, con límites. Nunca la novela completa.">
+        <input
+          type="checkbox"
+          checked={deep}
+          onChange={(e) => {
+            setDeep(e.target.checked);
+            writePref("deepReading", e.target.checked ? "1" : "0");
+          }}
+        />
+        <span>Lectura profunda: puede pedir más material si lo necesita</span>
+      </label>
       <form
         className="ask"
         onSubmit={(e) => {
@@ -367,6 +427,13 @@ export default function AdvisorConsult(p: Props) {
             </p>
           )}
           {progress && <p className="muted small" role="status">{progress}</p>}
+          {rounds.length > 0 && (
+            <ul className="rounds muted small" aria-label="Lectura profunda">
+              {rounds.map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
+          )}
           {visible(text) && (
             <div className="markdown">
               <ReactMarkdown>{visible(text)}</ReactMarkdown>
@@ -382,6 +449,7 @@ export default function AdvisorConsult(p: Props) {
           )}
           {invalid && <p className="notice small">Las observaciones llegaron mal formadas y no se muestran; el texto sí.</p>}
           {notice && <p className="notice">{notice}</p>}
+          {material && <MaterialLine items={material.items} rounds={material.rounds} />}
           {!running && (parts || usage) && <UsageLine parts={parts} usage={usage} />}
         </section>
       )}

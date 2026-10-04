@@ -8,6 +8,8 @@ import { extractJson } from "@/lib/ai/structured";
 import { getProvider } from "@/lib/ai/providers";
 import { recordUsage } from "@/lib/ai/usage";
 import { conversationContext, getConversation, saveExchange } from "@/lib/advisor/conversations";
+import { adviseRounds, type LoopResult } from "@/lib/advisor/loop";
+import type { DeepRequest } from "@/lib/advisor/deep";
 import type { AdvisorAction, AssistEvent, Observation, ProviderId, Usage } from "@/lib/types";
 
 export const maxDuration = 300;
@@ -43,6 +45,7 @@ export const POST = handler(async (request) => {
       selection: sel && Number.isFinite(Number(sel.start)) ? { start: Number(sel.start), end: Number(sel.end) } : null,
       characterIds: Array.isArray(body.characterIds) ? body.characterIds.filter((x): x is string => typeof x === "string") : [],
       conversation: conversation?.text,
+      deep: body.deep !== false,
     },
     request.signal,
   );
@@ -59,12 +62,21 @@ export const POST = handler(async (request) => {
 
   const encoder = new TextEncoder();
   const send = (c: ReadableStreamDefaultController<Uint8Array>, e: AssistEvent) => c.enqueue(encoder.encode(`${JSON.stringify(e)}\n`));
-  const generator = provider!.stream(advice.request);
-  let text = "";
-  let model: string | null = null;
-  let usage: Usage | null = null;
-  let ended = false;
   const question = typeof body.question === "string" && body.question.trim() ? body.question.trim().slice(0, 2000) : plan.label;
+  // Requests the author approved after a pause, served before the first call.
+  const preload = (Array.isArray(body.preload) ? body.preload : [])
+    .filter((r): r is DeepRequest => !!r && typeof r === "object" && typeof (r as DeepRequest).tipo === "string")
+    .slice(0, 30);
+  const rounds = adviseRounds({
+    provider: provider!,
+    request: advice.request,
+    tools: advice.tools,
+    deep: body.deep !== false,
+    preload,
+    approvedTokens: Number(body.approvedTokens) || 0,
+    onUsage: (u) => recordUsage(advice.novelId, "advise", body.provider as ProviderId, u),
+  });
+  let ended = false;
   const stream = new ReadableStream<Uint8Array>({
     start(c) {
       send(c, { type: "context", parts: advice.parts });
@@ -73,19 +85,16 @@ export const POST = handler(async (request) => {
     async pull(c) {
       if (ended) return c.close();
       try {
-        const { value, done } = await generator.next();
-        if (!done) {
-          if (value.type === "text") text += value.text;
-          if (value.type === "usage") {
-            model = value.model;
-            usage = value;
-            await recordUsage(advice.novelId, "advise", body.provider as ProviderId, value);
-          }
-          send(c, value);
+        const step = await rounds.next();
+        if (!step.done) {
+          send(c, step.value);
           return;
         }
-        // The cards, validated and verified, once the whole answer is in.
-        const { markdown, json } = splitAnswer(text);
+        ended = true;
+        const result: LoopResult = step.value;
+        if (result.text === null) return c.close(); // paused to ask the author, or refused
+        // The cards, validated and verified (against every chapter, the material's too).
+        const { markdown, json } = splitAnswer(result.text);
         let items: Observation[] = [];
         if (json !== null) {
           try {
@@ -95,21 +104,33 @@ export const POST = handler(async (request) => {
             send(c, { type: "observations", items: [], invalid: true });
           }
         }
-        // Stored as an exchange of the conversation (a new one if none was given).
+        // Stored as an exchange of the conversation. What it relied on includes the chapters
+        // it read through lectura profunda, at their current revision.
         if (markdown || items.length) {
+          const extra = new Set(result.items.flatMap((m) => m.chapters));
+          const basedOn = {
+            ...advice.basedOn,
+            ...Object.fromEntries(advice.tools.chapters.filter((x) => extra.has(x.id)).map((x) => [x.id, x.revision])),
+          };
           const saved = await saveExchange({
             novelId: advice.novelId,
             conversationId,
             title: question,
             question,
             answer: markdown,
-            context: { parts: advice.parts, plan: { label: plan.label, detail: plan.detail }, model, usage },
+            context: {
+              parts: advice.parts,
+              plan: { label: plan.label, detail: plan.detail },
+              model: result.usage?.model ?? null,
+              usage: result.usage,
+              material: result.items.map(({ label, tokens }) => ({ label, tokens })),
+              rounds: result.rounds,
+            },
             observations: items,
-            basedOn: advice.basedOn,
+            basedOn,
           });
           send(c, { type: "saved", ...saved });
         }
-        ended = true;
         c.close();
       } catch (e) {
         if (!request.signal.aborted) {
@@ -120,7 +141,7 @@ export const POST = handler(async (request) => {
       }
     },
     async cancel() {
-      await generator.return(undefined);
+      await rounds.return({ text: null, items: [], rounds: 0, usage: null });
     },
   });
   return new Response(stream, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" } });
