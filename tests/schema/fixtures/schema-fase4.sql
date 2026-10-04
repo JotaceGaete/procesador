@@ -14,13 +14,7 @@ do $$ begin
              where table_schema = 'public' and table_name = 'characters' and column_name = 'project_id') then
     drop table public.characters;
   end if;
-  -- Sólo la tabla del MVP (reconocible por sus columnas), nunca otra que se llame igual.
-  if exists (select 1 from information_schema.columns
-             where table_schema = 'public' and table_name = 'projects' and column_name = 'style_notes')
-     and exists (select 1 from information_schema.columns
-                 where table_schema = 'public' and table_name = 'projects' and column_name = 'singleton') then
-    drop table public.projects;
-  end if;
+  drop table if exists public.projects;
   -- Borrador de la galería (sin publicar) que guardaba las rutas en character_images.
   if exists (select 1 from information_schema.columns
              where table_schema = 'public' and table_name = 'character_images' and column_name = 'storage_path') then
@@ -28,36 +22,6 @@ do $$ begin
   end if;
   drop function if exists public.set_updated_at();
 end $$;
-
--- ---------------------------------------------------------------------------
--- Utilidades del esquema. Van antes de las tablas: cada tabla se protege justo
--- después de crearse, de modo que ninguna sentencia se refiere a una tabla que
--- no se haya garantizado antes (aunque se ejecute sólo una parte del archivo).
--- ---------------------------------------------------------------------------
-create or replace function public.touch_row() returns trigger
-language plpgsql set search_path = '' as $$
-begin
-  new.updated_at = now();
-  return new;
-end $$;
-
--- RLS activado sin políticas, sin permisos para las claves públicas (anon, authenticated)
--- y todos para la service_role del servidor. Con p_touch, el trigger <tabla>_touch que
--- mantiene updated_at. Idempotente.
-create or replace function public.procesador_secure_table(p_table regclass, p_touch boolean)
-returns void language plpgsql set search_path = '' as $$
-declare v_name text := (select relname from pg_catalog.pg_class where oid = p_table);
-begin
-  execute format('alter table %s enable row level security', p_table);
-  execute format('revoke all on %s from anon, authenticated', p_table);
-  execute format('grant all on %s to service_role', p_table);
-  if p_touch then
-    execute format('drop trigger if exists %I on %s', v_name || '_touch', p_table);
-    execute format('create trigger %I before update on %s for each row execute function public.touch_row()',
-                   v_name || '_touch', p_table);
-  end if;
-end $$;
-revoke execute on function public.procesador_secure_table(regclass, boolean) from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Tablas
@@ -72,7 +36,6 @@ create table if not exists public.novels (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-select public.procesador_secure_table('public.novels', true);
 
 create table if not exists public.chapters (
   id         uuid primary key default gen_random_uuid(),
@@ -87,8 +50,6 @@ create table if not exists public.chapters (
   unique (id, novel_id)
 );
 create index if not exists chapters_novel_position_idx on public.chapters(novel_id, position);
--- Su trigger de updated_at es chapters_touch (touch_chapter: también sube la revisión), más abajo.
-select public.procesador_secure_table('public.chapters', false);
 
 create table if not exists public.characters (
   id             uuid primary key default gen_random_uuid(),
@@ -116,7 +77,6 @@ create table if not exists public.characters (
   unique (id, novel_id)
 );
 create index if not exists characters_novel_idx on public.characters(novel_id);
-select public.procesador_secure_table('public.characters', true);
 
 create table if not exists public.relationships (
   id         uuid primary key default gen_random_uuid(),
@@ -132,7 +92,6 @@ create table if not exists public.relationships (
   check (from_id <> to_id)
 );
 create index if not exists relationships_novel_idx on public.relationships(novel_id);
-select public.procesador_secure_table('public.relationships', true);
 
 create table if not exists public.places (
   id          uuid primary key default gen_random_uuid(),
@@ -146,7 +105,6 @@ create table if not exists public.places (
   unique (id, novel_id)
 );
 create index if not exists places_novel_idx on public.places(novel_id);
-select public.procesador_secure_table('public.places', true);
 
 create table if not exists public.facts (
   id         uuid primary key default gen_random_uuid(),
@@ -166,7 +124,6 @@ create table if not exists public.facts (
   foreign key (place_id, novel_id) references public.places(id, novel_id) on delete set null (place_id)
 );
 create index if not exists facts_novel_idx on public.facts(novel_id);
-select public.procesador_secure_table('public.facts', true);
 
 create table if not exists public.fact_characters (
   fact_id      uuid not null,
@@ -176,7 +133,6 @@ create table if not exists public.fact_characters (
   foreign key (fact_id, novel_id) references public.facts(id, novel_id) on delete cascade,
   foreign key (character_id, novel_id) references public.characters(id, novel_id) on delete cascade
 );
-select public.procesador_secure_table('public.fact_characters', false);
 
 -- Archivos de la novela (ver docs/archivos.md). Un archivo: el original, conservado siempre,
 -- y sus derivados para la interfaz. Los bytes viven en el bucket privado 'novel-files';
@@ -214,7 +170,6 @@ create index if not exists assets_novel_idx on public.assets(novel_id);
 alter table public.assets add column if not exists orientation smallint not null default 1
   check (orientation between 1 and 8);
 create index if not exists assets_novel_sha_idx on public.assets(novel_id, sha256) where status = 'ready';
-select public.procesador_secure_table('public.assets', true);
 
 -- Uso: galería de un personaje (imágenes de referencia).
 -- stage_label es una etiqueta descriptiva ("1982", "tras la cárcel"), no un dato cronológico.
@@ -236,7 +191,6 @@ create table if not exists public.character_images (
 create index if not exists character_images_character_idx on public.character_images(character_id, sort_order);
 create index if not exists character_images_novel_idx on public.character_images(novel_id);
 create index if not exists character_images_asset_idx on public.character_images(asset_id);
-select public.procesador_secure_table('public.character_images', true);
 -- Como mucho una imagen principal por personaje.
 create unique index if not exists character_images_one_primary
   on public.character_images(character_id) where is_primary;
@@ -270,7 +224,6 @@ create table if not exists public.manuscript_images (
 create index if not exists manuscript_images_novel_idx on public.manuscript_images(novel_id);
 create index if not exists manuscript_images_asset_idx on public.manuscript_images(asset_id);
 create index if not exists manuscript_images_chapter_idx on public.manuscript_images(chapter_id);
-select public.procesador_secure_table('public.manuscript_images', true);
 
 -- Registro de uso de la IA (docs/consejero.md): una fila por consulta, con los tokens que
 -- informó el proveedor y su costo estimado (null si no hay precios configurados).
@@ -289,7 +242,6 @@ create table if not exists public.ai_usage (
   created_at     timestamptz not null default now()
 );
 create index if not exists ai_usage_novel_idx on public.ai_usage(novel_id, created_at);
-select public.procesador_secure_table('public.ai_usage', false);
 
 -- Consejero, fase 2 (docs/consejero.md): la lectura de la novela. Todo es derivado y
 -- regenerable: el manuscrito (chapters.content) es siempre la fuente de verdad, y nada
@@ -322,7 +274,6 @@ create table if not exists public.story_threads (
   foreign key (closed_chapter_id, novel_id) references public.chapters(id, novel_id) on delete set null (closed_chapter_id)
 );
 create index if not exists story_threads_novel_idx on public.story_threads(novel_id);
-select public.procesador_secure_table('public.story_threads', true);
 
 -- Ficha de lectura de cada capítulo. source_revision es la revisión del capítulo leída;
 -- text_sketch, una huella numérica del texto leído (secuencias de tres palabras, bottom-k),
@@ -351,7 +302,6 @@ create table if not exists public.chapter_digests (
   foreign key (chapter_id, novel_id) references public.chapters(id, novel_id) on delete cascade
 );
 create index if not exists chapter_digests_novel_idx on public.chapter_digests(novel_id);
-select public.procesador_secure_table('public.chapter_digests', true);
 
 -- Conversaciones del Consejero (fase 4). Los turnos más recientes van literales a cada
 -- consulta; los anteriores, resumidos en summary (hasta el mensaje summarized_count).
@@ -366,7 +316,6 @@ create table if not exists public.advisor_conversations (
   unique (id, novel_id)
 );
 create index if not exists advisor_conversations_novel_idx on public.advisor_conversations(novel_id, updated_at);
-select public.procesador_secure_table('public.advisor_conversations', true);
 
 -- Mensajes: del autor (pregunta o acción) y del Consejero (su texto en Markdown).
 -- context: qué se leyó (partes y tokens), el plan y based_on { chapter_id: revision }.
@@ -382,7 +331,6 @@ create table if not exists public.advisor_messages (
   foreign key (conversation_id, novel_id) references public.advisor_conversations(id, novel_id) on delete cascade
 );
 create index if not exists advisor_messages_conversation_idx on public.advisor_messages(conversation_id, created_at);
-select public.procesador_secure_table('public.advisor_messages', false);
 
 -- Observaciones (tarjetas). refs: [{ chapterId, quote, verified, at }], verificadas contra el
 -- texto. based_on: { chapter_id: revision } de los capítulos en que se apoya; si alguno cambió,
@@ -409,7 +357,6 @@ create table if not exists public.advisor_observations (
 );
 create index if not exists advisor_observations_novel_idx on public.advisor_observations(novel_id, status);
 create index if not exists advisor_observations_message_idx on public.advisor_observations(message_id);
-select public.procesador_secure_table('public.advisor_observations', true);
 
 -- Resumen global, derivado de las fichas (no del texto). based_on: { chapter_id: revision }.
 create table if not exists public.novel_digests (
@@ -420,11 +367,17 @@ create table if not exists public.novel_digests (
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
-select public.procesador_secure_table('public.novel_digests', true);
 
 -- ---------------------------------------------------------------------------
 -- Triggers
 -- ---------------------------------------------------------------------------
+create or replace function public.touch_row() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  new.updated_at = now();
+  return new;
+end $$;
+
 create or replace function public.touch_chapter() returns trigger
 language plpgsql set search_path = '' as $$
 begin
@@ -435,6 +388,17 @@ begin
     update public.novels set updated_at = now() where id = new.novel_id;
   end if;
   return new;
+end $$;
+
+do $$
+declare t text;
+begin
+  foreach t in array array['novels', 'characters', 'relationships', 'places', 'facts', 'assets', 'character_images',
+                           'manuscript_images', 'story_threads', 'chapter_digests', 'novel_digests',
+                           'advisor_conversations', 'advisor_observations'] loop
+    execute format('drop trigger if exists %I_touch on public.%I', t, t);
+    execute format('create trigger %I_touch before update on public.%I for each row execute function public.touch_row()', t, t);
+  end loop;
 end $$;
 
 -- Al añadir: se coloca al final, la primera del personaje es la principal y hay un máximo por personaje.
@@ -808,23 +772,17 @@ end $$;
 -- Con la clave anon/publishable no se puede leer, escribir ni llamar funciones.
 -- La app accede sólo desde el servidor con la service_role key.
 -- ---------------------------------------------------------------------------
--- Cada tabla se protegió al crearse (procesador_secure_table). Comprobación final: si
--- falta alguna tabla o alguna quedó sin RLS (por ejemplo, porque se ejecutó sólo una
--- parte de este archivo), se detiene con un mensaje claro. En el SQL Editor de Supabase todo
--- el archivo es una sola transacción: al detenerse no queda nada aplicado a medias.
 do $$
-declare v_missing text;
+declare t text;
 begin
-  select string_agg(t, ', ') into v_missing
-  from unnest(array['novels', 'chapters', 'characters', 'relationships', 'places', 'facts', 'fact_characters',
-                    'assets', 'character_images', 'manuscript_images', 'ai_usage', 'story_threads',
-                    'chapter_digests', 'novel_digests', 'advisor_conversations', 'advisor_messages',
-                    'advisor_observations']) as t
-  where to_regclass('public.' || t) is null
-     or not (select relrowsecurity from pg_class where oid = to_regclass('public.' || t));
-  if v_missing is not null then
-    raise exception 'Esquema incompleto: falta o no está protegida: %. Ejecuta supabase/schema.sql completo, sin seleccionar una parte.', v_missing;
-  end if;
+  foreach t in array array['novels', 'chapters', 'characters', 'relationships', 'places', 'facts', 'fact_characters',
+                           'assets', 'character_images', 'manuscript_images', 'ai_usage',
+                           'story_threads', 'chapter_digests', 'novel_digests',
+                           'advisor_conversations', 'advisor_messages', 'advisor_observations'] loop
+    execute format('alter table public.%I enable row level security', t);
+    execute format('revoke all on public.%I from anon, authenticated', t);
+    execute format('grant all on public.%I to service_role', t);
+  end loop;
 end $$;
 
 revoke execute on function public.touch_row() from public, anon, authenticated;

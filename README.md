@@ -97,9 +97,16 @@ Sólo lo relevante. El manuscrito completo nunca se envía por defecto.
 ```bash
 npm run typecheck
 npm test            # unitarias (~1 s): contexto, prompts, Guía Maestra, sesiones, los tres proveedores
+npm run test:schema # actualización de bases existentes (~20 s): schema.sql sobre cada estado real
 npm run test:e2e    # de punta a punta (~2–3 min): API, seguridad e interfaz en Chromium
-npm run test:all    # ambas
+npm run test:all    # todas
 ```
+
+`npm run test:schema` levanta un Postgres temporal y comprueba que `supabase/schema.sql` y `supabase/actualizar-consejero.sql` se pueden ejecutar completos, dos veces, sin errores y sin alterar los datos.
+- **Estados de partida:** base vacía; base anterior al Consejero (2b); base de la fase 1; base actualizada a medias a mano; y base con las fases 2–4 (versiones guardadas en `tests/schema/fixtures`).
+- **Modos de ejecución:** el archivo entero como una sola consulta (como el SQL Editor de Supabase) y sentencia a sentencia (como `psql`).
+- **Regresión:** una ejecución que llega al bloque de triggers sin `story_threads` ya no da `relation "public.story_threads" does not exist`.
+- **Comprobación estática:** ninguna sentencia se refiere a una tabla antes del `create table` que la garantiza.
 
 `npm run test:e2e` levanta un entorno desechable y lo elimina al terminar. No usa claves reales ni crea recursos externos:
 

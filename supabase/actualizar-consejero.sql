@@ -1,10 +1,38 @@
 -- Actualización de una base existente a las fases 1 a 5 del Consejero.
+-- Es la parte nueva de supabase/schema.sql; ejecutar el schema.sql completo también sirve.
+--
 -- Idempotente: se puede ejecutar varias veces. No borra ni modifica datos existentes:
--- sólo añade una columna (novels.auto_digest), tablas nuevas, índices, triggers,
--- RLS, permisos y la versión actual de duplicate_novel.
--- Equivale a la parte nueva de supabase/schema.sql; ejecutar el schema completo también sirve.
+-- añade la columna novels.auto_digest, las tablas nuevas con sus índices, cada una
+-- protegida (RLS, permisos, trigger de updated_at) justo después de crearse, y la
+-- versión actual de duplicate_novel. Todo en una transacción: si algo falla, no se
+-- aplica nada.
 
 begin;
+
+create or replace function public.touch_row() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  new.updated_at = now();
+  return new;
+end $$;
+
+-- RLS activado sin políticas, sin permisos para las claves públicas (anon, authenticated)
+-- y todos para la service_role del servidor. Con p_touch, el trigger <tabla>_touch que
+-- mantiene updated_at. Idempotente.
+create or replace function public.procesador_secure_table(p_table regclass, p_touch boolean)
+returns void language plpgsql set search_path = '' as $$
+declare v_name text := (select relname from pg_catalog.pg_class where oid = p_table);
+begin
+  execute format('alter table %s enable row level security', p_table);
+  execute format('revoke all on %s from anon, authenticated', p_table);
+  execute format('grant all on %s to service_role', p_table);
+  if p_touch then
+    execute format('drop trigger if exists %I on %s', v_name || '_touch', p_table);
+    execute format('create trigger %I before update on %s for each row execute function public.touch_row()',
+                   v_name || '_touch', p_table);
+  end if;
+end $$;
+revoke execute on function public.procesador_secure_table(regclass, boolean) from public, anon, authenticated;
 
 -- Registro de uso de la IA (docs/consejero.md): una fila por consulta, con los tokens que
 -- informó el proveedor y su costo estimado (null si no hay precios configurados).
@@ -23,6 +51,7 @@ create table if not exists public.ai_usage (
   created_at     timestamptz not null default now()
 );
 create index if not exists ai_usage_novel_idx on public.ai_usage(novel_id, created_at);
+select public.procesador_secure_table('public.ai_usage', false);
 
 -- Consejero, fase 2 (docs/consejero.md): la lectura de la novela. Todo es derivado y
 -- regenerable: el manuscrito (chapters.content) es siempre la fuente de verdad, y nada
@@ -55,6 +84,7 @@ create table if not exists public.story_threads (
   foreign key (closed_chapter_id, novel_id) references public.chapters(id, novel_id) on delete set null (closed_chapter_id)
 );
 create index if not exists story_threads_novel_idx on public.story_threads(novel_id);
+select public.procesador_secure_table('public.story_threads', true);
 
 -- Ficha de lectura de cada capítulo. source_revision es la revisión del capítulo leída;
 -- text_sketch, una huella numérica del texto leído (secuencias de tres palabras, bottom-k),
@@ -83,6 +113,7 @@ create table if not exists public.chapter_digests (
   foreign key (chapter_id, novel_id) references public.chapters(id, novel_id) on delete cascade
 );
 create index if not exists chapter_digests_novel_idx on public.chapter_digests(novel_id);
+select public.procesador_secure_table('public.chapter_digests', true);
 
 -- Conversaciones del Consejero (fase 4). Los turnos más recientes van literales a cada
 -- consulta; los anteriores, resumidos en summary (hasta el mensaje summarized_count).
@@ -97,6 +128,7 @@ create table if not exists public.advisor_conversations (
   unique (id, novel_id)
 );
 create index if not exists advisor_conversations_novel_idx on public.advisor_conversations(novel_id, updated_at);
+select public.procesador_secure_table('public.advisor_conversations', true);
 
 -- Mensajes: del autor (pregunta o acción) y del Consejero (su texto en Markdown).
 -- context: qué se leyó (partes y tokens), el plan y based_on { chapter_id: revision }.
@@ -112,6 +144,7 @@ create table if not exists public.advisor_messages (
   foreign key (conversation_id, novel_id) references public.advisor_conversations(id, novel_id) on delete cascade
 );
 create index if not exists advisor_messages_conversation_idx on public.advisor_messages(conversation_id, created_at);
+select public.procesador_secure_table('public.advisor_messages', false);
 
 -- Observaciones (tarjetas). refs: [{ chapterId, quote, verified, at }], verificadas contra el
 -- texto. based_on: { chapter_id: revision } de los capítulos en que se apoya; si alguno cambió,
@@ -138,6 +171,7 @@ create table if not exists public.advisor_observations (
 );
 create index if not exists advisor_observations_novel_idx on public.advisor_observations(novel_id, status);
 create index if not exists advisor_observations_message_idx on public.advisor_observations(message_id);
+select public.procesador_secure_table('public.advisor_observations', true);
 
 -- Resumen global, derivado de las fichas (no del texto). based_on: { chapter_id: revision }.
 create table if not exists public.novel_digests (
@@ -148,16 +182,7 @@ create table if not exists public.novel_digests (
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
-
--- updated_at automático en las tablas nuevas.
-do $$
-declare t text;
-begin
-  foreach t in array array['story_threads', 'chapter_digests', 'novel_digests', 'advisor_conversations', 'advisor_observations'] loop
-    execute format('drop trigger if exists %I_touch on public.%I', t, t);
-    execute format('create trigger %I_touch before update on public.%I for each row execute function public.touch_row()', t, t);
-  end loop;
-end $$;
+select public.procesador_secure_table('public.novel_digests', true);
 
 -- Duplicar una novela copia también el interruptor y la lectura del Consejero.
 drop function if exists public.duplicate_novel(uuid, text);
@@ -287,20 +312,26 @@ begin
 
   return jsonb_build_object('id', v_new, 'copies', v_copies);
 end $$;
-
 revoke execute on function public.duplicate_novel(uuid, text) from public, anon, authenticated;
 grant execute on function public.duplicate_novel(uuid, text) to service_role;
 
--- Privacidad: RLS sin políticas y sin acceso para las claves públicas, como el resto.
+-- Cada tabla se protegió al crearse (procesador_secure_table). Comprobación final: si
+-- falta alguna tabla o alguna quedó sin RLS (por ejemplo, porque se ejecutó sólo una
+-- parte de este archivo), se detiene con un mensaje claro. En el SQL Editor de Supabase todo
+-- el archivo es una sola transacción: al detenerse no queda nada aplicado a medias.
 do $$
-declare t text;
+declare v_missing text;
 begin
-  foreach t in array array['ai_usage', 'story_threads', 'chapter_digests', 'novel_digests',
-                           'advisor_conversations', 'advisor_messages', 'advisor_observations'] loop
-    execute format('alter table public.%I enable row level security', t);
-    execute format('revoke all on public.%I from anon, authenticated', t);
-    execute format('grant all on public.%I to service_role', t);
-  end loop;
+  select string_agg(t, ', ') into v_missing
+  from unnest(array['novels', 'chapters', 'characters', 'relationships', 'places', 'facts', 'fact_characters',
+                    'assets', 'character_images', 'manuscript_images', 'ai_usage', 'story_threads',
+                    'chapter_digests', 'novel_digests', 'advisor_conversations', 'advisor_messages',
+                    'advisor_observations']) as t
+  where to_regclass('public.' || t) is null
+     or not (select relrowsecurity from pg_class where oid = to_regclass('public.' || t));
+  if v_missing is not null then
+    raise exception 'Esquema incompleto: falta o no está protegida: %. Ejecuta supabase/schema.sql completo, sin seleccionar una parte.', v_missing;
+  end if;
 end $$;
 
 commit;

@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --conditions=react-server --test \"tests/unit/*.test.ts\"",
     "test:e2e": "node tests/e2e/run.mjs",
-    "test:all": "npm test && npm run test:e2e"
+    "test:all": "npm test && npm run test:schema && npm run test:e2e",
+    "test:schema": "node --test --test-concurrency=1 tests/schema/run.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
