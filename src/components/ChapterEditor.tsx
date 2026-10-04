@@ -243,6 +243,7 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
         return true;
       },
       insertAtCursor(text) {
+        if (!textareaRef.current) return false;
         insertParagraphs(text, cursorRef.current, "end");
         return true;
       },

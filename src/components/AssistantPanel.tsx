@@ -183,6 +183,7 @@ function AssistantPanel(props: Props) {
   const [estimate, setEstimate] = useState<{ total: number; manuscript: number; parts?: ContextPart[] } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const resultRef = useRef<HTMLElement | null>(null);
+  const argumentRef = useRef<HTMLTextAreaElement | null>(null);
 
   const slot = `${section}:${mode}`;
   const result = results[slot] ?? null;
@@ -419,8 +420,38 @@ function AssistantPanel(props: Props) {
    */
   const used = (ok: boolean) => {
     note(`usada ok=${ok} → ${ok ? `clearResult(${slot})` : "applyError"}`);
-    return ok ? clearResult(slot) : update(slot, () => ({ applyError: true, lostImages: null }));
+    if (!ok) return update(slot, () => ({ applyError: true, lostImages: null }));
+    clearResult(slot);
+    // A scene that reached the manuscript also takes its argument with it: the box is ready
+    // for the next scene. Unless the author already started another one meanwhile.
+    if (last?.mode === "scene" && argument.trim() === String(last.body.argument ?? "").trim()) {
+      setArgument("");
+      writePref(`argument:${novelId}`, "");
+    }
   };
+  /** Inserting can fail (the editor is not there, the browser refused the edit): then nothing is lost. */
+  const tryInsert = (text: string) => {
+    try {
+      return onInsert(text);
+    } catch {
+      return false;
+    }
+  };
+
+  // Coming back to "Escribir escena" (opening the panel, or the tab) with nothing pending:
+  // the cursor waits in the empty argument for the next scene. Not on page load.
+  const readyForNextScene = () =>
+    requestAnimationFrame(() => {
+      if (!argumentRef.current?.value && !results["assistant:scene"]) argumentRef.current?.focus();
+    });
+  const shownAs = useRef(hidden ? null : slot);
+  useEffect(() => {
+    const now = hidden ? null : slot;
+    const before = shownAs.current;
+    shownAs.current = now;
+    if (now === "assistant:scene" && before !== now) readyForNextScene();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the panel or the tab changes
+  }, [hidden, slot]);
 
   // The author chose a path of "¿Cómo seguir?": the Asistente gets it as the argument of a scene.
   const sendToAssistant = (text: string) => {
@@ -526,7 +557,13 @@ function AssistantPanel(props: Props) {
           <button className={mode === "edit" ? "on" : undefined} onClick={() => setMode("edit")}>
             Editar selección
           </button>
-          <button className={mode === "scene" ? "on" : undefined} onClick={() => setMode("scene")}>
+          <button
+            className={mode === "scene" ? "on" : undefined}
+            onClick={() => {
+              setMode("scene");
+              readyForNextScene();
+            }}
+          >
             Escribir escena
           </button>
         </nav>
@@ -656,6 +693,7 @@ function AssistantPanel(props: Props) {
           <label className="argument">
             <span>Argumento</span>
             <textarea
+              ref={argumentRef}
               data-origin={`argument (estado argument, localStorage argument:${novelId})`}
               rows={6}
               value={argument}
@@ -783,7 +821,7 @@ function AssistantPanel(props: Props) {
                 </button>
               )}
               {parsed.proposal && (parsed.complete || parsed.untagged) && last.mode === "scene" && (
-                <button className="btn primary" onClick={() => used(onInsert(parsed.proposal!))}>
+                <button className="btn primary" onClick={() => used(tryInsert(parsed.proposal!))}>
                   Insertar en el cursor
                 </button>
               )}
@@ -836,7 +874,11 @@ function AssistantPanel(props: Props) {
             </div>
           )}
           {result?.applyError && (
-            <p className="error small">El fragmento original ya no está en el texto. Copia la propuesta y pégala a mano.</p>
+            <p className="error small">
+              {last.mode === "scene"
+                ? "No se pudo insertar la escena. Copia la propuesta y pégala a mano."
+                : "El fragmento original ya no está en el texto. Copia la propuesta y pégala a mano."}
+            </p>
           )}
         </section>
       )}
