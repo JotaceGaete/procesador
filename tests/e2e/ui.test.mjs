@@ -186,7 +186,7 @@ test("Desarrollar escena: estimate shown, proposal only, request carries guide a
   const req = (await aiLog()).at(-1);
   const system = req.body.system.map((b) => b.text).join("\n");
   assert.equal(req.provider, "anthropic");
-  assert.match(system, /El argumento del autor es la autoridad/);
+  assert.match(system, /El argumento es el plan de la escena y la autoridad sobre lo que ocurre/);
   assert.match(system, /Tercera persona/);
   assert.match(system, /### Elena/);
   assert.match(system, /Juan estuvo con Marta/);

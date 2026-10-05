@@ -310,7 +310,7 @@ test("Desarrollar escena (Claude): WRITE instructions, guide, relevant memory, a
   assert.ok(events(r.data).some((e) => e.type === "text" && e.text.includes("<escena>")));
   const sent = (await aiLog())[0].body;
   const system = sent.system.map((b) => b.text).join("\n");
-  assert.match(system, /El argumento del autor es la autoridad/);
+  assert.match(system, /El argumento es el plan de la escena y la autoridad sobre lo que ocurre/);
   assert.doesNotMatch(system, /tu trabajo es conservador/);
   assert.match(system, /Persona narrativa: Tercera persona/);
   assert.match(system, /Español de Chile/);

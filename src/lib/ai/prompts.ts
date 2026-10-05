@@ -32,8 +32,11 @@ Desarrollar una escena es dramatizarla, no resumirla:
 - Si en el argumento los personajes conversan, discuten o se dicen algo, esa conversación ocurre en escena, con sus palabras, sus pausas y lo que callan; no la resuelvas con «hablaron de…» o «le explicó que…». Si nadie interactúa, no fuerces el diálogo.
 - No cuentes el argumento desde lejos ni lo despaches en unas líneas: entre un hecho y el siguiente están las reacciones, los gestos y las pequeñas decisiones que hacen creíble la escena.
 
-El argumento del autor es la autoridad sobre lo que ocurre:
-- Ocurre todo lo que el argumento dice, tal como lo dice. Si dice que alguien se va, se va. Si dice que alguien no revela algo, no lo revela, ni directa ni indirectamente.
+El argumento es el plan de la escena y la autoridad sobre lo que ocurre. Fidelidad al argumento es fidelidad a sus acontecimientos, a su intención y a sus límites; no a su redacción:
+- Ocurre todo lo que el argumento dice. Si dice que alguien se va, se va. Si dice que alguien no revela algo, no lo revela, ni directa ni indirectamente.
+- La narración del argumento es un plan, no un borrador: no la copies ni la corrijas por encima. Escribe la escena de nuevo con la voz del manuscrito y de la Guía Maestra, no con la forma telegráfica o resumida con que el autor anotó el argumento.
+- Las réplicas de diálogo que el autor escribe explícitamente en el argumento (con raya o entre comillas) son decisiones suyas: consérvalas tal cual, sin embellecerlas ni cambiar lo que dicen. Intégralas con acciones, pausas, silencios y reacciones.
+- Cuando el argumento nombra un estado interior («quería seguir», «estaba nerviosa»), no lo repitas sin más: si es literariamente apropiado, hazlo visible en lo que el personaje hace, mira o dice, o en cómo reaccionan los demás.
 - No añadas acontecimientos que cambien la historia: muertes, revelaciones, confesiones, reconciliaciones, decisiones o giros que el argumento no indique. No resuelvas tensiones que el argumento deja abiertas.
 - Termina donde termina el argumento. No adelantes lo que vendrá ni cierres con una reflexión o moraleja.
 
@@ -313,7 +316,7 @@ export function scenePrompt(opts: {
       parts.push(`Texto que viene después (la escena debe poder enlazar con él):\n<despues>\n${opts.after}\n</despues>`);
   }
 
-  parts.push(`Argumento del autor (esto es lo que ocurre, y sólo esto):\n<argumento>\n${opts.argument.trim()}\n</argumento>`);
+  parts.push(`Argumento del autor: los hechos de la escena (su plan, no su texto):\n<argumento>\n${opts.argument.trim()}\n</argumento>`);
   parts.push(`Extensión: ${extent.target}.`);
   if (opts.draft) {
     const written = countWords(opts.draft);
@@ -330,10 +333,31 @@ export function scenePrompt(opts: {
   return parts.join("\n\n");
 }
 
-/** Notes for one provider on top of the common instructions; "{extension}" is the length asked. */
+/**
+ * One provider's adaptation, on top of the common base (never instead of it). Grok tended to
+ * transcribe the argument in short sentences that tell what happens: its block teaches, by
+ * contrast, what staging a scene means, and a one-line reminder closes the task.
+ */
+/** Appended to WRITE_INSTRUCTIONS (system) for that provider. */
+export const SCENE_PROVIDER_CRAFT: Partial<Record<ProviderId, string>> = {
+  xai: `Escenificar, no resumir:
+Tiendes a reescribir el argumento en frases breves que cuentan lo que pasa. Aquí eso no sirve: cada frase del argumento debe convertirse en un momento visible, sin añadir acontecimientos. Para cada acontecimiento: qué hace el cuerpo (una microacción), qué se ve u oye en ese instante, cómo reacciona el otro, y la pausa o la réplica si la hay. Sin acumular adjetivos ni metáforas, y sin introspección inventada.
+
+Ejemplo de la diferencia (enseña el procedimiento, no un estilo: no lo imites ni lo reutilices):
+Argumento: «Marta estaba nerviosa. Le pidió a Juan que se fuera.»
+Resumen (no): «Marta estaba nerviosa y le pidió a Juan que se fuera.»
+Escena (sí): «Marta dobló la servilleta en dos, después en cuatro. Juan seguía con el abrigo puesto, sin sentarse. —Mejor vete —dijo ella, sin levantar la vista.»`,
+};
+
+/** The common writing instructions, plus the provider's own block if it has one. */
+export function writeInstructions(provider: ProviderId | null | undefined): string {
+  const craft = provider ? SCENE_PROVIDER_CRAFT[provider] : undefined;
+  return craft ? `${WRITE_INSTRUCTIONS}\n\n${craft}` : WRITE_INSTRUCTIONS;
+}
+
+/** A one-line reminder at the end of the task for that provider; "{extension}" is the length asked. */
 export const SCENE_PROVIDER_NOTES: Partial<Record<ProviderId, string>> = {
-  // Grok tended to turn "Desarrollar escena" into a short summary of the argument.
-  xai: "Importante: no resumas el argumento. Escribe la escena entera en tiempo de escena, desarrollando cada momento que contiene, hasta {extension}.",
+  xai: "Recuerda: no copies las frases del argumento; escenifícalas momento a momento, hasta {extension}.",
 };
 
 /** How the asked length is said to the model: a range to aim at, never a quota. */

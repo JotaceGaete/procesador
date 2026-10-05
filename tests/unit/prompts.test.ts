@@ -6,8 +6,8 @@ import { character, fact } from "./fixtures";
 
 test("editing and writing use different instructions", () => {
   assert.match(EDIT_INSTRUCTIONS, /conservador/);
-  assert.doesNotMatch(EDIT_INSTRUCTIONS, /argumento del autor es la autoridad/);
-  assert.match(WRITE_INSTRUCTIONS, /argumento del autor es la autoridad/);
+  assert.doesNotMatch(EDIT_INSTRUCTIONS, /argumento es el plan de la escena y la autoridad/);
+  assert.match(WRITE_INSTRUCTIONS, /argumento es el plan de la escena y la autoridad/);
   assert.match(WRITE_INSTRUCTIONS, /<escena><\/escena>/);
   for (const text of [EDIT_INSTRUCTIONS, WRITE_INSTRUCTIONS]) {
     assert.match(text, /no moralices/, "both modes keep the shared literary principles");

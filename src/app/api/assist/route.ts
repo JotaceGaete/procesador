@@ -20,10 +20,10 @@ import {
 import {
   EDIT_INSTRUCTIONS,
   SCENE_PROVIDER_NOTES,
-  WRITE_INSTRUCTIONS,
   editPrompt,
   memoryBlock,
   scenePrompt,
+  writeInstructions,
 } from "@/lib/ai/prompts";
 import { getProvider, type CompletionRequest } from "@/lib/ai/providers";
 import {
@@ -285,7 +285,8 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
     return {
       sections,
       notices: story.notices,
-      instructions: WRITE_INSTRUCTIONS,
+      // The common base, plus the provider's own block (only Grok has one).
+      instructions: writeInstructions(body.provider as ProviderId),
       manuscript: whole,
       project: project(selected),
       prompt: scenePrompt({

@@ -59,11 +59,20 @@ test("los tres modelos reciben la misma base literaria y el rango; sólo Grok la
     assert.match(user, /Extensión: alrededor de 800–1\.000 palabras \(media\)\./, provider);
     assert.match(user, /Escribe la escena completa, desarrollada: alrededor de 800–1\.000 palabras\. Es una orientación, no una cuota/, provider);
   }
-  assert.equal(seen.anthropic.system, seen.openai.system, "same instructions, word for word");
-  assert.equal(seen.openai.system, seen.xai.system, "same instructions, word for word");
+  assert.equal(seen.anthropic.system, seen.openai.system, "GPT and Claude: the same instructions, word for word");
   assert.equal(seen.anthropic.user, seen.openai.user, "GPT and Claude: the same task");
-  assert.match(seen.xai.user, /Importante: no resumas el argumento\. Escribe la escena entera en tiempo de escena, desarrollando cada momento que contiene, hasta alrededor de 800–1\.000 palabras\./);
-  assert.equal(seen.xai.user.replace(/\n\nImportante: no resumas[^\n]*/, ""), seen.openai.user, "the note is Grok's only difference");
+  // Grok: the same base plus its block (with the Marta/Juan example), and a one-line reminder.
+  const block = /\n\nEscenificar, no resumir:\n[\s\S]*sin levantar la vista\.»/;
+  assert.match(seen.xai.system, block);
+  assert.match(seen.xai.system, /Resumen \(no\): «Marta estaba nerviosa y le pidió a Juan que se fuera\.»/);
+  assert.doesNotMatch(seen.openai.system, /Escenificar, no resumir|Marta estaba nerviosa/);
+  assert.match(seen.xai.user, /Recuerda: no copies las frases del argumento; escenifícalas momento a momento, hasta alrededor de 800–1\.000 palabras\./);
+  assert.doesNotMatch(seen.openai.user, /Recuerda: no copies/);
+  // Those are Grok's only differences.
+  const common = seen.openai.system.split("\n\n# Guía Maestra")[0];
+  assert.ok(seen.xai.system.startsWith(`${common}\n\nEscenificar, no resumir:`), "the block goes right after the common base");
+  assert.equal(seen.xai.system.replace(block, ""), seen.openai.system);
+  assert.equal(seen.xai.user.replace(/\n\nRecuerda: no copies[^\n]*/, ""), seen.openai.user);
 });
 
 test("Ampliar (API): la escena escrita va como borrador, con el mismo contexto", async () => {
@@ -75,7 +84,9 @@ test("Ampliar (API): la escena escrita va como borrador, con el mismo contexto",
   assert.match(user, /Conserva todo lo que ocurre, en el mismo orden/);
   assert.match(user, /No añadas acontecimientos nuevos para ganar extensión/);
   assert.match(user, /<argumento>\nJuan y Elena discuten en la cocina\.\n<\/argumento>/);
-  assert.doesNotMatch(user, /Importante: no resumas/, "the widening task says it already");
+  assert.doesNotMatch(user, /Recuerda: no copies/, "the widening task says it already");
+  // The block stays in Grok's system prompt when widening too.
+  assert.match(parts((await aiLog())[0]).system, /Escenificar, no resumir:/);
 });
 
 for (const device of [
