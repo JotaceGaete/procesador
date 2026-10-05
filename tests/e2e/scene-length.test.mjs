@@ -132,7 +132,8 @@ for (const device of [
     assert.equal((await aiLog()).length, 1);
 
     await s.press(note.getByRole("button", { name: "Ampliar" }));
-    await s.panel.getByText(/ESCENA-AMPLIADA/).waitFor();
+    // The new scene, in its place (the preview also shows the text around the cursor).
+    await s.panel.getByRole("insertion").getByText(/ESCENA-AMPLIADA/).waitFor();
     await s.panel.getByRole("button", { name: "Insertar en el cursor" }).waitFor();
     const log = await aiLog();
     assert.equal(log.length, 2);
@@ -140,6 +141,7 @@ for (const device of [
     assert.equal(await note.count(), 0, "developed enough: no note");
     // The widened scene is the one inserted; the argument goes with it.
     await s.press(s.panel.getByRole("button", { name: "Insertar en el cursor" }));
+    await s.page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
     assert.ok((await s.editor.inputValue()).includes("ESCENA-AMPLIADA"));
     await s.ctx.close();
   });

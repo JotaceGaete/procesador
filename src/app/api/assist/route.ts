@@ -27,8 +27,10 @@ import {
 } from "@/lib/ai/prompts";
 import { getProvider, type CompletionRequest } from "@/lib/ai/providers";
 import {
+  draftSection,
   guideSection,
   manuscriptSection,
+  storyManuscriptSection,
   memorySectionsFor,
   passagesSection,
   sceneTextSections,
@@ -42,6 +44,7 @@ import {
   SCENE_LENGTHS,
   type AssistEvent,
   type Character,
+  type ContextInventory,
   type ContextPart,
   type ContextSection,
   type ProviderId,
@@ -74,21 +77,21 @@ export const POST = handler(async (request) => {
 
   const { novelId, purpose, sections, notices, ...completion } = await buildRequest(body, request.signal);
   const parts = contextParts(completion);
+  const total = parts.reduce((n, p) => n + p.tokens, 0);
+  // "Ver contexto": the request, said for the author. The rest of the total are Procesador's
+  // own instructions to the model (how to write, the format). The real request sends the
+  // same inventory first, so what was actually sent can be checked afterwards.
+  const inventory = {
+    total,
+    manuscript: estimateTokens(completion.manuscript?.length ?? 0),
+    parts,
+    sections,
+    notices,
+    instructions: Math.max(0, total - sections.reduce((n, x) => n + x.tokens, 0)),
+  };
 
-  if (body.dryRun) {
-    const total = parts.reduce((n, p) => n + p.tokens, 0);
-    return NextResponse.json({
-      total,
-      manuscript: estimateTokens(completion.manuscript?.length ?? 0),
-      parts,
-      // "Ver contexto": the same request, said for the author. The rest of the total are
-      // Procesador's own instructions to the model (how to write, the format).
-      sections,
-      notices,
-      instructions: Math.max(0, total - sections.reduce((n, x) => n + x.tokens, 0)),
-    });
-  }
-  return streamResponse(provider!, completion, parts, (u) => recordUsage(novelId, purpose, body.provider as ProviderId, u));
+  if (body.dryRun) return NextResponse.json(inventory);
+  return streamResponse(provider!, completion, inventory, (u) => recordUsage(novelId, purpose, body.provider as ProviderId, u));
 });
 
 /** What the request carries, in estimated tokens, so the panel can say what the AI read. */
@@ -177,12 +180,14 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
             .filter((p) => p.kind === "present" && !characterIds.includes(p.character) && memory.characters.some((c) => c.id === p.character))
             .map((p) => p.character)
         : [];
+    // Temporal ignorance: nothing of later chapters (docs/asistente-contexto.md).
     const picked = selectMemory(memory, {
       text: `${argument}\n${before}`,
       characterIds: [...characterIds, ...continuing],
       placeIds,
       chapterId: chapter.id,
       chapterOrder,
+      noLaterThan: chapter.id,
     });
     // Relationships of the people chosen in "En escena" go with anyone (the other one only by name).
     const chosen = new Set(characterIds);
@@ -211,17 +216,20 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       includeManuscript,
     });
 
-    // With the whole novel the text around the cursor is already there: the cursor is marked in it
-    // instead of sending that text twice. Without it, the chapter from its start, and the end of the
-    // previous one when the scene opens a chapter.
+    // «Leer toda la historia hasta aquí»: the previous chapters and this one up to the cursor,
+    // where the mark goes. Never a later chapter, never the text after the cursor: the model
+    // can't give away what the reader will only learn later. Without it, the chapter from its
+    // start, the text around the cursor, and the end of the previous one when the scene opens
+    // a chapter.
     let whole: string | null = null;
     let earlier: string | null = null;
     let earlierOmitted = 0;
     let previousChapterTail: string | null = null;
     if (includeManuscript) {
       const full = await manuscript();
-      const marked = `${content.slice(0, cursor)}\n\n${SCENE_MARK}\n\n${content.slice(cursor)}`;
-      whole = await plain(buildManuscript(full.chapters, { id: chapter.id, content: marked }).text);
+      const story = full.chapters.slice(0, chapterIndex + 1);
+      const marked = `${content.slice(0, cursor).trimEnd()}\n\n${SCENE_MARK}`;
+      whole = await plain(buildManuscript(story, { id: chapter.id, content: marked }).text);
     } else {
       const head = content.slice(0, near.start);
       if (head.trim()) {
@@ -280,11 +288,17 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       ...kind("facts"),
       ...(story.sections.threads ? [story.sections.threads] : []),
       texts.argument,
-      ...(await wholeNovel(whole)),
+      ...(draft ? [draftSection(draft)] : []),
+      ...(whole ? [storyManuscriptSection(whole, chapterIndex)] : []),
     ];
+    const later = picked.later
+      ? [
+          `${picked.later === 1 ? "1 hecho de un capítulo posterior no se envía" : `${picked.later} hechos de capítulos posteriores no se envían`}: la escena no puede saber lo que aún no ha ocurrido.`,
+        ]
+      : [];
     return {
       sections,
-      notices: story.notices,
+      notices: [...story.notices, ...later],
       // The common base, plus the provider's own block (only Grok has one).
       instructions: writeInstructions(body.provider as ProviderId),
       manuscript: whole,
@@ -403,7 +417,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
 function streamResponse(
   provider: NonNullable<ReturnType<typeof getProvider>>,
   completion: CompletionRequest,
-  parts: ContextPart[],
+  inventory: { parts: ContextPart[] } & ContextInventory,
   onUsage: (u: Extract<AssistEvent, { type: "usage" }>) => Promise<void>,
 ) {
   const encoder = new TextEncoder();
@@ -413,7 +427,8 @@ function streamResponse(
   const generator = provider.stream(completion);
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      send(controller, { type: "context", parts });
+      const { parts, total, sections, notices, instructions } = inventory;
+      send(controller, { type: "context", parts, sent: { total, sections, notices, instructions } });
     },
     async pull(controller) {
       try {

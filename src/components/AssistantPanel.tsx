@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import {
   EDIT_ACTIONS,
@@ -10,6 +10,7 @@ import {
   type AssistEvent,
   type ChapterInfo,
   type Fact,
+  type ContextInventory,
   type ContextPart,
   type ContextSection,
   type EditAction,
@@ -18,7 +19,8 @@ import {
   type SceneLength,
   type Usage,
 } from "@/lib/types";
-import { estimateTokens } from "@/lib/ai/context";
+import { chapterLabel, estimateTokens } from "@/lib/ai/context";
+import { diffStats, diffText } from "@/lib/diff";
 import { readPref, writePref } from "@/lib/client";
 import { BUILD, diagEnabled } from "@/lib/diag";
 import { appendImages, countWords, fromModel, protectImages, restoreImages } from "@/lib/manuscript";
@@ -30,6 +32,7 @@ import AdvisorSaved from "./AdvisorSaved";
 import { formatCount, formatTokens } from "./format";
 import UsageLine from "./UsageLine";
 import ContextView from "./ContextView";
+import DiffView from "./DiffView";
 
 interface Props {
   hidden: boolean;
@@ -54,9 +57,12 @@ interface Props {
   novelChars: number;
   getContent(): string;
   getCursor(): number;
-  /** Both return true when the text reached the manuscript. */
-  onApply(original: Selection, rewrite: string): boolean;
-  onInsert(text: string): boolean;
+  /**
+   * Both keep the current text as a version first, then apply; true when the text reached the
+   * manuscript. They throw (and change nothing) when the version can't be saved.
+   */
+  onApply(original: Selection, rewrite: string): Promise<boolean>;
+  onInsert(text: string): Promise<boolean>;
   onClearSelection(): void;
 }
 
@@ -74,6 +80,10 @@ interface Result {
   lostImages: { text: string; missing: string[] } | null;
   /** What the request read and what it cost, as the server and the provider reported it. */
   readParts: ContextPart[] | null;
+  /** «Ver lo que se envió»: the real request's inventory, as the server built it. */
+  sent: ContextInventory | null;
+  /** Applying failed before touching the manuscript (the copy couldn't be saved): why. */
+  applyFailed: string | null;
   usage: Usage | null;
 }
 
@@ -127,6 +137,36 @@ function parse(output: string, mode: Mode) {
     complete: main?.complete ?? false,
     warning: warning?.text ?? null,
     untagged: false,
+  };
+}
+
+const wordsLabel = (n: number) => (n === 1 ? "1 palabra" : `${n.toLocaleString("es")} palabras`);
+
+/** Up to `max` characters, cut at a word, with an ellipsis where it was cut. */
+function around(text: string, max: number, side: "start" | "end") {
+  if (text.length <= max) return text;
+  if (side === "end") {
+    const cut = text.slice(-max);
+    return `…${cut.slice(cut.search(/\s/) + 1)}`;
+  }
+  const cut = text.slice(0, max);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), 1))}…`;
+}
+
+/**
+ * Insertar en el cursor, before it happens: the text around the cursor and the scene in its
+ * place, as ChapterEditor.insertParagraphs will put it (its own paragraphs).
+ */
+function insertPreview(content: string, cursor: number, scene: string) {
+  const at = Math.min(Math.max(0, cursor), content.length);
+  const before = content.slice(0, at).trimEnd();
+  const after = content.slice(at).trimStart();
+  const where = !before ? "al principio del capítulo" : !after ? "al final del capítulo" : "en el cursor, entre estos párrafos";
+  return {
+    where,
+    before: before ? `${around(before, 220, "end")}\n\n` : "",
+    scene: scene.trim(),
+    after: after ? `\n\n${around(after, 220, "start")}` : "",
   };
 }
 
@@ -195,6 +235,14 @@ function AssistantPanel(props: Props) {
   // "Ver contexto" open; opening it asks again (the manuscript may have changed meanwhile).
   const [showContext, setShowContext] = useState(false);
   const [contextAsked, setContextAsked] = useState(0);
+  // A proposal being applied (the copy of the current text is being saved first).
+  const [applying, setApplying] = useState(false);
+  // How a rewrite is shown before accepting it: the changes, the clean proposal, or the author's text.
+  const [compareView, setCompareView] = useState<"changes" | "proposal" | "original">("changes");
+  // «Ver lo que se envió», under an answer.
+  const [showSent, setShowSent] = useState(false);
+  // Where a scene will go follows the cursor while the proposal waits.
+  const [, setCaretTick] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const resultRef = useRef<HTMLElement | null>(null);
   const argumentRef = useRef<HTMLTextAreaElement | null>(null);
@@ -320,8 +368,8 @@ function AssistantPanel(props: Props) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
-          // The text on screen now, as the real request will send it.
-          body: JSON.stringify({ ...req.body, content: getContent(), dryRun: true }),
+          // The text on screen now and the chosen model, as the real request will send them.
+          body: JSON.stringify({ ...req.body, content: getContent(), provider, dryRun: true }),
         });
         if (res.ok) setEstimate(await res.json());
       } catch {}
@@ -347,6 +395,7 @@ function AssistantPanel(props: Props) {
     length,
     chapterId,
     memory,
+    provider,
   ]);
 
   async function run(req: Request, using: ProviderId) {
@@ -362,7 +411,17 @@ function AssistantPanel(props: Props) {
     note(`run → ${key}`);
     setResults((all) => ({
       ...all,
-      [key]: { output: "", notice: null, last: { ...req, provider: using }, applyError: false, lostImages: null, readParts: null, usage: null },
+      [key]: {
+        output: "",
+        notice: null,
+        last: { ...req, provider: using },
+        applyError: false,
+        lostImages: null,
+        readParts: null,
+        sent: null,
+        applyFailed: null,
+        usage: null,
+      },
     }));
     setRunningSlot(key);
 
@@ -398,7 +457,7 @@ function AssistantPanel(props: Props) {
           else if (event.type === "error") update(key, () => ({ notice: { kind: "error", message: event.message } }));
           else if (event.type === "truncated")
             update(key, () => ({ notice: { kind: "truncated", message: "La respuesta se cortó por longitud." } }));
-          else if (event.type === "context") update(key, () => ({ readParts: event.parts }));
+          else if (event.type === "context") update(key, () => ({ readParts: event.parts, sent: event.sent ?? null }));
           else if (event.type === "usage") update(key, () => ({ usage: event }));
         }
       }
@@ -446,12 +505,21 @@ function AssistantPanel(props: Props) {
       writePref(`argument:${novelId}`, "");
     }
   };
-  /** Inserting can fail (the editor is not there, the browser refused the edit): then nothing is lost. */
-  const tryInsert = (text: string) => {
+  /**
+   * Accepting a proposal: the current text is kept as a version, then the manuscript changes.
+   * If the copy can't be saved nothing changes and the proposal stays, with the reason; if the
+   * text can't be applied (the fragment is gone), the proposal stays too (`used(false)`).
+   */
+  const accept = async (apply: () => Promise<boolean>) => {
+    setApplying(true);
+    update(slot, () => ({ applyFailed: null }));
     try {
-      return onInsert(text);
-    } catch {
-      return false;
+      used(await apply());
+    } catch (e) {
+      note(`aplicar falló: ${(e as Error).message}`);
+      update(slot, () => ({ applyFailed: (e as Error).message }));
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -497,6 +565,35 @@ function AssistantPanel(props: Props) {
     sceneWords < asked.words * asked.warnBelow
       ? { words: sceneWords, asked: asked.words }
       : null;
+  const finished = Boolean(parsed?.proposal && (parsed.complete || parsed.untagged) && !runningHere);
+  // A finished rewrite, as it would reach the manuscript (markers restored), and its changes.
+  const rewrite = useMemo(() => {
+    if (!finished || !last || last.mode !== "edit" || !last.target || !parsed?.proposal) return null;
+    const restored = restoreImages(fromModel(parsed.proposal), protectImages(last.target.text).ids);
+    const ops = diffText(last.target.text, restored.text);
+    return { restored, ops, stats: diffStats(ops) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the proposal and its target
+  }, [finished, last, parsed?.proposal]);
+  useEffect(() => setCompareView("changes"), [rewrite]);
+  useEffect(() => setShowSent(false), [last]);
+  // A finished scene: where it will go, following the cursor until it is inserted.
+  const sceneReady = finished && last?.mode === "scene";
+  useEffect(() => {
+    if (!sceneReady) return;
+    const tick = () => setCaretTick((n) => n + 1);
+    document.addEventListener("selectionchange", tick);
+    document.addEventListener("keyup", tick);
+    document.addEventListener("pointerup", tick);
+    return () => {
+      document.removeEventListener("selectionchange", tick);
+      document.removeEventListener("keyup", tick);
+      document.removeEventListener("pointerup", tick);
+    };
+  }, [sceneReady]);
+  const insertion = sceneReady && parsed?.proposal ? insertPreview(getContent(), getCursor(), fromModel(parsed.proposal)) : null;
+  const chapterIndex = chapters.findIndex((c) => c.id === chapterId);
+  const here = chapterIndex >= 0 ? chapterLabel(chapterIndex, chapters[chapterIndex].title) : "este capítulo";
+
   const req = buildRequest();
   const canRun = Boolean(req && provider && !running && (mode === "scene" || current.character !== "required" || character));
   const manuscriptTokens = estimateTokens(novelChars);
@@ -520,23 +617,39 @@ function AssistantPanel(props: Props) {
     </label>
   );
 
+  // A scene reads the story up to the cursor, never beyond (docs/asistente-contexto.md).
+  const storyChars =
+    mode === "scene"
+      ? chapters.slice(0, Math.max(0, chapters.findIndex((c) => c.id === chapterId))).reduce((n, c) => n + c.chars, 0) + getCursor()
+      : 0;
   const contextControls = (
     <>
       <label className="check">
         <input type="checkbox" checked={includeManuscript} onChange={(e) => setIncludeManuscript(e.target.checked)} />
-        <span>
-          Leer también la novela completa
-          {novelChars > 0 && <span className="muted"> · ≈{formatTokens(manuscriptTokens)} tokens más por consulta</span>}
-        </span>
+        {mode === "scene" ? (
+          <span>
+            Leer toda la historia hasta aquí
+            {storyChars > 0 && <span className="muted"> · ≈{formatTokens(estimateTokens(storyChars))} tokens estimados más</span>}
+          </span>
+        ) : (
+          <span>
+            Leer también la novela completa
+            {novelChars > 0 && <span className="muted"> · ≈{formatTokens(manuscriptTokens)} tokens estimados más por consulta</span>}
+          </span>
+        )}
       </label>
       <p className="muted small check-help">
-        {includeManuscript
-          ? "Lee todo el manuscrito: más coherencia, más coste."
-          : "Desactivada, la IA no lee todo el manuscrito: trabaja sólo con el contexto seleccionado."}
+        {mode === "scene"
+          ? includeManuscript
+            ? "Lee los capítulos anteriores y este hasta el cursor; nunca lo que viene después."
+            : "Desactivada, la IA no lee toda la historia: trabaja sólo con el contexto seleccionado."
+          : includeManuscript
+            ? "Lee todo el manuscrito: más coherencia, más coste."
+            : "Desactivada, la IA no lee todo el manuscrito: trabaja sólo con el contexto seleccionado."}
       </p>
       {estimate && (
         <p className={`estimate${estimate.total > confirmTokens ? " large" : ""}`}>
-          Contexto de esta consulta: ≈{formatTokens(estimate.total)} tokens
+          Contexto de esta consulta: ≈{formatTokens(estimate.total)} tokens estimados
           {estimate.sections && (
             <>
               {" · "}
@@ -561,6 +674,7 @@ function AssistantPanel(props: Props) {
           total={estimate.total}
           instructions={estimate.instructions ?? 0}
           includeManuscript={includeManuscript}
+          scene={mode === "scene"}
           updating={Boolean(estimate.stale)}
           notices={estimate.notices}
         />
@@ -844,18 +958,71 @@ function AssistantPanel(props: Props) {
           )}
           {runningHere && !output && <p className="muted">{last.mode === "scene" ? "Escribiendo…" : "Pensando…"}</p>}
 
-          {parsed.proposal !== null && (
-            <div className="compare">
-              {last.mode === "edit" && last.target && (
+          {parsed.proposal !== null && rewrite && last.target ? (
+            // Comparar antes de aplicar: the author's text and the proposal, as prose.
+            <div className="compare" data-origin="comparación (texto actual ↔ propuesta)">
+              <div className="compare-tabs" role="group" aria-label="Cómo ver la propuesta">
+                {(
+                  [
+                    ["changes", "Cambios"],
+                    ["proposal", "Propuesta"],
+                    ["original", "Tu texto"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button key={id} className={compareView === id ? "on" : undefined} aria-pressed={compareView === id} onClick={() => setCompareView(id)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {compareView === "changes" && (
                 <>
-                  <h3>Original</h3>
-                  <p className="prose original">{last.target.text}</p>
+                  <p className="muted small compare-summary">
+                    {rewrite.stats.added || rewrite.stats.removed
+                      ? `La IA propone quitar ${wordsLabel(rewrite.stats.removed)} y añadir ${wordsLabel(rewrite.stats.added)}. Tachado: lo que se quita; resaltado: lo que se añade.`
+                      : "La propuesta deja el fragmento igual."}
+                  </p>
+                  <DiffView ops={rewrite.ops} label="Cambios que propone la IA" />
                 </>
               )}
-              <h3>Propuesta</h3>
-              <p className="prose">{parsed.proposal}</p>
+              {compareView === "proposal" && (
+                <DiffView ops={[{ kind: "same", text: rewrite.restored.text }]} label="Propuesta de la IA" full />
+              )}
+              {compareView === "original" && (
+                <DiffView ops={[{ kind: "same", text: last.target.text }]} label="Tu texto actual" full />
+              )}
               {parsed.warning && <p className="notice">Aviso: {parsed.warning}</p>}
             </div>
+          ) : parsed.proposal !== null && insertion ? (
+            // Insertar en el cursor: what goes in, and exactly where.
+            <div className="compare" data-origin="vista previa de la inserción">
+              <p className="muted small insert-where">
+                Se insertará en {here}, {insertion.where}. Mueve el cursor en el texto para cambiar el lugar.
+              </p>
+              <DiffView
+                ops={[
+                  { kind: "same", text: insertion.before },
+                  { kind: "add", text: insertion.scene },
+                  { kind: "same", text: insertion.after },
+                ]}
+                label="La escena en su lugar"
+                full
+              />
+              {parsed.warning && <p className="notice">Aviso: {parsed.warning}</p>}
+            </div>
+          ) : (
+            parsed.proposal !== null && (
+              <div className="compare">
+                {last.mode === "edit" && last.target && (
+                  <>
+                    <h3>Original</h3>
+                    <p className="prose original">{last.target.text}</p>
+                  </>
+                )}
+                <h3>Propuesta</h3>
+                <p className="prose">{parsed.proposal}</p>
+                {parsed.warning && <p className="notice">Aviso: {parsed.warning}</p>}
+              </div>
+            )
           )}
 
           {short && (
@@ -872,25 +1039,43 @@ function AssistantPanel(props: Props) {
           )}
           {notice && <p className={`notice ${notice.kind}`}>{notice.message}</p>}
           {!runningHere && (readParts || usage) && <UsageLine parts={readParts} usage={usage} />}
+          {!runningHere && result?.sent && (
+            <p className="muted small">
+              <button type="button" className="link small" aria-expanded={showSent} onClick={() => setShowSent(!showSent)}>
+                {showSent ? "Ocultar lo que se envió" : "Ver lo que se envió"}
+              </button>
+            </p>
+          )}
+          {showSent && result?.sent && (
+            <ContextView
+              sections={result.sent.sections}
+              total={result.sent.total}
+              instructions={result.sent.instructions}
+              includeManuscript={last.body.includeManuscript === true}
+              scene={last.mode === "scene"}
+              notices={result.sent.notices}
+              sent
+            />
+          )}
 
           {!runningHere && (
             <div className="compare-actions">
-              {parsed.proposal && (parsed.complete || parsed.untagged) && last.mode === "edit" && last.target && (
+              {rewrite && last.target && (
                 <button
                   className="btn primary"
+                  disabled={applying}
                   onClick={() => {
-                    // The model saw [IMAGEN n] and `* * *`; put the real markers back before touching the text.
-                    const restored = restoreImages(fromModel(parsed.proposal!), protectImages(last.target!.text).ids);
-                    if (restored.missing.length) return update(slot, () => ({ lostImages: restored }));
-                    used(onApply(last.target!, restored.text));
+                    // The model saw [IMAGEN n] and `* * *`: the real markers are back in `restored`.
+                    if (rewrite.restored.missing.length) return update(slot, () => ({ lostImages: rewrite.restored }));
+                    accept(() => onApply(last.target!, rewrite.restored.text));
                   }}
                 >
-                  Reemplazar selección
+                  {applying ? "Guardando una copia…" : "Reemplazar selección"}
                 </button>
               )}
-              {parsed.proposal && (parsed.complete || parsed.untagged) && last.mode === "scene" && (
-                <button className="btn primary" onClick={() => used(tryInsert(fromModel(parsed.proposal!)))}>
-                  Insertar en el cursor
+              {sceneReady && parsed.proposal && (
+                <button className="btn primary" disabled={applying} onClick={() => accept(() => onInsert(fromModel(parsed.proposal!)))}>
+                  {applying ? "Guardando una copia…" : "Insertar en el cursor"}
                 </button>
               )}
               <button className="btn ghost" onClick={() => run(last, last.provider)}>
@@ -931,7 +1116,8 @@ function AssistantPanel(props: Props) {
               <div className="compare-actions">
                 <button
                   className="btn"
-                  onClick={() => used(onApply(last.target!, appendImages(lostImages.text, lostImages.missing)))}
+                  disabled={applying}
+                  onClick={() => accept(() => onApply(last.target!, appendImages(lostImages.text, lostImages.missing)))}
                 >
                   Aplicar y colocar la imagen al final
                 </button>
@@ -940,6 +1126,11 @@ function AssistantPanel(props: Props) {
                 </button>
               </div>
             </div>
+          )}
+          {result?.applyFailed && (
+            <p className="error small" role="alert">
+              {result.applyFailed}
+            </p>
           )}
           {result?.applyError && (
             <p className="error small">

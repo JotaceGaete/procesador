@@ -36,6 +36,29 @@ test("diffText: a change inside a paragraph is told word by word", () => {
   assert.deepEqual(diffStats(ops), { added: 1, removed: 1 });
 });
 
+test("diffText: a whole change reads as what goes and what comes, not word against word", () => {
+  const ops = diffText("Uno.\n\nLa casa era azul.\n\nDos.", "Uno.\n\nTexto propuesto por el modelo.\n\nDos.");
+  assert.deepEqual(
+    ops.filter((o) => o.kind !== "same"),
+    [
+      { kind: "del", text: "La casa era azul." },
+      { kind: "add", text: "Texto propuesto por el modelo." },
+    ],
+  );
+  assert.equal(side(ops, "before"), "Uno.\n\nLa casa era azul.\n\nDos.");
+  assert.equal(side(ops, "after"), "Uno.\n\nTexto propuesto por el modelo.\n\nDos.");
+  // Shared words in between keep the changes apart.
+  const near = diffText("El perro negro corre.", "El gato negro duerme.");
+  assert.deepEqual(near.map((o) => [o.kind, o.text]), [
+    ["same", "El "],
+    ["del", "perro"],
+    ["add", "gato"],
+    ["same", " negro "],
+    ["del", "corre."],
+    ["add", "duerme."],
+  ]);
+});
+
 test("diffText: a long chapter with one edit is fast; texts with nothing in common are whole blocks", () => {
   const para = (i: number) => `Párrafo ${i} con algunas palabras que se repiten en la novela.\n\n`;
   const a = Array.from({ length: 4000 }, (_, i) => para(i)).join("");

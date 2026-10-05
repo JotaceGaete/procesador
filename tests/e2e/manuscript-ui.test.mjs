@@ -258,6 +258,7 @@ test("assistant: a rewrite keeps the images (restored from [IMAGEN n])", async (
   await selectFromLastMarker();
   await page.getByRole("button", { name: "Proponer cambios" }).click();
   await page.getByRole("button", { name: "Reemplazar selección" }).click();
+  await page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
   const text = await editor().inputValue();
   assert.match(text, new RegExp(`Primero la imagen\\.\\n\\n\\[\\[imagen:${before.at(-1)}\\]\\]\\n\\nY el texto reescrito\\.`));
   assert.deepEqual(new Set(await markers()), new Set(before), "every image still in the text");
@@ -272,6 +273,7 @@ test("assistant: a rewrite that drops an image is not applied without asking", a
   await page.locator(".lost-images").waitFor();
   assert.deepEqual(await markers(), before, "nothing applied yet");
   await page.getByRole("button", { name: "Aplicar y colocar la imagen al final" }).click();
+  await page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
   const text = await editor().inputValue();
   assert.match(text, /Texto propuesto por el modelo\.\n\n\[\[imagen:/);
   assert.deepEqual(await markers(), before, "the image is still in the text");

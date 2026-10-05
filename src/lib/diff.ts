@@ -58,6 +58,37 @@ function backtrack(trace: Int32Array[], a: string[], b: string[], offset: number
   return ops.reverse();
 }
 
+/**
+ * For a reader, not a machine: a change whose words only share the spaces between them
+ * («~~La~~ Texto ~~casa~~ propuesto…») reads as one change, what goes and what comes. Runs
+ * of changes separated only by blank space or punctuation become one removed and one
+ * added block. Both texts can still be rebuilt from the result.
+ */
+function readable(ops: DiffOp[]): DiffOp[] {
+  const out: DiffOp[] = [];
+  const glue = (o: DiffOp) => o.kind === "same" && /^[\s.,;:!?¡¿«»"'—–-]*$/.test(o.text);
+  for (let i = 0; i < ops.length; ) {
+    if (ops[i].kind === "same") {
+      out.push(ops[i++]);
+      continue;
+    }
+    // A run of changes, with the glue between them (never at its ends).
+    let j = i;
+    let end = i;
+    while (j < ops.length && (ops[j].kind !== "same" || glue(ops[j]))) {
+      if (ops[j].kind !== "same") end = j;
+      j++;
+    }
+    const run = ops.slice(i, end + 1);
+    const del = run.filter((o) => o.kind !== "add").map((o) => o.text).join("");
+    const add = run.filter((o) => o.kind !== "del").map((o) => o.text).join("");
+    if (del) out.push({ kind: "del", text: del });
+    if (add) out.push({ kind: "add", text: add });
+    i = end + 1;
+  }
+  return out;
+}
+
 /** Joins consecutive operations of the same kind. */
 function merge(ops: DiffOp[]): DiffOp[] {
   const out: DiffOp[] = [];
@@ -114,7 +145,7 @@ export function diffText(before: string, after: string): DiffOp[] {
     }
     return out;
   });
-  return merge(ops);
+  return merge(readable(merge(ops)));
 }
 
 /** Words removed and added, for a one-line summary. */

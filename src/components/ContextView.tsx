@@ -5,6 +5,7 @@ import { formatTokens } from "./format";
 
 /** Sections that are lists of concrete things the author can unfold to check one by one. */
 const LISTS: ContextSectionId[] = [
+  "draft",
   "story",
   "guide",
   "characters",
@@ -16,7 +17,7 @@ const LISTS: ContextSectionId[] = [
   "passages",
 ];
 /** Lists whose label already says what they hold. */
-const LABELLED: ContextSectionId[] = ["guide", "story", "knowledge"];
+const LABELLED: ContextSectionId[] = ["guide", "story", "knowledge", "draft"];
 /** Lists whose names fit in the line itself. */
 const NAMED: ContextSectionId[] = ["characters", "places"];
 
@@ -30,6 +31,8 @@ export default function ContextView({
   total,
   instructions,
   includeManuscript,
+  scene = false,
+  sent = false,
   updating,
   notices = [],
 }: {
@@ -37,15 +40,25 @@ export default function ContextView({
   total: number;
   instructions: number;
   includeManuscript: boolean;
+  /** Desarrollar escena: the option is «Leer toda la historia hasta aquí». */
+  scene?: boolean;
+  /** What a request already sent (its own inventory), not a preview of the next one. */
+  sent?: boolean;
   /** The inputs changed and a new estimate is on its way. */
   updating?: boolean;
   /** What the AI does not know and the author may want to fix (chapters without a digest…). */
   notices?: string[];
 }) {
   return (
-    <div className="context-view" role="region" aria-label="Contexto que recibirá la IA" aria-busy={updating}>
+    <div
+      className="context-view"
+      role="region"
+      aria-label={sent ? "Contexto que recibió la IA" : "Contexto que recibirá la IA"}
+      aria-busy={updating}
+    >
       <p className="context-title">
-        La IA tendrá en cuenta <span className="muted small">(tokens aprox.){updating ? " · actualizando…" : ""}</span>
+        {sent ? "La IA tuvo en cuenta" : "La IA tendrá en cuenta"}{" "}
+        <span className="muted small">(tokens estimados){updating ? " · actualizando…" : ""}</span>
       </p>
       <ul className="context-sections">
         {sections.map((s) => (
@@ -79,8 +92,9 @@ export default function ContextView({
         ))}
       </ul>
       <p className="muted small">
-        Total aproximado: ≈{formatTokens(total)} tokens
-        {instructions > 0 && `, de ellos ≈${formatTokens(instructions)} de instrucciones de Procesador al modelo`}.
+        Total estimado: ≈{formatTokens(total)} tokens
+        {instructions > 0 && `, de ellos ≈${formatTokens(instructions)} de instrucciones de Procesador al modelo`}. Es una
+        estimación (unos 3,5 caracteres por token); el proveedor informa los tokens reales al responder.
       </p>
       {notices.map((n) => (
         <p key={n} className="muted small context-notice">
@@ -88,7 +102,9 @@ export default function ContextView({
         </p>
       ))}
       {!includeManuscript && (
-        <p className="muted small">No lee la novela completa: sólo lo que aparece aquí.</p>
+        <p className="muted small">
+          {scene ? "No lee toda la historia hasta aquí: sólo lo que aparece en esta lista." : "No lee la novela completa: sólo lo que aparece aquí."}
+        </p>
       )}
     </div>
   );

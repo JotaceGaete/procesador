@@ -3,39 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { VERSION_REASONS, type ChapterVersion, type TrashEntry } from "@/lib/types";
 import { api } from "@/lib/client";
-import { diffStats, diffText, type DiffOp } from "@/lib/diff";
+import { diffStats, diffText } from "@/lib/diff";
 import { chapterLabel } from "@/lib/ai/context";
 import Modal from "./Modal";
+import DiffView from "./DiffView";
 
 /** Versions and trash (docs/versiones.md). */
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString("es", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 const wordsLabel = (n: number) => (n === 1 ? "1 palabra" : `${n.toLocaleString("es")} palabras`);
-
-/** Unchanged stretches longer than this show only their ends. */
-const CONTEXT_CHARS = 240;
-
-function DiffView({ ops }: { ops: DiffOp[] }) {
-  return (
-    <div className="diff" aria-label="Diferencias con el texto actual">
-      {ops.map((o, i) => {
-        if (o.kind === "add") return <ins key={i}>{o.text}</ins>;
-        if (o.kind === "del") return <del key={i}>{o.text}</del>;
-        if (o.text.length <= CONTEXT_CHARS * 2 + 40) return <span key={i}>{o.text}</span>;
-        const head = i === 0 ? "" : o.text.slice(0, CONTEXT_CHARS);
-        const tail = i === ops.length - 1 ? "" : o.text.slice(-CONTEXT_CHARS);
-        return (
-          <span key={i}>
-            {head}
-            <span className="diff-gap muted">{"\n[…]\n"}</span>
-            {tail}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
 
 /**
  * The chapter's versions: save the current text with a name, see what each version
@@ -112,7 +89,7 @@ export function VersionsModal({
             ? "Es igual al texto actual."
             : `Comparada con el texto actual: en verde, ${wordsLabel(stats.added)} de esta versión que hoy no están; tachadas, ${wordsLabel(stats.removed)} del texto actual que esta versión no tiene.`}
         </p>
-        <DiffView ops={ops} />
+        <DiffView ops={ops} label="Diferencias con el texto actual" />
         {error && <p className="error small">{error}</p>}
         <div className="compare-actions">
           <button

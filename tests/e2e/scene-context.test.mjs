@@ -119,17 +119,17 @@ test("relaciones de quien eliges en «En escena», con cualquiera (el otro sólo
   assert.doesNotMatch(system, /### Rosa/);
 });
 
-test("con la novela completa, el texto alrededor del cursor no va dos veces: el cursor va marcado en ella", async () => {
+test("con toda la historia hasta aquí: el texto hasta el cursor va una vez, con la marca al final; nada posterior", async () => {
   const text = "ANTES-DEL-CURSOR. Pilar entra.\n\nDESPUES-DEL-CURSOR.";
   const cursor = text.indexOf("\n\nDESPUES");
   const d = await dry(text, { includeManuscript: true, cursor });
   const sec = byId(d.sections);
-  assert.deepEqual(sec.chapter.items.map((i) => i.label), ["El lugar del cursor, marcado en la novela completa"]);
+  assert.deepEqual(sec.chapter.items.map((i) => i.label), ["El lugar del cursor, al final de la historia hasta aquí"]);
   assert.equal(sec.previous, undefined);
   const { system, prompt } = await sent(text, { includeManuscript: true, cursor });
-  assert.match(system, /ANTES-DEL-CURSOR\. Pilar entra\.\n\n⟦AQUÍ VA LA ESCENA NUEVA⟧\n\n\n\nDESPUES-DEL-CURSOR/);
+  assert.match(system, /ANTES-DEL-CURSOR\. Pilar entra\.\n\n⟦AQUÍ VA LA ESCENA NUEVA⟧$/m);
   assert.match(system, /FINAL-DEL-UNO/);
-  for (const twice of ["ANTES-DEL-CURSOR", "DESPUES-DEL-CURSOR", "FINAL-DEL-UNO", "<antes>", "<despues>"])
-    assert.ok(!prompt.includes(twice), twice);
-  assert.match(prompt, /La escena va exactamente donde el manuscrito completo dice ⟦AQUÍ VA LA ESCENA NUEVA⟧/);
+  assert.ok(!system.includes("DESPUES-DEL-CURSOR") && !prompt.includes("DESPUES-DEL-CURSOR"), "nothing after the cursor");
+  for (const twice of ["ANTES-DEL-CURSOR", "FINAL-DEL-UNO", "<antes>", "<despues>"]) assert.ok(!prompt.includes(twice), twice);
+  assert.match(prompt, /La escena va exactamente donde la historia hasta aquí termina con ⟦AQUÍ VA LA ESCENA NUEVA⟧/);
 });

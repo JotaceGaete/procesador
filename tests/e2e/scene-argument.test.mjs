@@ -75,6 +75,7 @@ for (const device of DEVICES) {
     const s = await open(device);
     await generate(s);
     await s.press(s.panel.getByRole("button", { name: "Insertar en el cursor" }));
+    await s.page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
     assert.ok((await s.editor.inputValue()).includes("—dijo él."), "the scene is in the manuscript");
     assert.equal(await s.panel.locator(".result").count(), 0, "the used proposal is gone");
     assert.equal(await s.argument.inputValue(), "");
@@ -135,6 +136,7 @@ test("escritorio: si el autor ya escribió otro argumento mientras tanto, insert
   await generate(s);
   await s.argument.fill("Otra escena distinta.");
   await s.press(s.panel.getByRole("button", { name: "Insertar en el cursor" }));
+  await s.page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
   assert.equal(await s.panel.locator(".result").count(), 0);
   assert.equal(await s.argument.inputValue(), "Otra escena distinta.");
   await s.ctx.close();

@@ -17,6 +17,9 @@ Procesador de textos personal para escribir novelas con asistencia de IA. Tú im
   - *Editar selección*: Redacción, Diálogo, Expandir, Acortar. Es conservador: preserva hechos, intención, voz y regionalismos. Las propuestas se muestran como **Original / Propuesta**.
   - *Escribir escena*: escribes el argumento y pulsas **Desarrollar escena**. Puedes marcar quién está en escena, el lugar y la extensión. Tu argumento es la autoridad sobre lo que ocurre; la IA sólo decide cómo contarlo. La escena se puede **insertar en el cursor**.
   - Nada se escribe en el manuscrito sin tu clic. Cada propuesta ofrece *Otra versión*, *Copiar*, *Limpiar* y *Probar con* otro proveedor.
+  - **Comparar antes de aplicar** ([diseño](docs/asistente-contexto.md#9-comparar-antes-de-aplicar)): una reescritura se ve como cambios sobre tu texto (tachado lo que se quita, resaltado lo que se añade), o limpia, o tu texto; una escena, en su lugar entre los párrafos del cursor. Al aceptar se guarda antes una versión del texto actual; si no se puede guardar, no se aplica nada.
+  - **Ignorancia temporal:** al escribir una escena, la IA nunca recibe capítulos posteriores, el texto después del cursor ni hechos de capítulos posteriores. *Leer toda la historia hasta aquí* añade los capítulos anteriores y el actual hasta el cursor.
+  - *Ver contexto* antes de enviar, y *Ver lo que se envió* después: lo que la IA tiene en cuenta, con tokens estimados.
   - Al *Reemplazar* o *Insertar*, la propuesta sale del panel y el cursor queda al final del texto nuevo, listo para seguir escribiendo. Un aviso ofrece *Deshacer* (el mismo historial que `Ctrl/⌘+Z`). Si no se puede aplicar, la propuesta se queda con el motivo.
   - Cada pestaña (*Editar selección*, *Escribir escena*) guarda su propia propuesta pendiente.
   - En el teléfono el panel es una hoja inferior compacta, de hasta el 58 % de la pantalla, que se mantiene por encima del teclado. Al aplicar una propuesta se cierra para dejar el manuscrito a la vista.
@@ -63,11 +66,11 @@ Sólo lo relevante. El manuscrito completo nunca se envía por defecto.
 | Redacción, Diálogo, Expandir, Acortar | Guía Maestra, selección, ~4.000 caracteres antes y ~1.500 después, fichas de los personajes nombrados o elegidos |
 | Consistencia | Lo anterior, más relaciones, lugares y hechos relevantes, y pasajes de toda la novela donde aparecen los personajes de la selección |
 | Personaje, Evolución | La ficha, sus relaciones, sus hechos y sus pasajes en toda la novela |
-| Desarrollar escena | Guía Maestra, argumento, capítulo, ~6.000 caracteres antes del cursor (y el final del capítulo anterior si el actual empieza), personajes en escena o nombrados, sus relaciones, lugares y hechos |
+| Desarrollar escena | Guía Maestra, argumento, el capítulo desde su inicio hasta el cursor y ~1.500 caracteres después (y el final del capítulo anterior si el actual empieza), las fichas de lectura de los capítulos anteriores, lo que saben los personajes y los hilos abiertos, personajes en escena o nombrados, sus relaciones, lugares y hechos hasta este capítulo. Con *Leer toda la historia hasta aquí*: los capítulos anteriores y éste hasta el cursor, nada después |
 
 - "Relevante" se decide por nombres y apodos (de personajes y lugares) y por los vínculos de cada hecho. No hay embeddings ni base vectorial.
-- Los hechos de capítulos posteriores se marcan como "aún no ocurridos". Los hechos *sugeridos* (reservados para el futuro) nunca se usan sin tu aprobación.
-- El panel muestra el tamaño del contexto antes de enviar y pide confirmación por encima de ~30.000 tokens. *Incluir la novela completa* indica cuántos tokens añade.
+- Al escribir una escena, los hechos de capítulos posteriores no se envían. Al editar o revisar, se marcan como "aún no ocurridos". Los hechos *sugeridos* nunca se usan sin tu aprobación.
+- El panel muestra el tamaño estimado del contexto antes de enviar y pide confirmación por encima de `AI_CONFIRM_TOKENS`. La casilla de la novela completa (o de la historia hasta aquí) indica cuántos tokens añade.
 
 ## Puesta en marcha
 
@@ -141,6 +144,8 @@ npm run test:all    # todas
 | `tests/unit/manuscript.test.ts` | Formato del marcador (línea propia, dentro de un párrafo, repetidos), recuento de palabras, sustitución y restauración en el asistente, resolución de impresión, cursivas y separadores (lectura, alternar, ida y vuelta con la IA) |
 | `tests/unit/versions.test.ts` | Comparación de versiones (reconstruye ambos textos, palabra a palabra, capítulos largos), ZIP (CRC, nombres UTF-8), contenido y nombres de la copia de seguridad |
 | `tests/e2e/versions.test.mjs` | Copia automática, versiones a pedido sin repetir, antes de *Conservar la mía*, papelera y recuperación con historial, copia de seguridad; en la interfaz: guardar, comparar, restaurar y deshacer, versión antes de la IA, conflicto, recuperar de la papelera, descargar el ZIP |
+| `tests/unit/temporal.test.ts` | Hechos posteriores fuera al escribir una escena (y dentro, marcados, al revisar), ficha con su contenido, momento del hecho, «La historia hasta aquí» |
+| `tests/e2e/phase2.test.mjs` | Capítulo 5 con una revelación sólo en el 20: ni el capítulo 20, ni el texto tras el cursor, ni el hecho llegan al modelo (con y sin la historia completa); dry-run con el modelo elegido; Ampliar; en escritorio y teléfono: comparar, aceptar con copia previa, recargar y restaurar, fallo de la copia sin aplicar nada, vista previa de la inserción y *Ver lo que se envió* |
 | `tests/e2e/format.test.mjs` | Cursiva con `Ctrl/⌘+I` y con el botón, separador como bloque, Lectura, lo que reciben los modelos (`* * *`, nunca el marcador), escena y reescritura que vuelven con separador y sin negritas, teléfono |
 | `tests/e2e/manuscript.test.mjs` | Imágenes del manuscrito: insertar, editar, mover, quitar y recuperar, sin colocar, borrar capítulo, reutilización y archivo compartido con galerías, reemplazar, borrado seguro, orientación EXIF, asistente, duplicar novela reescribiendo marcadores, aislamiento |
 | `tests/e2e/manuscript-ui.test.mjs` | Insertar con botón, pegar y arrastrar; tarjeta; escribir sobre la imagen; quitar y recuperar; vista de lectura; desde una galería; reemplazo compartido; protección en el asistente; móvil |

@@ -307,6 +307,16 @@ export interface ContextItem {
   reason?: string;
   note?: string;
 }
+/** What a request carries, for the author: the dry run's answer, and the real request's first event. */
+export interface ContextInventory {
+  /** Estimated tokens (characters ÷ 3.5): the provider reports the real ones after answering. */
+  total: number;
+  sections: ContextSection[];
+  notices: string[];
+  /** Procesador's own instructions to the model, only counted. */
+  instructions: number;
+}
+
 export type ContextSectionId =
   | "chapter"
   | "previous"
@@ -321,6 +331,7 @@ export type ContextSectionId =
   | "knowledge"
   | "threads"
   | "argument"
+  | "draft"
   | "manuscript";
 export interface ContextSection {
   id: ContextSectionId;
@@ -369,7 +380,12 @@ export type AssistEvent =
   | { type: "truncated" }
   | { type: "error"; message: string }
   /** First event: what the request reads. */
-  | { type: "context"; parts: ContextPart[] }
+  | {
+      type: "context";
+      parts: ContextPart[];
+      /** The Asistente's request as sent ("Ver contexto" of the real request, not of a preview). */
+      sent?: ContextInventory;
+    }
   /** Last event before refusal/truncated: tokens and cost. */
   | ({ type: "usage" } & Usage)
   /** Consejero: how a free question was understood, and the verified cards at the end. */

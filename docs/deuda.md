@@ -20,4 +20,4 @@ Lo que falta y está decidido que debe hacerse. Ordenado por prioridad.
 - Restaurar sólo una parte de una versión de capítulo.
 - Incluir las versiones en la copia de seguridad, y restaurar una novela desde una copia.
 - Avisar de un `[[separador]]` escrito dentro de un párrafo ([formato](formato-texto.md)).
-- Fichas de personaje y relaciones con información posterior al punto de la escena (ver [contexto del Asistente](asistente-contexto.md), «Ignorancia temporal»).
+- **Ignorancia temporal, riesgo residual** ([contexto del Asistente](asistente-contexto.md#8-ignorancia-temporal-al-escribir-una-escena-fase-2-del-plan-profesional)): las fichas de personaje (secretos, qué sabe, arco) y las relaciones son atemporales y llegan a todas las escenas; un hecho sin capítulo cuenta como conocido desde el principio; los hechos del capítulo actual van aunque se revelen tras el cursor. Encaja con la cronología.

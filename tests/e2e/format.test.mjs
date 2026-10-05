@@ -138,6 +138,7 @@ test("assistant: a scene's * * * becomes a separator and its bold italics; a rew
   await page.getByPlaceholder(/Qué ocurre en la escena/).fill("ESCENA-FORMATO");
   await panel.getByRole("button", { name: "Desarrollar escena" }).click();
   await panel.getByRole("button", { name: "Insertar en el cursor" }).click();
+  await page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
   assert.equal(await editor.inputValue(), `Uno.\n\nLeyó *Rayuela* de un tirón.\n\n${SEP}\n\nAl día siguiente dijo *nunca*.`);
 
   // A rewrite of text with italics and a separator: the model sees * * *, the manuscript gets the marker back.
@@ -150,6 +151,7 @@ test("assistant: a scene's * * * becomes a separator and its bold italics; a rew
   await select(0, text.length);
   await panel.getByRole("button", { name: "Proponer cambios" }).click();
   await panel.getByRole("button", { name: "Reemplazar selección" }).click();
+  await page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
   assert.equal(await editor.inputValue(), `*Uno* reescrito.\n\n${SEP}\n\nDos reescrito.`);
   await ctx.close();
 });

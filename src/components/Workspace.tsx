@@ -281,13 +281,18 @@ export default function Workspace({ novelId }: { novelId: string }) {
     },
     [chapter],
   );
-  const keepBeforeAI = useCallback(
-    () =>
-      keepVersion("ai").catch(() =>
-        setNotice("No se pudo guardar una versión del texto anterior. Deshacer (Ctrl/⌘+Z) sigue disponible."),
-      ),
-    [keepVersion],
-  );
+  /**
+   * Applying a proposal of the Asistente (docs/asistente-contexto.md, «Comparar antes de
+   * aplicar»): the current text is kept as a version first, and only then does the manuscript
+   * change. If the copy can't be saved, nothing is applied (the panel keeps the proposal).
+   */
+  const keepBeforeAI = useCallback(async () => {
+    try {
+      await keepVersion("ai");
+    } catch {
+      throw new Error("No se pudo guardar una copia del texto actual, así que no se ha aplicado nada. Vuelve a intentarlo.");
+    }
+  }, [keepVersion]);
   /** Versiones → Restaurar: the current text becomes a version first; if that fails, nothing changes. */
   const restoreVersion = useCallback(
     async (text: string) => {
@@ -307,17 +312,25 @@ export default function Workspace({ novelId }: { novelId: string }) {
     }
     return ok;
   }, []);
+  /** The editor's own edit; if the browser refuses it, nothing was applied (false). */
+  const attempt = (edit: () => boolean | undefined) => {
+    try {
+      return edit() ?? false;
+    } catch {
+      return false;
+    }
+  };
   const applyRewrite = useCallback(
-    (original: Selection, text: string) => {
-      void keepBeforeAI();
-      return afterApply(editorRef.current?.applyRewrite(original, text) ?? false, "Reemplazado en el manuscrito.");
+    async (original: Selection, text: string) => {
+      await keepBeforeAI();
+      return afterApply(attempt(() => editorRef.current?.applyRewrite(original, text)), "Reemplazado en el manuscrito.");
     },
     [afterApply, keepBeforeAI],
   );
   const insertAtCursor = useCallback(
-    (text: string) => {
-      void keepBeforeAI();
-      return afterApply(editorRef.current?.insertAtCursor(text) ?? false, "Escena insertada en el cursor.");
+    async (text: string) => {
+      await keepBeforeAI();
+      return afterApply(attempt(() => editorRef.current?.insertAtCursor(text)), "Escena insertada en el cursor.");
     },
     [afterApply, keepBeforeAI],
   );

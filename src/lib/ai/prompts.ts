@@ -65,7 +65,7 @@ Formato de respuesta: la escena completa dentro de <escena></escena>, solo prosa
 // Memory formatting
 // ---------------------------------------------------------------------------
 
-const CHARACTER_LABELS: [keyof Character, string][] = [
+export const CHARACTER_LABELS: [keyof Character, string][] = [
   ["aliases", "También llamado"],
   ["age", "Edad"],
   ["role", "Rol"],
@@ -310,7 +310,7 @@ export function scenePrompt(opts: {
   parts.push(`Estás escribiendo en: ${opts.chapter}.`);
   if (opts.mark) {
     parts.push(
-      `La escena va exactamente donde el manuscrito completo dice ${opts.mark}: continúa con naturalidad el texto que hay antes de esa marca y, si hay texto después, enlaza con él. No repitas ese texto ni incluyas la marca.`,
+      `La escena va exactamente donde la historia hasta aquí termina con ${opts.mark}: continúa con naturalidad el texto que hay antes de esa marca. Es todo lo que ha ocurrido hasta este punto; lo que viene después no lo conoces y no debes anticiparlo. No repitas ese texto ni incluyas la marca.`,
     );
   } else {
     if (opts.earlier?.trim())
