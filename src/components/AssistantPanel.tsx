@@ -21,6 +21,7 @@ import {
 } from "@/lib/types";
 import { chapterLabel, estimateTokens } from "@/lib/ai/context";
 import { diffStats, diffText } from "@/lib/diff";
+import { anchorAt, resolveAnchor, type Anchor, type InsertTarget, type SceneTarget } from "@/lib/placement";
 import { readPref, writePref } from "@/lib/client";
 import { BUILD, diagEnabled } from "@/lib/diag";
 import { appendImages, countWords, fromModel, protectImages, restoreImages } from "@/lib/manuscript";
@@ -62,7 +63,7 @@ interface Props {
    * manuscript. They throw (and change nothing) when the version can't be saved.
    */
   onApply(original: Selection, rewrite: string): Promise<boolean>;
-  onInsert(text: string): Promise<boolean>;
+  onInsert(text: string, target: InsertTarget): Promise<boolean>;
   onClearSelection(): void;
 }
 
@@ -84,6 +85,8 @@ interface Result {
   sent: ContextInventory | null;
   /** Applying failed before touching the manuscript (the copy couldn't be saved): why. */
   applyFailed: string | null;
+  /** Where a scene will go: the chapter's end, or a fixed position. Only the author changes it. */
+  insertTarget: InsertTarget;
   usage: Usage | null;
 }
 
@@ -94,6 +97,11 @@ interface Request {
   action: EditAction;
   target: Selection | null;
   body: Record<string, unknown>;
+  /**
+   * A scene written for the cursor: the position fixed when it was asked (docs/asistente-
+   * contexto.md §11). "Otra versión", "Ampliar" and "Probar con…" keep it.
+   */
+  anchor?: Anchor | null;
 }
 
 // ---------- output parsing ----------
@@ -154,16 +162,17 @@ function around(text: string, max: number, side: "start" | "end") {
 }
 
 /**
- * Insertar en el cursor, before it happens: the text around the cursor and the scene in its
- * place, as ChapterEditor.insertParagraphs will put it (its own paragraphs).
+ * A scene before it is inserted: the scene in its place, with enough text around it to
+ * recognise the spot (as ChapterEditor will put it: its own paragraphs). Null when a fixed
+ * position can no longer be found.
  */
-function insertPreview(content: string, cursor: number, scene: string) {
-  const at = Math.min(Math.max(0, cursor), content.length);
+function insertPreview(content: string, target: InsertTarget, scene: string) {
+  const at = target.kind === "end" ? content.length : resolveAnchor(content, target.anchor);
+  if (at === null) return null;
   const before = content.slice(0, at).trimEnd();
   const after = content.slice(at).trimStart();
-  const where = !before ? "al principio del capítulo" : !after ? "al final del capítulo" : "en el cursor, entre estos párrafos";
   return {
-    where,
+    atStart: !before,
     before: before ? `${around(before, 220, "end")}\n\n` : "",
     scene: scene.trim(),
     after: after ? `\n\n${around(after, 220, "start")}` : "",
@@ -216,6 +225,9 @@ function AssistantPanel(props: Props) {
   const [sceneCharacters, setSceneCharacters] = useState<string[]>([]);
   const [placeId, setPlaceId] = useState("");
   const [length, setLength] = useState<SceneLength>("media");
+  // Where a new scene goes: the end of the chapter unless the author chooses the cursor.
+  const [sceneTarget, setSceneTarget] = useState<SceneTarget>("end");
+  useEffect(() => setSceneTarget(readPref("sceneTarget") === "cursor" ? "cursor" : "end"), []);
 
   // One pending result per tab (Editar selección, Escribir escena, the Consejero's analysis):
   // generating in one never discards an unused proposal in another. Using a proposal
@@ -331,7 +343,9 @@ function AssistantPanel(props: Props) {
           length,
           characterIds: sceneCharacters,
           placeIds: placeId ? [placeId] : [],
-          cursor: getCursor(),
+          sceneTarget,
+          // Written to continue the chapter's end, or the text at the cursor (fixed in run()).
+          cursor: sceneTarget === "end" ? getContent().length : getCursor(),
         },
       };
     }
@@ -396,6 +410,7 @@ function AssistantPanel(props: Props) {
     chapterId,
     memory,
     provider,
+    sceneTarget,
   ]);
 
   async function run(req: Request, using: ProviderId) {
@@ -403,6 +418,24 @@ function AssistantPanel(props: Props) {
     const size = estimate?.total ?? 0;
     if (size > confirmTokens && !confirm(`Esta consulta enviará unos ${formatTokens(size)} tokens de contexto. ¿Continuar?`))
       return;
+
+    // A scene: written for the chapter's end as it is now, or for the fixed position (fixed now
+    // the first time; a repeat keeps it, wherever the cursor went meanwhile).
+    const content = getContent();
+    if (req.mode === "scene") {
+      if (req.body.sceneTarget === "cursor") {
+        const anchor = req.anchor ?? anchorAt(content, getCursor());
+        const at = resolveAnchor(content, anchor);
+        if (at === null) {
+          const key = `${req.section}:${req.mode}`;
+          update(key, () => ({
+            notice: { kind: "error", message: "El texto alrededor del lugar fijado cambió: vuelve a pedir la escena desde el cursor." },
+          }));
+          return;
+        }
+        req = { ...req, anchor, body: { ...req.body, cursor: at } };
+      } else req = { ...req, anchor: null, body: { ...req.body, cursor: content.length } };
+    }
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -420,6 +453,7 @@ function AssistantPanel(props: Props) {
         readParts: null,
         sent: null,
         applyFailed: null,
+        insertTarget: req.anchor ? { kind: "at", anchor: req.anchor } : { kind: "end" },
         usage: null,
       },
     }));
@@ -431,7 +465,7 @@ function AssistantPanel(props: Props) {
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         // Always the latest text: "Otra versión" after edits uses what is on screen now.
-        body: JSON.stringify({ ...req.body, content: getContent(), provider: using }),
+        body: JSON.stringify({ ...req.body, content, provider: using }),
       });
       if (res.status === 401) {
         window.location.href = "/login";
@@ -576,21 +610,23 @@ function AssistantPanel(props: Props) {
   }, [finished, last, parsed?.proposal]);
   useEffect(() => setCompareView("changes"), [rewrite]);
   useEffect(() => setShowSent(false), [last]);
-  // A finished scene: where it will go, following the cursor until it is inserted.
+  // A finished scene: its preview, redrawn while it waits.
   const sceneReady = finished && last?.mode === "scene";
   useEffect(() => {
     if (!sceneReady) return;
     const tick = () => setCaretTick((n) => n + 1);
-    document.addEventListener("selectionchange", tick);
-    document.addEventListener("keyup", tick);
-    document.addEventListener("pointerup", tick);
+    // Only to redraw the text around the destination as it changes; the destination itself
+    // never follows the cursor (§11).
+    const events = ["selectionchange", "keyup", "pointerup", "input"];
+    for (const e of events) document.addEventListener(e, tick);
     return () => {
-      document.removeEventListener("selectionchange", tick);
-      document.removeEventListener("keyup", tick);
-      document.removeEventListener("pointerup", tick);
+      for (const e of events) document.removeEventListener(e, tick);
     };
   }, [sceneReady]);
-  const insertion = sceneReady && parsed?.proposal ? insertPreview(getContent(), getCursor(), fromModel(parsed.proposal)) : null;
+  // The destination shown is the one used: the cursor moving never changes it (§11).
+  const insertTarget = result?.insertTarget ?? ({ kind: "end" } as InsertTarget);
+  const insertion = sceneReady && parsed?.proposal ? insertPreview(getContent(), insertTarget, fromModel(parsed.proposal)) : null;
+  const fixHere = () => update(slot, () => ({ insertTarget: { kind: "at", anchor: anchorAt(getContent(), getCursor()) }, applyFailed: null }));
   const chapterIndex = chapters.findIndex((c) => c.id === chapterId);
   const here = chapterIndex >= 0 ? chapterLabel(chapterIndex, chapters[chapterIndex].title) : "este capítulo";
 
@@ -900,6 +936,28 @@ function AssistantPanel(props: Props) {
                 </select>
               </label>
             )}
+            <fieldset className="checks inline scene-target">
+              <legend>Dónde va</legend>
+              {(
+                [
+                  ["end", "Al final del capítulo"],
+                  ["cursor", "En el cursor"],
+                ] as const
+              ).map(([id, label]) => (
+                <label key={id} className="check">
+                  <input
+                    type="radio"
+                    name="scene-target"
+                    checked={sceneTarget === id}
+                    onChange={() => {
+                      setSceneTarget(id);
+                      writePref("sceneTarget", id);
+                    }}
+                  />
+                  {label}
+                </label>
+              ))}
+            </fieldset>
             <label>
               <span>Extensión</span>
               <select value={length} onChange={(e) => setLength(e.target.value as SceneLength)}>
@@ -915,8 +973,10 @@ function AssistantPanel(props: Props) {
             {contextControls}
           </div>
           <p className="muted small">
-            Los personajes y lugares nombrados en el argumento se incluyen solos. La escena se escribe para la posición del
-            cursor.
+            Los personajes y lugares nombrados en el argumento se incluyen solos.{" "}
+            {sceneTarget === "end"
+              ? "La escena continúa el final del capítulo, donde se insertará, esté donde esté el cursor."
+              : "La escena se escribe para la posición del cursor, que queda fijada al pedirla."}
           </p>
         </>
       )}
@@ -992,12 +1052,30 @@ function AssistantPanel(props: Props) {
               )}
               {parsed.warning && <p className="notice">Aviso: {parsed.warning}</p>}
             </div>
-          ) : parsed.proposal !== null && insertion ? (
-            // Insertar en el cursor: what goes in, and exactly where.
+          ) : parsed.proposal !== null && sceneReady ? (
+            // A scene: what goes in, and exactly where.
             <div className="compare" data-origin="vista previa de la inserción">
-              <p className="muted small insert-where">
-                Se insertará en {here}, {insertion.where}. Mueve el cursor en el texto para cambiar el lugar.
+              <p className="insert-where" data-target={insertTarget.kind}>
+                {insertTarget.kind === "end" ? (
+                  <strong>Se insertará al final del capítulo</strong>
+                ) : (
+                  <strong>Se insertará en la posición actual</strong>
+                )}
+                <span className="muted small">
+                  {" "}
+                  · {here}
+                  {insertTarget.kind === "end"
+                    ? ", después de su último párrafo."
+                    : insertion?.atStart
+                      ? ", al principio. Es la posición fijada al elegirla: mover el cursor no la cambia."
+                      : ", entre estos párrafos. Es la posición fijada al elegirla: mover el cursor no la cambia."}
+                </span>
               </p>
+              {!insertion ? (
+                <p className="notice" role="alert">
+                  El texto alrededor del lugar fijado cambió y ya no se encuentra. Fíjalo de nuevo en el cursor o inserta al final.
+                </p>
+              ) : (
               <DiffView
                 ops={[
                   { kind: "same", text: insertion.before },
@@ -1007,6 +1085,18 @@ function AssistantPanel(props: Props) {
                 label="La escena en su lugar"
                 full
               />
+              )}
+              {insertTarget.kind === "at" && (
+                <p className="small insert-options">
+                  <button type="button" className="link small" onClick={fixHere}>
+                    Fijar en la posición actual del cursor
+                  </button>
+                  {" · "}
+                  <button type="button" className="link small" onClick={() => update(slot, () => ({ insertTarget: { kind: "end" }, applyFailed: null }))}>
+                    Insertar al final en su lugar
+                  </button>
+                </p>
+              )}
               {parsed.warning && <p className="notice">Aviso: {parsed.warning}</p>}
             </div>
           ) : (
@@ -1074,8 +1164,22 @@ function AssistantPanel(props: Props) {
                 </button>
               )}
               {sceneReady && parsed.proposal && (
-                <button className="btn primary" disabled={applying} onClick={() => accept(() => onInsert(fromModel(parsed.proposal!)))}>
-                  {applying ? "Guardando una copia…" : "Insertar en el cursor"}
+                <button
+                  className="btn primary"
+                  disabled={applying || !insertion}
+                  onClick={() => accept(() => onInsert(fromModel(parsed.proposal!), insertTarget))}
+                >
+                  {applying ? "Guardando una copia…" : insertTarget.kind === "end" ? "Insertar al final" : "Insertar en el cursor"}
+                </button>
+              )}
+              {sceneReady && parsed.proposal && insertTarget.kind === "end" && (
+                <button
+                  className="btn ghost"
+                  disabled={applying}
+                  onClick={fixHere}
+                  title="Muestra dónde está ahora el cursor y fija allí la escena; después se confirma"
+                >
+                  Insertar en el cursor…
                 </button>
               )}
               <button className="btn ghost" onClick={() => run(last, last.provider)}>

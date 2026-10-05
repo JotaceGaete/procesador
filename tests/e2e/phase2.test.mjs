@@ -228,7 +228,7 @@ for (const device of DEVICES) {
     await s.ctx.close();
   });
 
-  test(`${device.name}: Insertar en el cursor muestra la escena y dónde irá; después se puede ver lo que se envió`, async () => {
+  test(`${device.name}: Insertar en el cursor (elegido) muestra la escena y dónde irá; después se puede ver lo que se envió`, async () => {
     const target = ch[8]; // chapter 9
     const text = "Primer párrafo del nueve.\n\nSegundo párrafo del nueve.";
     const { revision } = (await call(`/api/chapters/${target}`)).data;
@@ -238,10 +238,13 @@ for (const device of DEVICES) {
     await s.select("Primer párrafo del nueve.".length, "Primer párrafo del nueve.".length);
     await s.press(s.panel.getByRole("button", { name: "Escribir escena" }));
     await s.page.getByPlaceholder(/Qué ocurre en la escena/).fill("ESCENA-FORMATO");
+    // Deliberately at the cursor (docs/asistente-contexto.md §11).
+    await s.press(s.panel.getByRole("radio", { name: "En el cursor" }));
     await s.press(s.panel.getByRole("button", { name: "Desarrollar escena" }));
-    await s.panel.getByRole("button", { name: "Insertar en el cursor" }).waitFor();
+    await s.panel.getByRole("button", { name: "Insertar en el cursor", exact: true }).waitFor();
 
-    await s.panel.getByText(/Se insertará en Capítulo 9: Parte 9, en el cursor, entre estos párrafos/).waitFor();
+    await s.panel.getByText("Se insertará en la posición actual").waitFor();
+    await s.panel.getByText(/Capítulo 9: Parte 9, entre estos párrafos/).waitFor();
     const preview = s.panel.getByLabel("La escena en su lugar");
     assert.match(await preview.locator("ins").innerText(), /Leyó \*Rayuela\* de un tirón\.\s+⁂ cambio de escena\s+Al día siguiente dijo \*nunca\*\./);
     assert.match(await preview.innerText(), /^Primer párrafo del nueve\.[\s\S]+Segundo párrafo del nueve\.$/);
@@ -253,7 +256,7 @@ for (const device of DEVICES) {
     await sentView.getByText("La IA tuvo en cuenta").waitFor();
     await sentView.getByText("Tu argumento").waitFor();
 
-    await s.press(s.panel.getByRole("button", { name: "Insertar en el cursor" }));
+    await s.press(s.panel.getByRole("button", { name: "Insertar en el cursor", exact: true }));
     await s.page.waitForFunction(() => document.querySelector("textarea.editor")?.value.includes("[[separador]]"));
     assert.match(await s.editor.inputValue(), /^Primer párrafo del nueve\.\n\nLeyó \*Rayuela\* de un tirón\.\n\n\[\[separador\]\]\n\nAl día siguiente dijo \*nunca\*\.\n\nSegundo párrafo del nueve\.$/);
     await s.ctx.close();

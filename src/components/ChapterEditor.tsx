@@ -5,6 +5,7 @@ import { readPref, writePref } from "@/lib/client";
 import { useAutosave, type SaveState } from "./useAutosave";
 import { SEPARATOR, blocks, countWords, marker, markerLineAt, toggleItalic } from "@/lib/manuscript";
 import { findQuote } from "@/lib/advisor/quotes";
+import { placeAtEnd } from "@/lib/placement";
 
 export interface Selection {
   start: number;
@@ -19,6 +20,10 @@ export interface EditorHandle {
   applyRewrite(original: Selection, rewrite: string): boolean;
   /** Inserts a scene at the cursor as its own paragraphs (undoable). */
   insertAtCursor(text: string): boolean;
+  /** Inserts a scene at a position as its own paragraphs (undoable). */
+  insertAt(position: number, text: string): boolean;
+  /** Inserts a scene after the chapter's last content, as its own paragraph (undoable). */
+  insertAtEnd(text: string): boolean;
   /** The browser's own undo on the manuscript: the same history Ctrl/⌘+Z uses. */
   undo(): void;
   /** Collapses the selection to its end, so nothing is selected. */
@@ -269,6 +274,17 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
       insertAtCursor(text) {
         if (!textareaRef.current) return false;
         insertParagraphs(text, cursorRef.current, "end");
+        return true;
+      },
+      insertAt(position, text) {
+        if (!textareaRef.current) return false;
+        insertParagraphs(text, position, "end");
+        return true;
+      },
+      insertAtEnd(text) {
+        if (!textareaRef.current) return false;
+        const place = placeAtEnd(contentRef.current, text);
+        replaceRange(place.start, place.end, place.text, "end");
         return true;
       },
       undo() {

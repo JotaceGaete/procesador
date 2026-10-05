@@ -178,8 +178,10 @@ test("360: Insertar una escena → cursor at the end of the scene, ready to keep
   await openAssistant(page);
   await panel.getByRole("button", { name: "Escribir escena" }).tap();
   await page.getByPlaceholder(/Qué ocurre en la escena/).fill("Juan vuelve tarde.");
+  // Deliberately at the cursor (docs/asistente-contexto.md §11): the position is fixed now.
+  await panel.getByRole("radio", { name: "En el cursor" }).tap();
   await panel.getByRole("button", { name: "Desarrollar escena" }).tap();
-  await panel.getByRole("button", { name: "Insertar en el cursor" }).tap();
+  await panel.getByRole("button", { name: "Insertar en el cursor", exact: true }).tap();
   await page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
   const value = await editor.inputValue();
   const end = value.indexOf("—dijo él.") + "—dijo él.".length;
@@ -232,7 +234,7 @@ test("390: two pending proposals: using one never clears the other", async () =>
   assert.equal(await panel.locator(".result").count(), 0, "each tab shows its own");
   await page.getByPlaceholder(/Qué ocurre en la escena/).fill("Juan vuelve tarde.");
   await panel.getByRole("button", { name: "Desarrollar escena" }).tap();
-  await panel.getByRole("button", { name: "Insertar en el cursor" }).tap();
+  await panel.getByRole("button", { name: "Insertar al final" }).tap();
   await page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
   assert.ok((await editor.inputValue()).includes("Juan dejó las llaves"));
 
@@ -245,10 +247,10 @@ test("390: two pending proposals: using one never clears the other", async () =>
   // Limpiar in one tab leaves the other alone.
   await page.getByPlaceholder(/Qué ocurre en la escena/).fill("Otra escena.");
   await panel.getByRole("button", { name: "Desarrollar escena" }).tap();
-  await panel.getByRole("button", { name: "Insertar en el cursor" }).waitFor();
+  await panel.getByRole("button", { name: "Insertar al final" }).waitFor();
   await panel.getByRole("button", { name: "Editar selección" }).tap();
   await panel.getByRole("button", { name: "Limpiar" }).tap();
   await panel.getByRole("button", { name: "Escribir escena" }).tap();
-  assert.ok(await panel.getByRole("button", { name: "Insertar en el cursor" }).isVisible());
+  assert.ok(await panel.getByRole("button", { name: "Insertar al final" }).isVisible());
   await ctx.close();
 });

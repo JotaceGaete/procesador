@@ -270,3 +270,17 @@ Para escribir una escena, **ignorancia temporal segura antes que un spoiler que 
 - **Hechos:** con su momento de la historia (`story_time`) cuando lo tienen.
 - **Tokens:** se dice explícitamente que son **estimados** (unos 3,5 caracteres por token); los reales los informa el proveedor bajo la respuesta.
 
+
+## 11. Dónde va una escena
+
+El cursor podía quedar por accidente en mitad del capítulo, y la escena se escribía para ese punto y se insertaba allí. Ahora el destino es una decisión explícita, que se toma antes de escribir la escena y se respeta hasta insertarla.
+
+- **«Dónde va: Al final del capítulo»** (predeterminado). La escena se escribe para continuar el final del capítulo, y *Insertar al final* la pone después del último contenido **tal como esté al aceptar**, sin mirar el cursor. Si el capítulo acaba en espacios o líneas en blanco, se sustituyen por una sola línea en blanco; un último párrafo, una imagen o un separador no se tocan, y la escena nunca queda pegada al último carácter (`placeAtEnd`, `src/lib/placement.ts`).
+- **«Dónde va: En el cursor»** (deliberado). La posición se **fija** al pedir la escena, anclada al texto que la rodea (`anchorAt` / `resolveAnchor`), no a un número que se desplazaría al escribir en otro sitio. *Otra versión*, *Ampliar* y *Probar con…* conservan esa posición.
+- Con destino al final, **«Insertar en el cursor…»** sigue disponible como acción secundaria: primero fija la posición actual del cursor y la muestra en la vista previa, y sólo un segundo clic inserta. *Insertar al final en su lugar* vuelve atrás.
+
+**Mover el cursor mientras la propuesta espera no cambia el destino.** La vista previa dice siempre cuál es («Se insertará al final del capítulo» o «Se insertará en la posición actual», con el texto de alrededor) y es exactamente donde se insertará. Para cambiarlo hay que pedirlo: *Fijar en la posición actual del cursor* o *Insertar al final en su lugar*.
+
+Si el texto alrededor de una posición fijada cambia tanto que ya no se encuentra, la vista previa lo dice, *Insertar en el cursor* queda desactivado y no se adivina otro lugar; el final siempre está disponible.
+
+El orden al aceptar es el de la Fase 0: guardar una versión → comprobar que se guardó → resolver el destino sobre el texto de ese momento → insertar → autoguardado. Si falla la copia, el destino ya no existe o el navegador rechaza la edición, no cambia nada y la propuesta se queda.

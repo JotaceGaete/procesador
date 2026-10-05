@@ -62,14 +62,14 @@ test("?diag=1: state of the panel, the clear after Insertar, and the origin of a
   await panel.getByRole("button", { name: "Escribir escena" }).click();
   await page.getByPlaceholder(/Qué ocurre en la escena/).fill("Juan vuelve tarde.");
   await panel.getByRole("button", { name: "Desarrollar escena" }).click();
-  await panel.getByRole("button", { name: "Insertar en el cursor" }).waitFor();
+  await panel.getByRole("button", { name: "Insertar al final" }).waitFor();
   assert.match(await diag.textContent(), /slot=assistant:scene/);
   assert.match(await diag.textContent(), /showResult=true parsed=true last=true/);
   assert.match(await diag.textContent(), /results: assistant:scene\(\d+ car\.\)/);
   // The result section says where it comes from.
   assert.equal(await panel.locator(".result").getAttribute("data-origin"), 'results["assistant:scene"] (showResult && parsed && last)');
 
-  await panel.getByRole("button", { name: "Insertar en el cursor" }).click();
+  await panel.getByRole("button", { name: "Insertar al final" }).click();
   await diag.filter({ hasText: "usada ok=true → clearResult(assistant:scene)" }).waitFor();
   assert.match(await diag.textContent(), /showResult=false parsed=false last=false/);
   assert.match(await diag.textContent(), /results: \(vacío\)/);

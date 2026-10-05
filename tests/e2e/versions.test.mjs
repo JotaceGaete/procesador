@@ -174,7 +174,7 @@ test("interface: applying the AI keeps the text before it", async () => {
   await panel.getByRole("button", { name: "Escribir escena" }).click();
   await page.getByPlaceholder(/Qué ocurre en la escena/).fill("Juan llega.");
   await panel.getByRole("button", { name: "Desarrollar escena" }).click();
-  await panel.getByRole("button", { name: "Insertar en el cursor" }).click();
+  await panel.getByRole("button", { name: "Insertar al final" }).click();
   await page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
   assert.ok((await editor.inputValue()).includes("—¿Café? —dijo él."));
   for (let i = 0; i < 50 && (await aiCount()) === before; i++) await new Promise((r) => setTimeout(r, 100));

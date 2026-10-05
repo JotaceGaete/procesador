@@ -2311,3 +2311,11 @@ details.group > p {
     max-height: 32dvh;
   }
 }
+
+/* ---------- Where a scene goes (docs/asistente-contexto.md §11) ---------- */
+.insert-where strong {
+  font-weight: 600;
+}
+.insert-options {
+  margin: 4px 0 0;
+}

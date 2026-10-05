@@ -65,7 +65,7 @@ async function generate({ panel, press, argument }) {
   await press(panel.getByRole("button", { name: "Desarrollar escena" }));
   // Asking for it does not take the argument away…
   assert.equal(await argument.inputValue(), A);
-  await panel.getByRole("button", { name: "Insertar en el cursor" }).waitFor();
+  await panel.getByRole("button", { name: "Insertar al final" }).waitFor();
   // …nor does the answer arriving: the proposal is pending, the argument still editable.
   assert.equal(await argument.inputValue(), A);
 }
@@ -74,7 +74,7 @@ for (const device of DEVICES) {
   test(`${device.name}: argumento A → generar → insertar → argumento vacío, también al volver`, async () => {
     const s = await open(device);
     await generate(s);
-    await s.press(s.panel.getByRole("button", { name: "Insertar en el cursor" }));
+    await s.press(s.panel.getByRole("button", { name: "Insertar al final" }));
     await s.page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
     assert.ok((await s.editor.inputValue()).includes("—dijo él."), "the scene is in the manuscript");
     assert.equal(await s.panel.locator(".result").count(), 0, "the used proposal is gone");
@@ -112,12 +112,12 @@ for (const device of DEVICES) {
         throw new Error("edición rechazada");
       };
     });
-    await s.press(s.panel.getByRole("button", { name: "Insertar en el cursor" }));
+    await s.press(s.panel.getByRole("button", { name: "Insertar al final" }));
     await s.panel.getByText("No se pudo insertar la escena. Copia la propuesta y pégala a mano.").waitFor();
     assert.equal(await s.argument.inputValue(), A);
     assert.equal(await s.editor.inputValue(), before, "nothing half-inserted");
     assert.ok(await s.panel.isVisible(), "the panel stays open");
-    assert.ok(await s.panel.getByRole("button", { name: "Insertar en el cursor" }).isVisible(), "the proposal stays");
+    assert.ok(await s.panel.getByRole("button", { name: "Insertar al final" }).isVisible(), "the proposal stays");
     await s.ctx.close();
   });
 
@@ -135,7 +135,7 @@ test("escritorio: si el autor ya escribió otro argumento mientras tanto, insert
   const s = await open(DEVICES[0]);
   await generate(s);
   await s.argument.fill("Otra escena distinta.");
-  await s.press(s.panel.getByRole("button", { name: "Insertar en el cursor" }));
+  await s.press(s.panel.getByRole("button", { name: "Insertar al final" }));
   await s.page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
   assert.equal(await s.panel.locator(".result").count(), 0);
   assert.equal(await s.argument.inputValue(), "Otra escena distinta.");

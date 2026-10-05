@@ -15,6 +15,7 @@ import AssistantPanel from "./AssistantPanel";
 import { ChapterImagesModal, ImageCard, ReadingView, type Pending } from "./ManuscriptImages";
 import { addManuscriptImage, rejectReason, replaceImage } from "@/lib/upload";
 import { imageAt, imageIds } from "@/lib/manuscript";
+import { resolveAnchor, type InsertTarget } from "@/lib/placement";
 
 interface Loaded {
   novel: Novel;
@@ -327,10 +328,20 @@ export default function Workspace({ novelId }: { novelId: string }) {
     },
     [afterApply, keepBeforeAI],
   );
-  const insertAtCursor = useCallback(
-    async (text: string) => {
+  /**
+   * A scene of the Asistente, where the panel says (docs/asistente-contexto.md §11): the
+   * chapter's real end at this moment, or the fixed position, found again by its anchor
+   * after the copy is saved. If that place is gone, nothing is inserted.
+   */
+  const insertScene = useCallback(
+    async (text: string, target: InsertTarget) => {
       await keepBeforeAI();
-      return afterApply(attempt(() => editorRef.current?.insertAtCursor(text)), "Escena insertada en el cursor.");
+      if (target.kind === "end")
+        return afterApply(attempt(() => editorRef.current?.insertAtEnd(text)), "Escena insertada al final del capítulo.");
+      const at = resolveAnchor(editorRef.current?.getContent() ?? "", target.anchor);
+      if (at === null)
+        throw new Error("El texto alrededor del lugar fijado cambió y ya no se encuentra. Fíjalo de nuevo o inserta al final.");
+      return afterApply(attempt(() => editorRef.current?.insertAt(at, text)), "Escena insertada en el lugar fijado.");
     },
     [afterApply, keepBeforeAI],
   );
@@ -643,7 +654,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
         getContent={getContent}
         getCursor={getCursor}
         onApply={applyRewrite}
-        onInsert={insertAtCursor}
+        onInsert={insertScene}
         onClearSelection={clearSelection}
       />
 
