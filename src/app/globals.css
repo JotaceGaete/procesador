@@ -170,6 +170,17 @@ input:focus,
   text-overflow: ellipsis;
   max-width: 40%;
 }
+.topbar .format-actions {
+  display: inline-flex;
+  gap: 10px;
+}
+.topbar .format {
+  font-family: var(--serif);
+  font-size: 15px;
+}
+.topbar .format:disabled {
+  opacity: 0.4;
+}
 .topbar .chapter-title {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1417,6 +1428,17 @@ details.group > p {
 .reading p {
   margin: 0 0 1em;
   white-space: pre-wrap;
+}
+.reading .scene-break {
+  border: 0;
+  margin: 1.6em 0;
+  text-align: center;
+  overflow: visible;
+}
+.reading .scene-break::after {
+  content: "* * *";
+  color: var(--muted);
+  letter-spacing: 0.4em;
 }
 .reading::after {
   content: "";

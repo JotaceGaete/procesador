@@ -1,10 +1,10 @@
-import { MARKER_RE } from "../manuscript";
+import { proseOnly } from "../manuscript";
 
 /**
  * Verifying a quote against the manuscript (docs/consejero.md, decision 5): a quote is
  * only shown as such if it is in the text. The comparison forgives what a model or a
  * copy changes without changing the words: case, spacing, the kind of quotes and dashes,
- * and an ellipsis at either end.
+ * the asterisks of italics, and an ellipsis at either end.
  */
 
 const FOLD: Record<string, string> = {
@@ -18,6 +18,7 @@ function normalize(text: string): { norm: string; map: number[] } {
   const map: number[] = [];
   let space = true; // collapse leading and repeated whitespace
   for (let i = 0; i < text.length; i++) {
+    if (text[i] === "*") continue; // *cursiva* is the same words as cursiva
     const ch = FOLD[text[i]] ?? text[i].toLocaleLowerCase("es");
     if (/\s/.test(ch)) {
       if (space) continue;
@@ -50,8 +51,8 @@ export interface Located {
 export function findQuote(text: string, quote: string, near = 0): Located | null {
   const q = cleanQuote(quote);
   if (q.length < 3) return null;
-  // Image markers are not prose: a quote never matches inside one.
-  const prose = text.replace(MARKER_RE, (m) => " ".repeat(m.length));
+  // Markers are not prose: a quote never matches inside one.
+  const prose = proseOnly(text);
   const { norm, map } = normalize(prose);
   let best: Located | null = null;
   for (let i = norm.indexOf(q); i !== -1; i = norm.indexOf(q, i + 1)) {

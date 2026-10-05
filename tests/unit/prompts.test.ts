@@ -82,3 +82,11 @@ test("Guía Maestra: only filled fields, unknown fields dropped", () => {
   assert.ok(compiled.includes("## Sinopsis\nSinopsis."));
   assert.match(compileGuide({ title: "T", synopsis: "", notes: "", guide: {} }), /infiere el estilo del texto/);
 });
+
+test("both modes explain the manuscript's format: italics *así*, scene breaks * * *, no other formatting", () => {
+  for (const instructions of [EDIT_INSTRUCTIONS, WRITE_INSTRUCTIONS]) {
+    assert.match(instructions, /\*así\*/);
+    assert.match(instructions, /sólo \* \* \*/);
+    assert.match(instructions, /No uses negritas/);
+  }
+});

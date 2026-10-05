@@ -412,6 +412,29 @@ export default function Workspace({ novelId }: { novelId: string }) {
           <span className="spacer" />
           <span className="meta words">{stats.words.toLocaleString("es")} palabras</span>
           <SaveStatus state={save.state} onRetry={save.retry} onOverwrite={save.overwrite} />
+          {/* Formato (docs/formato-texto.md). The text keeps the focus, and with it the selection. */}
+          <span className="format-actions">
+            <button
+              className="link format"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => editorRef.current?.toggleItalic()}
+              disabled={reading !== null}
+              title="Cursiva (Ctrl/⌘+I): *así*"
+              aria-label="Cursiva"
+            >
+              <em>C</em>
+            </button>
+            <button
+              className="link format"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => editorRef.current?.insertSeparator()}
+              disabled={reading !== null}
+              title="Separador de escena"
+              aria-label="Separador de escena"
+            >
+              ⁂
+            </button>
+          </span>
           <button
             className="link"
             onClick={() => {

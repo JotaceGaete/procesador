@@ -1,4 +1,4 @@
-import { MARKER_RE } from "../manuscript";
+import { proseOnly } from "../manuscript";
 import { quoteExists } from "./quotes";
 
 /**
@@ -45,7 +45,7 @@ export function changeThresholds() {
 }
 
 function words(text: string): string[] {
-  return text.replace(MARKER_RE, " ").toLocaleLowerCase("es").match(/[\p{L}\p{N}]+/gu) ?? [];
+  return proseOnly(text).toLocaleLowerCase("es").match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 
 /** FNV-1a then a murmur3 finalizer: a well spread 32-bit hash. */

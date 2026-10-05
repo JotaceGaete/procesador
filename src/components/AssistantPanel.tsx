@@ -21,7 +21,7 @@ import {
 import { estimateTokens } from "@/lib/ai/context";
 import { readPref, writePref } from "@/lib/client";
 import { BUILD, diagEnabled } from "@/lib/diag";
-import { appendImages, countWords, protectImages, restoreImages } from "@/lib/manuscript";
+import { appendImages, countWords, fromModel, protectImages, restoreImages } from "@/lib/manuscript";
 import type { Selection } from "./ChapterEditor";
 import AdvisorOverview from "./AdvisorOverview";
 import AdvisorReading from "./AdvisorReading";
@@ -879,8 +879,8 @@ function AssistantPanel(props: Props) {
                 <button
                   className="btn primary"
                   onClick={() => {
-                    // The model saw [IMAGEN n]; put the real markers back before touching the text.
-                    const restored = restoreImages(parsed.proposal!, protectImages(last.target!.text).ids);
+                    // The model saw [IMAGEN n] and `* * *`; put the real markers back before touching the text.
+                    const restored = restoreImages(fromModel(parsed.proposal!), protectImages(last.target!.text).ids);
                     if (restored.missing.length) return update(slot, () => ({ lostImages: restored }));
                     used(onApply(last.target!, restored.text));
                   }}
@@ -889,7 +889,7 @@ function AssistantPanel(props: Props) {
                 </button>
               )}
               {parsed.proposal && (parsed.complete || parsed.untagged) && last.mode === "scene" && (
-                <button className="btn primary" onClick={() => used(tryInsert(parsed.proposal!))}>
+                <button className="btn primary" onClick={() => used(tryInsert(fromModel(parsed.proposal!)))}>
                   Insertar en el cursor
                 </button>
               )}

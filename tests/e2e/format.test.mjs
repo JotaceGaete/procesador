@@ -1,0 +1,172 @@
+// Formato del texto (docs/formato-texto.md): cursivas *así* y separadores de escena.
+// Ctrl/⌘+I and the bar's buttons in the editor, the reading view, what the models receive
+// (`* * *`, never the marker) and what comes back from them (separators, no bold).
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { chromium } from "playwright";
+import { BASE, PASSWORD, aiLog, clearAiLog, client, events, login, resetDb } from "./helpers.mjs";
+
+const SEP = "[[separador]]";
+let call, browser, novel, chapterId;
+
+before(async () => {
+  await resetDb();
+  call = client(await login());
+  novel = (await call("/api/novels", "POST", { title: "Formato" })).data.id;
+  chapterId = (await call(`/api/novels/${novel}`)).data.chapters[0].id;
+  browser = await chromium.launch(
+    process.env.PLAYWRIGHT_CHROMIUM_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } : {},
+  );
+});
+after(async () => browser?.close());
+
+async function setText(content) {
+  const { revision } = (await call(`/api/chapters/${chapterId}`)).data;
+  assert.equal((await call(`/api/chapters/${chapterId}`, "PATCH", { content, revision })).status, 200);
+}
+
+async function open(context = { viewport: { width: 1280, height: 900 } }) {
+  const ctx = await browser.newContext(context);
+  await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
+  const page = await ctx.newPage();
+  page.setDefaultTimeout(15_000);
+  page.on("pageerror", (e) => assert.fail(`page error: ${e.message}`));
+  await page.goto(`${BASE}/novela/${novel}`);
+  const editor = page.locator("textarea.editor");
+  await editor.waitFor();
+  const select = (start, end = start) =>
+    editor.evaluate(
+      (el, [s, e]) => {
+        el.focus();
+        el.setSelectionRange(s, e);
+        el.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+      },
+      [start, end],
+    );
+  return { ctx, page, editor, select };
+}
+
+const saved = async (expected) => {
+  for (let i = 0; i < 50; i++) {
+    if ((await call(`/api/chapters/${chapterId}`)).data.content === expected) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.equal((await call(`/api/chapters/${chapterId}`)).data.content, expected, "saved");
+};
+
+test("API: the models read separators as * * * and italics as they are, never the marker", async () => {
+  const content = `*Uno*.\n\n${SEP}\n\nDos.`;
+  await clearAiLog();
+  const scene = await call("/api/assist", "POST", {
+    novelId: novel,
+    chapterId,
+    content,
+    mode: "scene",
+    argument: "Sigue.",
+    cursor: content.length,
+    provider: "anthropic",
+  });
+  assert.ok(events(scene.data).some((e) => e.type === "text"));
+  const edit = await call("/api/assist", "POST", {
+    novelId: novel,
+    chapterId,
+    content,
+    mode: "edit",
+    action: "redaccion",
+    selectionStart: 0,
+    selectionEnd: content.length,
+    provider: "anthropic",
+  });
+  assert.ok(events(edit.data).some((e) => e.type === "text"));
+  const sent = await aiLog();
+  assert.equal(sent.length, 2);
+  for (const r of sent) {
+    const all = JSON.stringify(r.body);
+    assert.ok(!all.includes("[[separador"), "no marker reaches a model");
+    assert.ok(r.body.messages[0].content.includes("*Uno*.\n\n* * *\n\nDos."), "italics kept, separator as * * *");
+    assert.match(r.body.system.map((b) => b.text).join("\n"), /Formato del manuscrito/);
+  }
+});
+
+test("editor: Ctrl/⌘+I toggles italics, the bar's buttons too; the separator is a block", async () => {
+  await setText("Leyó Rayuela entera.\n\nOtra escena.");
+  const { ctx, page, editor, select } = await open();
+
+  await select(5, 12); // "Rayuela"
+  await page.keyboard.press("ControlOrMeta+i");
+  assert.equal(await editor.inputValue(), "Leyó *Rayuela* entera.\n\nOtra escena.");
+  await page.keyboard.press("ControlOrMeta+i");
+  assert.equal(await editor.inputValue(), "Leyó Rayuela entera.\n\nOtra escena.");
+  // Undo is the editor's own.
+  await page.keyboard.press("ControlOrMeta+z");
+  assert.equal(await editor.inputValue(), "Leyó *Rayuela* entera.\n\nOtra escena.");
+
+  // The bar's Cursiva keeps the selection of the text (the button doesn't take the focus).
+  await select(0, 4);
+  await page.getByRole("button", { name: "Cursiva" }).click();
+  assert.equal(await editor.inputValue(), "*Leyó* *Rayuela* entera.\n\nOtra escena.");
+
+  // Separador de escena, after the first paragraph: its own paragraph.
+  await select("*Leyó* *Rayuela* entera.".length);
+  await page.getByRole("button", { name: "Separador de escena" }).click();
+  assert.equal(await editor.inputValue(), `*Leyó* *Rayuela* entera.\n\n${SEP}\n\nOtra escena.`);
+  // Typing on its line starts a new paragraph below it: the marker never breaks.
+  await page.keyboard.type("X");
+  assert.equal(await editor.inputValue(), `*Leyó* *Rayuela* entera.\n\n${SEP}\n\nX\n\nOtra escena.`);
+  await saved(`*Leyó* *Rayuela* entera.\n\n${SEP}\n\nX\n\nOtra escena.`);
+
+  // Lectura: real italics and a scene break; no asterisks, no marker.
+  await page.getByRole("button", { name: "Lectura", exact: true }).click();
+  const reading = page.locator("article.reading");
+  await reading.waitFor();
+  assert.deepEqual(await reading.locator("em").allTextContents(), ["Leyó", "Rayuela"]);
+  assert.equal(await reading.locator("hr.scene-break").count(), 1);
+  const shown = await reading.innerText();
+  assert.ok(!shown.includes("[[") && !shown.includes("*Rayuela*"), shown);
+  assert.ok(await page.getByRole("button", { name: "Cursiva" }).isDisabled(), "no formatting while reading");
+  await ctx.close();
+});
+
+test("assistant: a scene's * * * becomes a separator and its bold italics; a rewrite keeps both", async () => {
+  await setText("Uno.");
+  const { ctx, page, editor, select } = await open();
+  const panel = page.locator("aside.panel");
+  if (!(await panel.isVisible())) await page.getByRole("button", { name: "Asistente", exact: true }).first().click();
+
+  await select(4);
+  await panel.getByRole("button", { name: "Escribir escena" }).click();
+  await page.getByPlaceholder(/Qué ocurre en la escena/).fill("ESCENA-FORMATO");
+  await panel.getByRole("button", { name: "Desarrollar escena" }).click();
+  await panel.getByRole("button", { name: "Insertar en el cursor" }).click();
+  assert.equal(await editor.inputValue(), `Uno.\n\nLeyó *Rayuela* de un tirón.\n\n${SEP}\n\nAl día siguiente dijo *nunca*.`);
+
+  // A rewrite of text with italics and a separator: the model sees * * *, the manuscript gets the marker back.
+  const text = `*Uno* MANTEN-FORMATO.\n\n${SEP}\n\nDos.`;
+  await setText(text);
+  await page.reload();
+  await editor.waitFor();
+  if (!(await panel.isVisible())) await page.getByRole("button", { name: "Asistente", exact: true }).first().click();
+  await panel.getByRole("button", { name: "Editar selección" }).click();
+  await select(0, text.length);
+  await panel.getByRole("button", { name: "Proponer cambios" }).click();
+  await panel.getByRole("button", { name: "Reemplazar selección" }).click();
+  assert.equal(await editor.inputValue(), `*Uno* reescrito.\n\n${SEP}\n\nDos reescrito.`);
+  await ctx.close();
+});
+
+test("teléfono: Cursiva and Separador are in the bar and work by touch", async () => {
+  await setText("Hola mundo.");
+  const { ctx, page, editor, select } = await open({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    deviceScaleFactor: 3,
+  });
+  await select(5, 10);
+  await page.getByRole("button", { name: "Cursiva" }).tap();
+  assert.equal(await editor.inputValue(), "Hola *mundo*.");
+  await select("Hola *mundo*.".length);
+  await page.getByRole("button", { name: "Separador de escena" }).tap();
+  assert.equal(await editor.inputValue(), `Hola *mundo*.\n\n${SEP}`);
+  await ctx.close();
+});

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { handler } from "@/lib/auth";
 import { db, getChapterTexts, getMemory, getNovel, getOutline } from "@/lib/supabase";
-import { countWords, describeImages, protectImages } from "@/lib/manuscript";
+import { countWords, forModel, protectImages, separatorsForModel } from "@/lib/manuscript";
 import { HttpError, readJson } from "@/lib/http";
 import { compileGuide } from "@/lib/guide";
 import {
@@ -134,17 +134,17 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
   let ms: Manuscript | null = null;
   const manuscript = async () => (ms ??= buildManuscript(await getChapterTexts(novel.id), { id: chapter.id, content }));
 
-  // The assistant never receives images: each marker in the text it reads becomes a
-  // neutral line, applied to each piece as it is cut (offsets stay those of the real text).
+  // The assistant never receives images or markers: each image becomes a neutral line and
+  // each separator `* * *`, applied to each piece as it is cut (offsets stay those of the real text).
   let descriptions: Map<string, string> | null = null;
   const plain = async <T extends string | null>(t: T): Promise<T> => {
-    if (!t || !t.includes("[[imagen:")) return t;
+    if (!t || !t.includes("[[imagen:")) return (t && separatorsForModel(t)) as T;
     if (!descriptions) {
       const { data, error } = await db().from("manuscript_images").select("id, alt, caption, decorative").eq("novel_id", novel.id);
       if (error) throw error;
       descriptions = new Map(data.map((i) => [i.id, i.decorative ? "decorativa" : i.alt || i.caption]));
     }
-    return describeImages(t, (id) => descriptions!.get(id) ?? "") as T;
+    return forModel(t, (id) => descriptions!.get(id) ?? "") as T;
   };
 
   if (body.mode === "scene") {
@@ -354,8 +354,10 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
     passages = found.length ? await plain(found.map((f) => f.text).join("\n\n---\n\n")) : null;
   }
 
-  // Images in the selection travel as [IMAGEN n]; the panel puts the real markers back.
-  const protectedSelection = protectImages(selection);
+  // Images in the selection travel as [IMAGEN n] and separators as `* * *`; the panel puts
+  // the real markers back (restoreImages, fromModel).
+  const images = protectImages(selection);
+  const protectedSelection = { ...images, text: separatorsForModel(images.text) };
   const whole = includeManuscript ? await plain((await manuscript()).text) : null;
   const before = await plain(content.slice(near.start, start));
   const after = await plain(content.slice(end, near.end));
