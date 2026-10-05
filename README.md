@@ -52,6 +52,7 @@ Procesador de textos personal para escribir novelas con asistencia de IA. Tú im
   - *Versiones de este capítulo* (en la lista de capítulos): se guardan solas mientras escribes (como mucho una cada media hora), antes de aplicar una propuesta de la IA, antes de *Conservar la mía* y antes de restaurar; y con nombre cuando tú quieras. Cada una se compara con el texto actual y se puede restaurar (con *Deshacer*).
   - *Papelera*: un capítulo eliminado se recupera durante 30 días, con su historial.
   - *Descargar copia de seguridad* (ventana de la novela): un `.zip` con la novela para leer, cada capítulo tal cual, todos los datos y las imágenes originales.
+  - **Pendiente prioritario** ([deuda](docs/deuda.md)): eliminar una novela entera todavía es definitivo; tendrá su propia papelera antes de la producción definitiva.
 
 ## Qué se envía a la IA
 

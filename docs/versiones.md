@@ -81,7 +81,7 @@ Ejecutar `supabase/schema.sql` completo en el SQL Editor (idempotente, conserva 
 
 ## Fuera de esta fase
 
-- Papelera de novelas enteras.
+- **Papelera de novelas enteras: deuda prioritaria** ([deuda](deuda.md)). No se llegará a producción definitiva con eliminación irreversible de una novela.
 - Restaurar sólo una parte de una versión (hoy: copiar su texto y pegar).
 - Incluir las versiones en la copia de seguridad, y restaurar una novela desde una copia.
 - Copias de seguridad automáticas o programadas.
