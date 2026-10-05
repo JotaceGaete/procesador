@@ -21,3 +21,5 @@ Lo que falta y está decidido que debe hacerse. Ordenado por prioridad.
 - Incluir las versiones en la copia de seguridad, y restaurar una novela desde una copia.
 - Avisar de un `[[separador]]` escrito dentro de un párrafo ([formato](formato-texto.md)).
 - **Ignorancia temporal, riesgo residual** ([contexto del Asistente](asistente-contexto.md#8-ignorancia-temporal-al-escribir-una-escena-fase-2-del-plan-profesional)): las fichas de personaje (secretos, qué sabe, arco) y las relaciones son atemporales y llegan a todas las escenas; un hecho sin capítulo cuenta como conocido desde el principio; los hechos del capítulo actual van aunque se revelen tras el cursor. Encaja con la cronología.
+- **Cronología, pasos 5 y 6** ([diseño](cronologia-edades.md#estado-de-la-implementación)): edades declaradas en hechos, propuesta de ancla desde la nota libre, marcas dentro de un capítulo, edad de las imágenes de personaje; recuperar de la papelera un capítulo no recupera su marca de tiempo.
+

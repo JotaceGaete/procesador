@@ -20,6 +20,9 @@ export const character = (p: Partial<Character> & { name: string }): Character =
   unaware: "",
   arc: "",
   notes: "",
+  age_anchor: null,
+  age_approx: false,
+  death: null,
   ...p,
 });
 

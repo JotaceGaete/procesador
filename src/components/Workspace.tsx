@@ -2,13 +2,25 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AIPanelSection, Chapter, Fact, ChapterInfo, CharacterImage, ManuscriptImage, Memory, Novel, ProviderId } from "@/lib/types";
+import type {
+  AIPanelSection,
+  Chapter,
+  ChronologyView,
+  Fact,
+  ChapterInfo,
+  CharacterImage,
+  ManuscriptImage,
+  Memory,
+  Novel,
+  ProviderId,
+} from "@/lib/types";
 import { api, readPref, writePref } from "@/lib/client";
 import { chapterLabel } from "@/lib/ai/context";
 import type { SaveState } from "./useAutosave";
 import ChapterEditor, { type EditorHandle, type Selection } from "./ChapterEditor";
 import ChapterNav from "./ChapterNav";
 import { TrashModal, VersionsModal } from "./Versions";
+import { ChronologyModal } from "./Chronology";
 import NovelModal from "./NovelModal";
 import MemoryModal from "./MemoryModal";
 import AssistantPanel from "./AssistantPanel";
@@ -85,7 +97,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
   // Chapters written in during this visit: leaving one may re-read it (Consejero, auto_digest).
   const edited = useRef(new Set<string>());
   const [focusMode, setFocusMode] = useState(false);
-  const [modal, setModal] = useState<"novel" | "memory" | "images" | "versions" | "trash" | null>(null);
+  const [modal, setModal] = useState<"novel" | "memory" | "images" | "versions" | "trash" | "chronology" | null>(null);
   const editorRef = useRef<EditorHandle>(null);
 
   const openChapter = useCallback(async (id: string) => {
@@ -410,6 +422,18 @@ export default function Workspace({ novelId }: { novelId: string }) {
     [novelId],
   );
 
+  // Cronología (docs/cronologia-edades.md): computed on the server; reloaded when the memory or
+  // the chapters change, and when the view opens (who appears where depends on the texts).
+  const [chronologyView, setChronologyView] = useState<ChronologyView | null>(null);
+  const refreshChronology = useCallback(
+    () => api<ChronologyView>(`/api/novels/${novelId}/chronology`).then(setChronologyView).catch(() => {}),
+    [novelId],
+  );
+  useEffect(() => {
+    if (loaded) void refreshChronology();
+  }, [loaded, memory, chapters, refreshChronology]);
+  const timeWarnings = chronologyView?.warnings.filter((w) => !w.dismissed).length ?? 0;
+
   if (loadError) {
     return (
       <main className="fatal">
@@ -447,6 +471,12 @@ export default function Workspace({ novelId }: { novelId: string }) {
         onTrash={() => {
           if (narrow()) setNavOpen(false);
           setModal("trash");
+        }}
+        timeWarnings={timeWarnings}
+        onChronology={() => {
+          if (narrow()) setNavOpen(false);
+          void refreshChronology();
+          setModal("chronology");
         }}
         beforeDeleteCurrent={async (neighborId) => {
           if (!(await leaveChapter())) return false;
@@ -724,6 +754,19 @@ export default function Workspace({ novelId }: { novelId: string }) {
           onClose={() => setModal(null)}
         />
       )}
+      {modal === "chronology" && chronologyView && (
+        <ChronologyModal
+          novelId={novel.id}
+          view={chronologyView}
+          currentChapterId={chapter.id}
+          onChanged={refreshChronology}
+          onGoTo={(id) => {
+            setModal(null);
+            void switchChapter(id);
+          }}
+          onClose={() => setModal(null)}
+        />
+      )}
       {modal === "memory" && (
         <MemoryModal
           novelId={novel.id}
@@ -735,6 +778,8 @@ export default function Workspace({ novelId }: { novelId: string }) {
           manuscriptImages={manuscriptImages}
           onAllImagesChange={setAll}
           onInsertInChapter={insertFromAsset}
+          chronology={chronologyView}
+          currentChapterId={chapter.id}
           onClose={() => setModal(null)}
         />
       )}

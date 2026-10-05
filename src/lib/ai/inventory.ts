@@ -2,7 +2,7 @@ import type { Character, ContextItem, ContextSection, Memory, Novel, Place } fro
 import { GUIDE_SECTIONS } from "../guide";
 import { countWords } from "../manuscript";
 import { chapterLabel, estimateTokens, nameMatcher, type SelectedMemory } from "./context";
-import { CHARACTER_LABELS, memorySections } from "./prompts";
+import { CHARACTER_LABELS, memorySections, type StoryTime } from "./prompts";
 
 /**
  * "Ver contexto": what a request carries, said for the author. Built from the very pieces
@@ -63,13 +63,22 @@ export function memorySectionsFor(opts: {
   sources: NameSource[];
   /** Included for another reason than being chosen or named (id → reason). */
   extraReasons?: Map<string, string>;
+  /** Cronología: the time at this point and the computed ages. */
+  time?: StoryTime | null;
 }): ContextSection[] {
   const { selected, memory, chapters } = opts;
-  const blocks = memorySections(selected, memory, chapters, opts.currentChapterId);
+  const blocks = memorySections(selected, memory, chapters, opts.currentChapterId, opts.time);
   const names = new Map(memory.characters.map((c) => [c.id, c.name]));
   const placeNames = new Map(memory.places.map((p) => [p.id, p.name]));
   const out: ContextSection[] = [];
 
+  if (blocks.time)
+    out.push({
+      id: "time",
+      label: `Tiempo del relato: ${opts.time!.now}${opts.time!.estimated ? " (heredado del capítulo anterior)" : ""}`,
+      tokens: tokens(blocks.time),
+      items: [],
+    });
   if (blocks.characters) {
     const included = new Set(selected.characters.map((c) => c.id));
     out.push({
@@ -87,7 +96,7 @@ export function memorySectionsFor(opts: {
             reasonFor(c, opts.chosenCharacters, opts.chosenCharacterReason, opts.sources) ??
             opts.extraReasons?.get(c.id) ??
             (other ? `por su relación con ${other}` : undefined),
-          detail: characterSummary(c),
+          detail: characterSummary(c, opts.time?.ages.get(c.id)),
         };
       }),
     });
@@ -140,10 +149,11 @@ export function memorySectionsFor(opts: {
  * What of a character's file goes: every filled field, as the author wrote it (shortened).
  * It is the author's own data, the same fields that formatCharacter sends.
  */
-function characterSummary(c: Character): string {
-  const lines = CHARACTER_LABELS.filter(([k]) => String(c[k] ?? "").trim()).map(
+function characterSummary(c: Character, age?: string | null): string {
+  const lines = CHARACTER_LABELS.filter(([k]) => String(c[k] ?? "").trim() && !(age && k === "age")).map(
     ([k, label]) => `${label}: ${clip(String(c[k]).trim().replace(/\s+/g, " "), 140)}`,
   );
+  if (age) lines.unshift(`Edad en este punto: ${age}`);
   return lines.length ? lines.join("\n") : "Ficha sin datos más allá del nombre";
 }
 

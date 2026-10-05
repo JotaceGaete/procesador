@@ -27,7 +27,7 @@ export function assertId(id: unknown, what = "Elemento"): string {
 export async function getNovel(id: string): Promise<Novel> {
   const { data, error } = await db()
     .from("novels")
-    .select("id, title, synopsis, notes, guide, auto_digest, updated_at")
+    .select("id, title, synopsis, notes, guide, auto_digest, calendar, dismissed_warnings, updated_at")
     .eq("id", assertId(id, "Novela"))
     .maybeSingle();
   if (error) throw error;

@@ -2319,3 +2319,111 @@ details.group > p {
 .insert-options {
   margin: 4px 0 0;
 }
+
+/* ---------- Cronología (docs/cronologia-edades.md) ---------- */
+.story-date {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.story-date input {
+  width: 7em;
+}
+.story-date input[aria-label="Día"] {
+  width: 4.5em;
+}
+.age-at {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.age-at input[aria-label="Años que tenía"] {
+  width: 5em;
+}
+.age-now {
+  color: var(--text);
+}
+.chrono-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: flex-end;
+}
+.chrono-head p {
+  flex: 1 1 18em;
+  margin: 0;
+}
+/* The table scrolls inside the window on a phone; the page never does. */
+.chrono-table-wrap {
+  overflow-x: auto;
+  margin: 12px 0;
+  max-width: 100%;
+}
+.chrono-table {
+  border-collapse: collapse;
+  font-size: 14px;
+  min-width: 100%;
+}
+.chrono-table th,
+.chrono-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--faint);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.chrono-table tr.current th[scope="row"] {
+  font-weight: 600;
+}
+.chrono-table td.warned {
+  color: var(--danger);
+  font-weight: 600;
+}
+.time-label.estimated {
+  font-style: italic;
+  color: var(--muted);
+}
+.time-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  white-space: normal;
+  min-width: 18em;
+}
+.interval-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.interval input {
+  width: 4em;
+}
+.time-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+.chrono-warnings h3 {
+  font-size: 15px;
+  margin: 8px 0 4px;
+}
+.chrono-warnings ul {
+  margin: 0;
+  padding-left: 1.2em;
+}
+.chrono-warnings li {
+  margin: 4px 0;
+}
+.warning-level {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.warning.error .warning-level {
+  color: var(--danger);
+}
+.warning.review .warning-level {
+  color: var(--accent);
+}

@@ -117,6 +117,12 @@ create table if not exists public.characters (
 );
 create index if not exists characters_novel_idx on public.characters(novel_id);
 select public.procesador_secure_table('public.characters', true);
+-- Cronología (docs/cronologia-edades.md). La edad no se guarda: se calcula desde un ancla
+-- {kind:'birth', date} o {kind:'age_at', age, at:{chapter_id}|{date}}. `age` sigue como nota.
+-- age_approx: "unos cuarenta" (≈, sin avisos por un año). death: fecha opcional. Validados en la API.
+alter table public.characters add column if not exists age_anchor jsonb;
+alter table public.characters add column if not exists age_approx boolean not null default false;
+alter table public.characters add column if not exists death jsonb;
 
 create table if not exists public.relationships (
   id         uuid primary key default gen_random_uuid(),
@@ -297,6 +303,15 @@ select public.procesador_secure_table('public.ai_usage', false);
 
 -- Interruptor: rehacer la ficha de un capítulo al dejarlo tras un cambio sustancial.
 alter table public.novels add column if not exists auto_digest boolean not null default true;
+-- Cronología: calendario real (1972) o relativo (Año 0, Año 5), y advertencias descartadas
+-- por el autor ({clave: huella}: vuelven si cambian los datos que las producen).
+alter table public.novels add column if not exists calendar text not null default 'real';
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'novels_calendar_check') then
+    alter table public.novels add constraint novels_calendar_check check (calendar in ('real', 'relative'));
+  end if;
+end $$;
+alter table public.novels add column if not exists dismissed_warnings jsonb not null default '{}'::jsonb;
 
 -- Cabos y conflictos. Los propone el Consejero al leer (origin 'advisor', sin confirmar:
 -- "posible cabo") o los crea el autor. Capítulo de apertura, última aparición y cierre se
@@ -446,6 +461,27 @@ create table if not exists public.chapter_versions (
 create index if not exists chapter_versions_chapter_idx on public.chapter_versions(chapter_id, created_at desc);
 create index if not exists chapter_versions_trash_idx on public.chapter_versions(novel_id, source_chapter_id) where chapter_id is null;
 select public.procesador_secure_table('public.chapter_versions', false);
+
+-- Cronología: el tiempo del relato como marcas ancladas a un punto del manuscrito. En esta
+-- versión, una por capítulo y al inicio (anchor {at:'chapter_start'}). when: {date:{year,
+-- month?, day?}} o {after:{years?, months?, days?}} respecto del capítulo anterior. flashback:
+-- retrospectiva a propósito (sin aviso por retroceder). Validadas en la API (src/lib/chronology.ts).
+create table if not exists public.time_marks (
+  id          uuid primary key default gen_random_uuid(),
+  novel_id    uuid not null references public.novels(id) on delete cascade,
+  chapter_id  uuid not null,
+  anchor      jsonb not null default '{"at": "chapter_start"}'::jsonb,
+  "when"      jsonb not null,
+  flashback   boolean not null default false,
+  label       text not null default '' check (length(label) <= 200),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  foreign key (chapter_id, novel_id) references public.chapters(id, novel_id) on delete cascade
+);
+-- Una marca de inicio por capítulo. Se quitará al admitir marcas dentro del capítulo.
+create unique index if not exists time_marks_one_per_chapter on public.time_marks(chapter_id) where (anchor ->> 'at') = 'chapter_start';
+create index if not exists time_marks_novel_idx on public.time_marks(novel_id);
+select public.procesador_secure_table('public.time_marks', true);
 
 -- ---------------------------------------------------------------------------
 -- Triggers
@@ -827,8 +863,8 @@ declare
   v_ids jsonb; v_text text; r2 record;
   v_copies jsonb;
 begin
-  insert into public.novels (id, title, synopsis, notes, guide, auto_digest)
-  select v_new, p_title, synopsis, notes, guide, auto_digest from public.novels where id = p_novel;
+  insert into public.novels (id, title, synopsis, notes, guide, auto_digest, calendar)
+  select v_new, p_title, synopsis, notes, guide, auto_digest, calendar from public.novels where id = p_novel;
   if not found then return null; end if;
 
   select coalesce(jsonb_object_agg(id, gen_random_uuid()), '{}') into m_chap from public.chapters where novel_id = p_novel;
@@ -840,10 +876,21 @@ begin
   select (m_chap ->> id::text)::uuid, v_new, title, position, content from public.chapters where novel_id = p_novel;
 
   insert into public.characters (id, novel_id, name, aliases, age, role, description, background, personality,
-    motivations, fears, contradictions, "values", voice, vocabulary, secrets, knows, unaware, arc, notes)
+    motivations, fears, contradictions, "values", voice, vocabulary, secrets, knows, unaware, arc, notes,
+    age_anchor, age_approx, death)
   select (m_char ->> id::text)::uuid, v_new, name, aliases, age, role, description, background, personality,
-    motivations, fears, contradictions, "values", voice, vocabulary, secrets, knows, unaware, arc, notes
+    motivations, fears, contradictions, "values", voice, vocabulary, secrets, knows, unaware, arc, notes,
+    -- Un ancla "edad en un capítulo" apunta al capítulo de la copia.
+    case when age_anchor #>> '{at,chapter_id}' is not null
+         then jsonb_set(age_anchor, '{at,chapter_id}', to_jsonb(m_chap ->> (age_anchor #>> '{at,chapter_id}')))
+         else age_anchor end,
+    age_approx, death
   from public.characters where novel_id = p_novel;
+
+  -- Cronología: las marcas, en los capítulos de la copia.
+  insert into public.time_marks (novel_id, chapter_id, anchor, "when", flashback, label)
+  select v_new, (m_chap ->> t.chapter_id::text)::uuid, t.anchor, t."when", t.flashback, t.label
+  from public.time_marks t where t.novel_id = p_novel;
 
   insert into public.relationships (novel_id, from_id, to_id, kind, note)
   select v_new, (m_char ->> from_id::text)::uuid, (m_char ->> to_id::text)::uuid, kind, note
@@ -965,7 +1012,7 @@ begin
   from unnest(array['novels', 'chapters', 'characters', 'relationships', 'places', 'facts', 'fact_characters',
                     'assets', 'character_images', 'manuscript_images', 'ai_usage', 'story_threads',
                     'chapter_digests', 'novel_digests', 'advisor_conversations', 'advisor_messages',
-                    'advisor_observations', 'chapter_versions']) as t
+                    'advisor_observations', 'chapter_versions', 'time_marks']) as t
   where to_regclass('public.' || t) is null
      or not (select relrowsecurity from pg_class where oid = to_regclass('public.' || t));
   if v_missing is not null then

@@ -65,7 +65,10 @@ Formato de respuesta: la escena completa dentro de <escena></escena>, solo prosa
 // Memory formatting
 // ---------------------------------------------------------------------------
 
-export const CHARACTER_LABELS: [keyof Character, string][] = [
+/** The free-text fields of a character file (the time fields are structured: see StoryTime). */
+export type CharacterTextKey = Exclude<keyof Character, "age_anchor" | "age_approx" | "death">;
+
+export const CHARACTER_LABELS: [CharacterTextKey, string][] = [
   ["aliases", "También llamado"],
   ["age", "Edad"],
   ["role", "Rol"],
@@ -85,9 +88,25 @@ export const CHARACTER_LABELS: [keyof Character, string][] = [
   ["notes", "Notas"],
 ];
 
-export function formatCharacter(c: Character): string {
-  const lines = CHARACTER_LABELS.filter(([key]) => c[key]?.trim()).map(([key, label]) => `${label}: ${c[key].trim()}`);
+/**
+ * A character file as the model reads it. With a computed age for this point of the story
+ * (Cronología), it replaces the free note "Edad", which may say the age of another moment.
+ */
+export function formatCharacter(c: Character, age?: string | null): string {
+  const lines = CHARACTER_LABELS.filter(([key]) => c[key]?.trim() && !(age && key === "age")).map(
+    ([key, label]) => `${label}: ${c[key].trim()}`,
+  );
+  if (age) lines.splice(c.aliases.trim() ? 1 : 0, 0, `Edad en este punto de la historia: ${age}`);
   return [`### ${c.name}`, ...lines].join("\n");
+}
+
+/** The story's time at this point (Cronología): the chapter's time and each character's age. */
+export interface StoryTime {
+  /** "marzo de 1977", "Año 5", "Inicio + 5 años"; null when the novel has no times. */
+  now: string | null;
+  estimated: boolean;
+  /** Character id → "26 años (21 en el capítulo 1)". */
+  ages: Map<string, string>;
 }
 
 function formatRelationship(r: Relationship, names: Map<string, string>): string {
@@ -125,6 +144,7 @@ function formatFact(
 }
 
 export interface MemorySections {
+  time: string;
   characters: string;
   relationships: string;
   places: string;
@@ -137,14 +157,18 @@ export function memorySections(
   all: Memory,
   chapters: { id: string; title: string }[],
   currentChapterId: string | null,
+  time?: StoryTime | null,
 ): MemorySections {
   const names = new Map(all.characters.map((c) => [c.id, c.name]));
   const places = new Map(all.places.map((p) => [p.id, p.name]));
   const currentIndex = chapters.findIndex((c) => c.id === currentChapterId);
   const others = all.characters.length - selected.characters.length;
   return {
+    time: time?.now
+      ? `## Tiempo del relato\nEn este punto: ${time.now}${time.estimated ? " (sin fecha propia: el del capítulo anterior)" : ""}.`
+      : "",
     characters: selected.characters.length
-      ? `## Personajes\n\n${selected.characters.map(formatCharacter).join("\n\n")}` +
+      ? `## Personajes\n\n${selected.characters.map((c) => formatCharacter(c, time?.ages.get(c.id))).join("\n\n")}` +
         (others > 0 ? `\n\n(La novela tiene ${others} personajes más que no intervienen aquí.)` : "")
       : "",
     relationships: selected.relationships.length
@@ -168,9 +192,10 @@ export function memoryBlock(
   all: Memory,
   chapters: { id: string; title: string }[],
   currentChapterId: string | null,
+  time?: StoryTime | null,
 ): string {
-  const m = memorySections(selected, all, chapters, currentChapterId);
-  const parts = [m.characters, m.relationships, m.places, m.facts].filter(Boolean);
+  const m = memorySections(selected, all, chapters, currentChapterId, time);
+  const parts = [m.time, m.characters, m.relationships, m.places, m.facts].filter(Boolean);
   return parts.length ? `# Memoria narrativa\n\n${parts.join("\n\n")}` : "";
 }
 
@@ -248,9 +273,15 @@ export function editPrompt(opts: {
   passages: string | null;
   /** How many [IMAGEN n] placeholders the selection carries. */
   images?: number;
+  /** Cronología: warnings about the people involved, computed by Procesador. */
+  timeWarnings?: string[];
 }): string {
   const parts: string[] = [];
   if (opts.passages) parts.push(`Pasajes anteriores relevantes:\n<pasajes>\n${opts.passages}\n</pasajes>`);
+  if (opts.timeWarnings?.length)
+    parts.push(
+      `Advertencias de cronología calculadas por Procesador con las fechas y edades de la Memoria (pueden ser intencionadas; menciónalas si afectan al fragmento):\n<cronologia>\n${opts.timeWarnings.map((w) => `- ${w}`).join("\n")}\n</cronologia>`,
+    );
   parts.push(
     [
       "Fragmento seleccionado con su contexto inmediato (trabaja solo sobre <seleccion>):",

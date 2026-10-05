@@ -27,10 +27,11 @@ const OLD = {
 const TABLES = [
   "novels", "chapters", "characters", "relationships", "places", "facts", "fact_characters", "assets",
   "character_images", "manuscript_images", "ai_usage", "story_threads", "chapter_digests", "novel_digests",
-  "advisor_conversations", "advisor_messages", "advisor_observations", "chapter_versions",
+  "advisor_conversations", "advisor_messages", "advisor_observations", "chapter_versions", "time_marks",
 ];
 /** What only schema.sql brings (versions and trash), not actualizar-consejero.sql. */
-const AFTER_CONSEJERO = /chapter_versions|save_chapter_version|trash_chapter|chapter_trash|restore_chapter|chapter_version_auto|chapters_version/;
+const AFTER_CONSEJERO =
+  /chapter_versions|save_chapter_version|trash_chapter|chapter_trash|restore_chapter|chapter_version_auto|chapters_version|time_marks|novels\.calendar|dismissed_warnings|age_anchor|age_approx|characters\.death|anterior a la cronología/;
 
 let bin, dir, port;
 
@@ -366,4 +367,32 @@ test("word_count: separators don't count, like images", () => {
   const db = newDb();
   must(db, SCHEMA);
   assert.equal(must(db, "select public.word_count('Uno dos.' || chr(10) || '[[separador]]' || chr(10) || 'Tres.')"), "3");
+});
+
+// ---------------------------------------------------------------------------
+// Cronología (docs/cronologia-edades.md)
+// ---------------------------------------------------------------------------
+
+test("cronología: una marca por capítulo, calendario válido, y duplicar copia marcas y anclas en sus capítulos nuevos", () => {
+  const db = newDb();
+  must(db, SCHEMA);
+  must(db, DATA, "psql");
+  const novel = "11111111-1111-4111-8111-111111111111";
+  const ch1 = "22222222-2222-4222-8222-222222222221";
+  must(db, `insert into time_marks (novel_id, chapter_id, "when") values ('${novel}', '${ch1}', '{"date":{"year":1972}}')`);
+  assert.ok(!run(db, `insert into time_marks (novel_id, chapter_id, "when") values ('${novel}', '${ch1}', '{"date":{"year":1973}}')`).ok, "one per chapter");
+  assert.ok(!run(db, `update novels set calendar = 'lunar'`).ok, "real or relative");
+  must(db, `update novels set calendar = 'relative'`);
+  must(db, `update characters set age_anchor = '{"kind":"age_at","age":21,"at":{"chapter_id":"${ch1}"}}', age_approx = true, death = '{"year":1990}'`);
+
+  must(db, `select public.duplicate_novel('${novel}', 'Copia')`);
+  const copy = must(db, "select id from novels where title = 'Copia'");
+  assert.equal(must(db, `select calendar from novels where id = '${copy}'`), "relative");
+  const copyCh1 = must(db, `select id from chapters where novel_id = '${copy}' and title = 'Uno'`);
+  assert.equal(must(db, `select "when"->'date'->>'year' from time_marks where chapter_id = '${copyCh1}'`), "1972");
+  assert.equal(must(db, `select age_anchor #>> '{at,chapter_id}' from characters where novel_id = '${copy}'`), copyCh1, "the anchor points to the copy's chapter");
+  assert.equal(must(db, `select age_approx::text || ' ' || (death->>'year') from characters where novel_id = '${copy}'`), "true 1990");
+  // Deleting a chapter takes its mark with it.
+  must(db, `select public.trash_chapter('${ch1}')`);
+  assert.equal(must(db, `select count(*) from time_marks where novel_id = '${novel}'`), "0");
 });

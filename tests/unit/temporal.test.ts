@@ -61,3 +61,16 @@ test("«Leer toda la historia hasta aquí»: what the section says, and the prom
   assert.match(prompt, /lo que viene después no lo conoces/);
   assert.doesNotMatch(prompt, /si hay texto después, enlaza/);
 });
+
+test("Cronología in the prompt: the age at this point replaces the free note; the chapter's time goes first", async () => {
+  const { memoryBlock } = await import("@/lib/ai/prompts");
+  const elena2 = character({ name: "Elena", age: "21 años", role: "Protagonista" });
+  const sel = { characters: [elena2], relationships: [], places: [], facts: [] };
+  const time = { now: "1977", estimated: false, ages: new Map([["Elena", "26 años (21 en el capítulo 1)"]]) };
+  const block = memoryBlock(sel, { ...memory, characters: [elena2] }, order.map((id) => ({ id, title: "" })), "c6", time);
+  assert.match(block, /## Tiempo del relato\nEn este punto: 1977\./);
+  assert.match(block, /### Elena\nEdad en este punto de la historia: 26 años \(21 en el capítulo 1\)\nRol: Protagonista/);
+  assert.doesNotMatch(block, /Edad: 21 años/, "the note of another moment is not sent as the age");
+  // Without a computed age, the note goes as always.
+  assert.match(memoryBlock(sel, { ...memory, characters: [elena2] }, [], null), /Edad: 21 años/);
+});

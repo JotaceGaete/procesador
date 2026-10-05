@@ -1,3 +1,5 @@
+import type { AgeAnchor, Calendar, StoryDate, TimeMark, TimeWarning } from "./chronology";
+
 export interface NovelSummary {
   id: string;
   title: string;
@@ -14,6 +16,10 @@ export interface Novel {
   guide: Guide;
   /** Re-read a chapter on leaving it after a substantial change (Consejero). */
   auto_digest: boolean;
+  /** Cronología: real dates (1972) or relative years (Año 0, Año 5). */
+  calendar: Calendar;
+  /** Time warnings the author dismissed: key → fingerprint of the data it was about. */
+  dismissed_warnings: Record<string, string>;
   updated_at: string;
 }
 
@@ -109,6 +115,10 @@ export interface Character {
   unaware: string;
   arc: string;
   notes: string;
+  /** Cronología: what is known of the age (computed per chapter); `age` stays a free note. */
+  age_anchor: AgeAnchor | null;
+  age_approx: boolean;
+  death: StoryDate | null;
 }
 
 export interface Relationship {
@@ -331,6 +341,7 @@ export type ContextSectionId =
   | "knowledge"
   | "threads"
   | "argument"
+  | "time"
   | "draft"
   | "manuscript";
 export interface ContextSection {
@@ -566,3 +577,13 @@ export interface ConversationSummary {
   title: string;
   updated_at: string;
 }
+
+/** The Cronología view (GET /api/novels/[id]/chronology): computed, said for the author. */
+export interface ChronologyView {
+  calendar: Calendar;
+  chapters: { id: string; title: string; mark: TimeMark | null; time: string; estimated: boolean }[];
+  /** Ages per chapter, in chapter order ("26 años", "20–21 años", "≈ 40 años"; null unknown). */
+  characters: { id: string; name: string; anchored: boolean; ages: (string | null)[] }[];
+  warnings: (TimeWarning & { dismissed: boolean })[];
+}
+

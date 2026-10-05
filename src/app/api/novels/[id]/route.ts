@@ -59,7 +59,7 @@ export const PATCH = handler<Ctx>(async (request, { params }) => {
     .from("novels")
     .update(update)
     .eq("id", id)
-    .select("id, title, synopsis, notes, guide, auto_digest, updated_at")
+    .select("id, title, synopsis, notes, guide, auto_digest, calendar, dismissed_warnings, updated_at")
     .maybeSingle();
   if (error) throw error;
   if (!data) throw new HttpError(404, "Novela no encontrada");

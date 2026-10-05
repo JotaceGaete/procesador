@@ -22,6 +22,7 @@ import {
   SCENE_PROVIDER_NOTES,
   editPrompt,
   memoryBlock,
+  type StoryTime,
   scenePrompt,
   writeInstructions,
 } from "@/lib/ai/prompts";
@@ -38,6 +39,8 @@ import {
 } from "@/lib/ai/inventory";
 import { recordUsage, type UsagePurpose } from "@/lib/ai/usage";
 import { storySoFar } from "@/lib/ai/story";
+import { novelChronology } from "@/lib/chronology-server";
+import { describeAge, formatPoint } from "@/lib/chronology";
 import { chapterRows, digestRows, novelDigestFresh, novelDigestRow, threadRows } from "@/lib/advisor/reading";
 import {
   EDIT_ACTIONS,
@@ -127,8 +130,21 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
 
   const memory = await getMemory(novel.id);
   const guide = compileGuide(novel);
+  // Cronología (docs/cronologia-edades.md): the time at this chapter and each character's age,
+  // computed from marks up to here (nothing of later chapters is said).
+  const chron = await novelChronology(novel, { memory, chapters: outline });
+  const point = chron.result.points[chapterIndex];
+  const time: StoryTime = {
+    now: chron.marks.length ? formatPoint(point, novel.calendar) : null,
+    estimated: point.estimated,
+    ages: new Map(
+      memory.characters
+        .map((c) => [c.id, describeAge(c, chron.result.ages.get(c.id)?.[chapterIndex] ?? null, outline, novel.calendar)] as const)
+        .filter((x): x is readonly [string, string] => Boolean(x[1])),
+    ),
+  };
   const project = (selected: SelectedMemory) =>
-    [guide, memoryBlock(selected, memory, outline, chapter.id)].filter(Boolean).join("\n\n");
+    [guide, memoryBlock(selected, memory, outline, chapter.id, time)].filter(Boolean).join("\n\n");
   const guideInventory = guideSection(novel, guide);
   const wholeNovel = async (text: string | null) =>
     text ? [manuscriptSection(text, (await manuscript()).chapters.length)] : [];
@@ -275,12 +291,14 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
         { reason: "nombrado en el texto anterior", text: before },
       ],
       extraReasons: new Map(continuing.map((id) => [id, "en escena en el capítulo anterior"])),
+      time,
     });
     const kind = (id: string) => memorySections.filter((x) => x.id === id);
     const sections: ContextSection[] = [
       ...texts.text,
       ...(story.sections.story ? [story.sections.story] : []),
       guideInventory,
+      ...kind("time"),
       ...kind("characters"),
       ...(story.sections.knowledge ? [story.sections.knowledge] : []),
       ...kind("places"),
@@ -388,9 +406,27 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       chosenCharacters: character ? [character.id] : [],
       chosenCharacterReason: "elegido en «Personaje»",
       sources: [{ reason: "nombrado en el texto", text: nearText }],
+      time,
     }),
     ...(await wholeNovel(whole)),
   ];
+  // Checking a character or the continuity: the time warnings about the people involved
+  // (warnings, never errors: the model is told they may be on purpose).
+  let timeWarnings: string[] = [];
+  if (action.id === "consistencia" || action.id === "personaje") {
+    const involved = new Set(selected.characters.map((c) => c.id));
+    const full = await novelChronology(novel, { memory, chapters: (await manuscript()).chapters });
+    const dismissed = novel.dismissed_warnings ?? {};
+    timeWarnings = full.result.warnings
+      .filter((w) => dismissed[w.key] !== w.fingerprint && w.characterIds.some((id) => involved.has(id)))
+      .map((w) => w.message);
+    if (timeWarnings.length) {
+      const items = timeWarnings.map((label) => ({ label }));
+      const existing = sections.find((s) => s.id === "time");
+      if (existing) existing.items.push(...items);
+      else sections.splice(3, 0, { id: "time", label: "Advertencias de cronología", tokens: estimateTokens(timeWarnings.join("\n").length), items });
+    }
+  }
   return {
     sections,
     notices: [],
@@ -405,6 +441,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       after,
       passages,
       images: protectedSelection.ids.length,
+      timeWarnings,
     }),
     signal,
     // Rewrites are the Asistente's; the analyses belong to the Consejero and use its model.
