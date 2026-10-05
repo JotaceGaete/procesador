@@ -188,12 +188,11 @@ const PARAS = [
   ["d", "—Siempre dices lo mismo —dije."],
   ["d", "—Porque siempre pasa lo mismo."],
   ["d", "—¿Y si esta vez no?"],
-  ["d", "—Esta vez tampoco —contestó, sin mirarme."],
-  ["n", "Lorena me miró de costado."],
+  ["n", "Lorena me miró de costado. No contestó; se quedó mirando el agua, como si esperara que el barco volviera a aparecer detrás del espigón."],
 ];
 const AFTER = "A la mañana siguiente el barco ya no estaba, y nadie en el pueblo supo decir a qué hora había salido.";
 const CHAPTER =
-  `${PARAS[0][1]}\n${PARAS[1][1]}\n\n${PARAS[2][1]}\r\n\r\n${PARAS[3][1]}\n​\n${PARAS[4][1]}\n${PARAS[5][1]}\n﻿­\n\n${PARAS[6][1]}` +
+  `${PARAS[0][1]}\n${PARAS[1][1]}\n\n${PARAS[2][1]}\r\n\r\n${PARAS[3][1]}\n​\n${PARAS[4][1]}\n﻿­\n\n${PARAS[5][1]}` +
   `\n\n${SEP}\n\n${AFTER}`;
 
 /** Each paragraph's line boxes (as the browser lays them out) and its computed box. */
@@ -239,14 +238,17 @@ for (const device of [
     for (const p of ps) {
       assert.equal(p.box, "0px 0px 0px 0px normal", `no margin, padding or pre-wrap on «${p.text.slice(0, 30)}»`);
       assert.equal(p.brs, 0);
-      assert.ok(p.lineHeight / p.fontSize >= 1.45 && p.lineHeight / p.fontSize <= 1.7, `comfortable leading ${p.lineHeight / p.fontSize}`);
+      // A novel's leading (1.45), the same for narration and dialogue: not the open 1.6 of a web page.
+      assert.ok(p.lineHeight / p.fontSize >= 1.4 && p.lineHeight / p.fontSize <= 1.5, `novel leading: ${(p.lineHeight / p.fontSize).toFixed(3)}`);
+      assert.equal(p.lineHeight, ps[0].lineHeight, "one rhythm for every paragraph");
     }
-    assert.deepEqual(ps.map((p) => p.indent > 0), [false, true, true, true, true, true, true, false], "indent, but not after the heading or the break");
+    assert.deepEqual(ps.map((p) => p.indent > 0), [false, true, true, true, true, true, false], "indent, but not after the heading or the break");
 
     const lh = ps[0].lineHeight;
     // The measurement itself: two lines inside one narrative paragraph are one line-height apart.
     assert.ok(ps[0].lines.length >= 2, "the narration wraps");
-    assert.ok(Math.abs(ps[0].lines[1] - ps[0].lines[0] - lh) <= 1, `line step inside a paragraph: ${ps[0].lines[1] - ps[0].lines[0]} vs ${lh}`);
+    const intra = ps[0].lines[1] - ps[0].lines[0];
+    assert.ok(Math.abs(intra - lh) <= 0.5, `line step inside a paragraph: ${intra} vs ${lh}`);
 
     // From the last line of a paragraph to the first of the next: the same step, no empty line.
     const step = (i) => ps[i + 1].lines[0] - ps[i].lines.at(-1);
@@ -255,7 +257,8 @@ for (const device of [
     for (let i = 0; i < PARAS.length - 1; i++) {
       const pair = `${kind(i) === "n" ? "narración" : "diálogo"} → ${kind(i + 1) === "n" ? "narración" : "diálogo"}`;
       seen.add(pair);
-      assert.ok(Math.abs(step(i) - lh) <= 1, `${pair} (${i}→${i + 1}): ${step(i).toFixed(1)}px, a line is ${lh}px`);
+      // Exactly the step between two lines of one paragraph: no margin, no empty line, no extra air for dialogue.
+      assert.ok(Math.abs(step(i) - intra) <= 0.5, `${pair} (${i}→${i + 1}): ${step(i).toFixed(2)}px, inside a paragraph ${intra.toFixed(2)}px`);
     }
     assert.deepEqual([...seen].sort(), ["diálogo → diálogo", "diálogo → narración", "narración → diálogo", "narración → narración"]);
 

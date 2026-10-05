@@ -63,7 +63,7 @@ El texto nunca se modifica para conseguirla.
 
 *Lectura* muestra además el arranque del capítulo como en el libro («CAPÍTULO 3» y el título
 propio del autor; el título por defecto «Capítulo 3» no se repite), en una columna de unos 65
-caracteres (34 em) con interlineado 1,6, sin márgenes entre párrafos.
+caracteres (34 em) con interlineado de novela, 1,45 (27,5 px a 19 px), sin márgenes entre párrafos. Diálogo y narración siguen el mismo ritmo: ninguna regla de espaciado propia para el diálogo.
 
 Criterio comprobado en Chromium (`tests/e2e/format.test.mjs`): entre la última línea de un
 párrafo y la primera del siguiente hay exactamente un interlineado, igual que entre dos líneas

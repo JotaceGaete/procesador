@@ -1425,7 +1425,9 @@ details.group > p {
   padding: 24px max(24px, calc((100% - 34em) / 2)) 30vh;
   font-family: var(--serif);
   font-size: 19px;
-  line-height: 1.6;
+  /* A novel's leading: 1.45 (27.5 px at 19 px). Paragraphs follow at this same step: no margin,
+     no extra space for dialogue. Measured and protected in tests/e2e/format.test.mjs. */
+  line-height: 1.45;
   color: var(--prose);
   font-kerning: normal;
   font-variant-ligatures: common-ligatures;
