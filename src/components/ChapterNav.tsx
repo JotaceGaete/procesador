@@ -19,6 +19,8 @@ interface Props {
   /** Cronología (docs/cronologia-edades.md), with the time warnings not dismissed. */
   onChronology(): void;
   timeWarnings: number;
+  /** The novel: data, Guía Maestra, backup and the book's exports (also reachable on a phone, where the title is hidden). */
+  onNovel(): void;
   /** Moves the editor to another chapter before the current one is deleted. */
   beforeDeleteCurrent(neighborId: string): Promise<boolean>;
 }
@@ -36,6 +38,7 @@ export default function ChapterNav({
   onTrash,
   onChronology,
   timeWarnings,
+  onNovel,
   beforeDeleteCurrent,
 }: Props) {
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -179,6 +182,9 @@ export default function ChapterNav({
           {timeWarnings > 0 && (
             <span className="muted"> · {timeWarnings === 1 ? "1 advertencia" : `${timeWarnings} advertencias`}</span>
           )}
+        </button>
+        <button className="link" onClick={onNovel}>
+          Novela, copia y exportación
         </button>
       </p>
     </nav>

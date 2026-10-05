@@ -2,6 +2,7 @@ import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { HttpError } from "./http";
 import type { Chapter, ChapterInfo, Fact, Memory, Novel } from "./types";
+import { cleanBook } from "./book";
 
 let client: SupabaseClient | null = null;
 
@@ -27,12 +28,12 @@ export function assertId(id: unknown, what = "Elemento"): string {
 export async function getNovel(id: string): Promise<Novel> {
   const { data, error } = await db()
     .from("novels")
-    .select("id, title, synopsis, notes, guide, auto_digest, calendar, dismissed_warnings, updated_at")
+    .select("id, title, synopsis, notes, guide, auto_digest, calendar, dismissed_warnings, book, updated_at")
     .eq("id", assertId(id, "Novela"))
     .maybeSingle();
   if (error) throw error;
   if (!data) throw new HttpError(404, "Novela no encontrada");
-  return data as Novel;
+  return { ...data, book: cleanBook(data.book) } as Novel;
 }
 
 export async function getOutline(novelId: string): Promise<ChapterInfo[]> {

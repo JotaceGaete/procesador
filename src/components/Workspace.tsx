@@ -478,6 +478,10 @@ export default function Workspace({ novelId }: { novelId: string }) {
           void refreshChronology();
           setModal("chronology");
         }}
+        onNovel={() => {
+          if (narrow()) setNavOpen(false);
+          setModal("novel");
+        }}
         beforeDeleteCurrent={async (neighborId) => {
           if (!(await leaveChapter())) return false;
           await openChapter(neighborId);
@@ -498,7 +502,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
           >
             ←
           </Link>
-          <button className="link title" onClick={() => setModal("novel")} title="Novela y Guía Maestra">
+          <button className="link title" onClick={() => setModal("novel")} title="Novela, Guía Maestra y libro">
             {novel.title}
           </button>
           <button

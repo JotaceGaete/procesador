@@ -31,7 +31,7 @@ const TABLES = [
 ];
 /** What only schema.sql brings (versions and trash), not actualizar-consejero.sql. */
 const AFTER_CONSEJERO =
-  /chapter_versions|save_chapter_version|trash_chapter|chapter_trash|restore_chapter|chapter_version_auto|chapters_version|time_marks|novels\.calendar|dismissed_warnings|age_anchor|age_approx|characters\.death|anterior a la cronología/;
+  /chapter_versions|save_chapter_version|trash_chapter|chapter_trash|restore_chapter|chapter_version_auto|chapters_version|time_marks|novels\.calendar|dismissed_warnings|age_anchor|age_approx|characters\.death|anterior a la cronología|novels\.book|anterior a la exportación/;
 
 let bin, dir, port;
 
@@ -395,4 +395,24 @@ test("cronología: una marca por capítulo, calendario válido, y duplicar copia
   // Deleting a chapter takes its mark with it.
   must(db, `select public.trash_chapter('${ch1}')`);
   assert.equal(must(db, `select count(*) from time_marks where novel_id = '${novel}'`), "0");
+});
+
+test("exportación: los datos del libro se copian al duplicar, con la portada apuntando al archivo de la copia", () => {
+  const db = newDb();
+  must(db, SCHEMA);
+  must(db, DATA, "psql");
+  const novel = "11111111-1111-4111-8111-111111111111";
+  const asset = "44444444-4444-4444-8444-444444444444";
+  assert.equal(must(db, `select book::text from novels where id = '${novel}'`), "{}", "empty by default");
+  must(db, `update novels set book = '{"author":"Ana Pérez","isbn":"9788437604947","coverAssetId":"${asset}"}'`);
+  must(db, `select public.duplicate_novel('${novel}', 'Copia')`);
+  const copy = must(db, "select id from novels where title = 'Copia'");
+  const copyAsset = must(db, `select id from assets where novel_id = '${copy}'`);
+  assert.notEqual(copyAsset, asset);
+  assert.equal(must(db, `select book->>'author' || ' ' || (book->>'isbn') from novels where id = '${copy}'`), "Ana Pérez 9788437604947");
+  assert.equal(must(db, `select book->>'coverAssetId' from novels where id = '${copy}'`), copyAsset, "the copy's file, not the original's");
+  // A cover that isn't a (ready) file of the novel is dropped in the copy.
+  must(db, `update novels set book = '{"coverAssetId":"55555555-5555-4555-8555-555555555555"}' where id = '${novel}'`);
+  must(db, `select public.duplicate_novel('${novel}', 'Copia 2')`);
+  assert.equal(must(db, "select coalesce(book->>'coverAssetId', 'null') from novels where title = 'Copia 2'"), "null");
 });

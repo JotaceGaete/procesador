@@ -34,7 +34,7 @@ export const GET = handler<Ctx>(async (_request, { params }) => {
       format: "procesador-backup",
       version: 1,
       exported_at: new Date().toISOString(),
-      novel: { id: novel.id, title: novel.title, synopsis: novel.synopsis, notes: novel.notes, guide: novel.guide },
+      novel: { id: novel.id, title: novel.title, synopsis: novel.synopsis, notes: novel.notes, guide: novel.guide, book: novel.book },
       chapters: chapters.data,
       memory,
       reading: { threads: threads.data, digests: digests.data, summary: global.data },

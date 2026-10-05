@@ -3,6 +3,7 @@ import { handler } from "@/lib/auth";
 import { assertId, db, getMemory, getNovel, getOutline } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { cleanGuide } from "@/lib/guide";
+import { cleanBook } from "@/lib/book";
 import { availableProviders, defaultProvider } from "@/lib/ai/providers";
 import { confirmTokens } from "@/lib/ai/models";
 import { getManuscriptImages, getNovelImages, novelFiles, removeFiles } from "@/lib/assets-server";
@@ -40,7 +41,7 @@ export const GET = handler<Ctx>(async (_request, { params }) => {
   );
 });
 
-/** Title, synopsis, notes, Guía Maestra and the Consejero's automatic reading switch. */
+/** Title, synopsis, notes, Guía Maestra, the Consejero's automatic reading switch and the book's data. */
 export const PATCH = handler<Ctx>(async (request, { params }) => {
   const id = assertId((await params).id, "Novela");
   const body = await readJson(request);
@@ -53,17 +54,18 @@ export const PATCH = handler<Ctx>(async (request, { params }) => {
   if (typeof body.notes === "string") update.notes = body.notes.slice(0, 20_000);
   if ("guide" in body) update.guide = cleanGuide(body.guide);
   if (typeof body.auto_digest === "boolean") update.auto_digest = body.auto_digest;
+  if ("book" in body) update.book = cleanBook(body.book);
   if (!Object.keys(update).length) throw new HttpError(400, "Nada que guardar");
 
   const { data, error } = await db()
     .from("novels")
     .update(update)
     .eq("id", id)
-    .select("id, title, synopsis, notes, guide, auto_digest, calendar, dismissed_warnings, updated_at")
+    .select("id, title, synopsis, notes, guide, auto_digest, calendar, dismissed_warnings, book, updated_at")
     .maybeSingle();
   if (error) throw error;
   if (!data) throw new HttpError(404, "Novela no encontrada");
-  return NextResponse.json(data);
+  return NextResponse.json({ ...data, book: cleanBook(data.book) });
 });
 
 /** Deletes the novel with its chapters, memory and files (cascade), then the files in Storage. The UI asks for explicit confirmation. */

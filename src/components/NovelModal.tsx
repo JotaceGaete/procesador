@@ -7,14 +7,18 @@ import { api } from "@/lib/client";
 import Modal from "./Modal";
 import BuildStamp from "./BuildStamp";
 import BackupButton from "./BackupButton";
+import BookExport from "./BookExport";
+import { cleanBook, type BookMeta } from "@/lib/book";
 
-type Tab = "novela" | "guia";
+type Tab = "novela" | "guia" | "libro";
 
-/** Title, synopsis and notes, and the Guía Maestra (all optional, in plain writer's terms). */
+/** Title, synopsis and notes, the Guía Maestra (all optional, in plain writer's terms), and the book: its data and the exports. */
 export default function NovelModal({ novel, onClose, onSaved }: { novel: Novel; onClose(): void; onSaved(n: Novel): void }) {
   const [tab, setTab] = useState<Tab>("novela");
   const [form, setForm] = useState({ title: novel.title, synopsis: novel.synopsis, notes: novel.notes });
   const [guide, setGuide] = useState<Guide>(novel.guide ?? {});
+  const savedBook = cleanBook(novel.book);
+  const [book, setBook] = useState<BookMeta>(savedBook);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -22,7 +26,8 @@ export default function NovelModal({ novel, onClose, onSaved }: { novel: Novel; 
     form.title !== novel.title ||
     form.synopsis !== novel.synopsis ||
     form.notes !== novel.notes ||
-    JSON.stringify(guide) !== JSON.stringify(novel.guide ?? {});
+    JSON.stringify(guide) !== JSON.stringify(novel.guide ?? {}) ||
+    JSON.stringify(book) !== JSON.stringify(savedBook);
 
   const leave = () => (!dirty || confirm("Hay cambios sin guardar. ¿Descartarlos?")) && onClose();
 
@@ -31,7 +36,7 @@ export default function NovelModal({ novel, onClose, onSaved }: { novel: Novel; 
     setBusy(true);
     setError("");
     try {
-      onSaved(await api<Novel>(`/api/novels/${novel.id}`, { method: "PATCH", json: { ...form, guide } }));
+      onSaved(await api<Novel>(`/api/novels/${novel.id}`, { method: "PATCH", json: { ...form, guide, book } }));
     } catch (err) {
       setError((err as Error).message);
       setBusy(false);
@@ -48,6 +53,9 @@ export default function NovelModal({ novel, onClose, onSaved }: { novel: Novel; 
         </button>
         <button className={tab === "guia" ? "on" : undefined} onClick={() => setTab("guia")}>
           Guía Maestra
+        </button>
+        <button className={tab === "libro" ? "on" : undefined} onClick={() => setTab("libro")}>
+          Libro
         </button>
       </nav>
       <form onSubmit={submit} className="form">
@@ -77,6 +85,8 @@ export default function NovelModal({ novel, onClose, onSaved }: { novel: Novel; 
             </label>
             <BackupButton novelId={novel.id} />
           </>
+        ) : tab === "libro" ? (
+          <BookExport novelId={novel.id} title={form.title.trim() || novel.title} book={book} onChange={setBook} />
         ) : (
           <>
             <p className="muted small">

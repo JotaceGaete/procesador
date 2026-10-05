@@ -1,3 +1,4 @@
+import type { BookMeta } from "./book";
 import type { AgeAnchor, Calendar, StoryDate, TimeMark, TimeWarning } from "./chronology";
 
 export interface NovelSummary {
@@ -20,6 +21,8 @@ export interface Novel {
   calendar: Calendar;
   /** Time warnings the author dismissed: key → fingerprint of the data it was about. */
   dismissed_warnings: Record<string, string>;
+  /** The book's data for publishing: front matter, cover and page (docs/exportacion.md). */
+  book: BookMeta;
   updated_at: string;
 }
 

@@ -312,6 +312,9 @@ do $$ begin
   end if;
 end $$;
 alter table public.novels add column if not exists dismissed_warnings jsonb not null default '{}'::jsonb;
+-- Exportación editorial (docs/exportacion.md): los datos del libro (autor, ISBN, dedicatoria,
+-- página de créditos, portada, tamaño de página y márgenes). Los valida la app (src/lib/book.ts).
+alter table public.novels add column if not exists book jsonb not null default '{}'::jsonb;
 
 -- Cabos y conflictos. Los propone el Consejero al leer (origin 'advisor', sin confirmar:
 -- "posible cabo") o los crea el autor. Capítulo de apertura, última aparición y cierre se
@@ -863,8 +866,8 @@ declare
   v_ids jsonb; v_text text; r2 record;
   v_copies jsonb;
 begin
-  insert into public.novels (id, title, synopsis, notes, guide, auto_digest, calendar)
-  select v_new, p_title, synopsis, notes, guide, auto_digest, calendar from public.novels where id = p_novel;
+  insert into public.novels (id, title, synopsis, notes, guide, auto_digest, calendar, book)
+  select v_new, p_title, synopsis, notes, guide, auto_digest, calendar, book from public.novels where id = p_novel;
   if not found then return null; end if;
 
   select coalesce(jsonb_object_agg(id, gen_random_uuid()), '{}') into m_chap from public.chapters where novel_id = p_novel;
@@ -922,6 +925,9 @@ begin
     regexp_replace(a.thumb_path, '^[^/]+/[^/]+/', v_new || '/' || (m_asset ->> a.id::text) || '/'),
     a.derived_type
   from public.assets a where a.novel_id = p_novel and a.status = 'ready';
+  -- La portada del libro, si es un archivo de la novela, es el archivo de la copia.
+  update public.novels set book = jsonb_set(book, '{coverAssetId}', coalesce(m_asset -> (book ->> 'coverAssetId'), 'null'::jsonb))
+  where id = v_new and book ? 'coverAssetId';
 
   -- Usos: el trigger de inserción no debe reordenar ni elegir principal al copiar.
   perform set_config('procesador.copying', 'on', true);

@@ -58,6 +58,10 @@ Procesador de textos personal para escribir novelas con asistencia de IA. Tú im
   - *Papelera*: un capítulo eliminado se recupera durante 30 días, con su historial.
   - *Descargar copia de seguridad* (ventana de la novela): un `.zip` con la novela para leer, cada capítulo tal cual, todos los datos y las imágenes originales.
   - **Pendiente prioritario** ([deuda](docs/deuda.md)): eliminar una novela entera todavía es definitivo; tendrá su propia papelera antes de la producción definitiva.
+- **Exportación editorial** ([diseño](docs/exportacion.md)), en la ventana de la novela → *Libro* (en el teléfono, *Novela, copia y exportación* en la lista de capítulos):
+  - Datos del libro: autor, subtítulo, editorial, ISBN (con su dígito de control comprobado), año, idioma, página de créditos, dedicatoria, epígrafe y portada; tamaño de página (6 × 9 in de KDP, A5…), márgenes, cuerpo de letra, sangría y cornisa.
+  - *DOCX · Manuscrito*: formato de envío a editoriales (A4 o carta, Times 12, doble espacio, «Apellido / TÍTULO / página»). *DOCX · Libro*: maquetado con el tamaño de página, preliminares, cornisas y números de página, listo para pasar a PDF desde Word o LibreOffice. *EPUB*: EPUB 3 válido (epubcheck), con índice, portada y texto alternativo.
+  - Cursivas, separadores e imágenes (tamaño, pie, crédito, página completa) salen como en *Lectura*. Antes de exportar, comprobaciones que nunca bloquean: imágenes sin texto alternativo o con poca resolución para imprimir, ISBN erróneo, capítulos vacíos.
 
 ## Qué se envía a la IA
 
@@ -155,6 +159,8 @@ npm run test:all    # todas
 | `tests/e2e/format.test.mjs` | Cursiva con `Ctrl/⌘+I` y con el botón, separador como bloque, Lectura, lo que reciben los modelos (`* * *`, nunca el marcador), escena y reescritura que vuelven con separador y sin negritas, teléfono |
 | `tests/e2e/manuscript.test.mjs` | Imágenes del manuscrito: insertar, editar, mover, quitar y recuperar, sin colocar, borrar capítulo, reutilización y archivo compartido con galerías, reemplazar, borrado seguro, orientación EXIF, asistente, duplicar novela reescribiendo marcadores, aislamiento |
 | `tests/e2e/manuscript-ui.test.mjs` | Insertar con botón, pegar y arrastrar; tarjeta; escribir sobre la imagen; quitar y recuperar; vista de lectura; desde una galería; reemplazo compartido; protección en el asistente; móvil |
+| `tests/unit/export.test.ts` | Datos del libro y su validación, ISBN, modelo y comprobaciones; DOCX manuscrito y libro (XML bien formado, página, márgenes, secciones, cornisas, cursivas, imágenes); EPUB (OPF, índice, portada, figuras accesibles, ZIP) |
+| `tests/e2e/export.test.mjs` | Datos del libro en la API y la copia de seguridad; pestaña *Libro*: comprobaciones, las tres descargas revisadas por dentro (WebP → JPEG, PNG intacto), guardar; duplicar con portada; teléfono |
 | `tests/e2e/ui.test.mjs` | Flujo completo en el navegador: autoguardado, memoria, guía, capítulos, retomar posición, Desarrollar escena e insertar con deshacer, Original/Propuesta, cambio de proveedor, conflicto, concentración, móvil, capítulo de 1 MB |
 
 Requisitos de la E2E:
@@ -185,7 +191,7 @@ src/
     page.tsx                         biblioteca
     novela/[id]/page.tsx             espacio de escritura
     api/novels                       GET biblioteca · POST nueva
-    api/novels/[id]                  GET (novela, capítulos, memoria) · PATCH · DELETE
+    api/novels/[id]                  GET (novela, capítulos, memoria) · PATCH (también los datos del libro) · DELETE
     api/novels/[id]/duplicate        POST
     api/novels/[id]/chapters         POST nuevo · PUT orden
     api/novels/[id]/memory/[kind]    POST personaje | relación | lugar | hecho
@@ -196,6 +202,7 @@ src/
     Library, Workspace, ChapterEditor, ChapterNav, NovelModal, MemoryModal, AssistantPanel, useAutosave
   lib/
     guide.ts            Guía Maestra → instrucciones maestras
+    book.ts, export/    datos del libro; DOCX y EPUB (docs/exportacion.md)
     ai/context.ts       selección de contexto y memoria
     ai/prompts.ts       instrucciones de los dos modos y tareas
     ai/providers.ts     interfaz común: Claude (SDK oficial), GPT (SDK oficial, Responses API), Grok (REST)
@@ -206,4 +213,4 @@ supabase/schema.sql
 
 ## Fuera del alcance
 
-Un solo usuario. Sin RAG, embeddings ni base vectorial. Sin colaboración, publicación, exportación editorial, historial de versiones ni extracción automática de memoria.
+Un solo usuario. Sin RAG, embeddings ni base vectorial. Sin colaboración, publicación, PDF para imprenta ni extracción automática de memoria.

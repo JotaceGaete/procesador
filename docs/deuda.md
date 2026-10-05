@@ -17,6 +17,7 @@ Lo que falta y está decidido que debe hacerse. Ordenado por prioridad.
 
 ## Pendiente, sin prioridad fijada
 
+- **PDF para imprenta (KDP, IngramSpark)** ([exportación](exportacion.md#8-fuera-de-esta-fase)): composición en el servidor con partición silábica, viudas y huérfanas, fuentes incrustadas y sangrado. Hoy: *DOCX · Libro* con el tamaño de KDP, a PDF desde Word o LibreOffice. También: cubierta completa con lomo, índice en el DOCX, notas al pie, partes.
 - Restaurar sólo una parte de una versión de capítulo.
 - Incluir las versiones en la copia de seguridad, y restaurar una novela desde una copia.
 - Avisar de un `[[separador]]` escrito dentro de un párrafo ([formato](formato-texto.md)).

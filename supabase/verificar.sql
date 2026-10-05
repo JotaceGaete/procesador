@@ -14,6 +14,8 @@ with expected(kind, object) as (
     -- Cronología (docs/cronologia-edades.md)
     ('tabla', 'time_marks'), ('columna', 'novels.calendar'), ('columna', 'novels.dismissed_warnings'),
     ('columna', 'characters.age_anchor'), ('columna', 'characters.age_approx'), ('columna', 'characters.death'),
+    -- Exportación editorial (docs/exportacion.md)
+    ('columna', 'novels.book'),
     ('columna', 'novels.auto_digest'), ('columna', 'assets.orientation'), ('columna', 'chapters.revision'),
     ('columna', 'facts.status'), ('columna', 'chapter_digests.text_sketch'), ('columna', 'advisor_observations.position'),
     ('función', 'duplicate_novel'), ('función', 'sync_chapter_images'), ('función', 'replace_asset_uses'),
@@ -50,4 +52,9 @@ union all
 -- duplicate_novel debe copiar la cronología.
 select 'función', 'duplicate_novel', 'versión anterior a la cronología'
 where exists (select 1 from pg_proc where proname = 'duplicate_novel')
-  and not exists (select 1 from pg_proc where proname = 'duplicate_novel' and prosrc like '%time_marks%');
+  and not exists (select 1 from pg_proc where proname = 'duplicate_novel' and prosrc like '%time_marks%')
+union all
+-- duplicate_novel debe copiar los datos del libro.
+select 'función', 'duplicate_novel', 'versión anterior a la exportación'
+where exists (select 1 from pg_proc where proname = 'duplicate_novel')
+  and not exists (select 1 from pg_proc where proname = 'duplicate_novel' and prosrc like '%coverAssetId%');
