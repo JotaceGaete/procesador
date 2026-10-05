@@ -9,10 +9,14 @@ with expected(kind, object) as (
     -- Consejero, fases 1 a 4 (la fase 5 no cambió el esquema)
     ('tabla', 'ai_usage'), ('tabla', 'story_threads'), ('tabla', 'chapter_digests'), ('tabla', 'novel_digests'),
     ('tabla', 'advisor_conversations'), ('tabla', 'advisor_messages'), ('tabla', 'advisor_observations'),
+    -- Versiones y papelera (docs/versiones.md)
+    ('tabla', 'chapter_versions'),
     ('columna', 'novels.auto_digest'), ('columna', 'assets.orientation'), ('columna', 'chapters.revision'),
     ('columna', 'facts.status'), ('columna', 'chapter_digests.text_sketch'), ('columna', 'advisor_observations.position'),
     ('función', 'duplicate_novel'), ('función', 'sync_chapter_images'), ('función', 'replace_asset_uses'),
-    ('función', 'finalize_asset'), ('función', 'novel_outline'), ('función', 'library')
+    ('función', 'finalize_asset'), ('función', 'novel_outline'), ('función', 'library'),
+    ('función', 'save_chapter_version'), ('función', 'trash_chapter'), ('función', 'chapter_trash'),
+    ('función', 'restore_chapter'), ('función', 'chapter_version_auto')
 )
 select e.kind, e.object, 'falta' as estado
 from expected e
@@ -33,4 +37,9 @@ union all
 -- duplicate_novel debe copiar el interruptor auto_digest (versión de la fase 2 en adelante).
 select 'función', 'duplicate_novel', 'versión anterior a la fase 2'
 where exists (select 1 from pg_proc where proname = 'duplicate_novel')
-  and not exists (select 1 from pg_proc where proname = 'duplicate_novel' and prosrc like '%auto_digest%');
+  and not exists (select 1 from pg_proc where proname = 'duplicate_novel' and prosrc like '%auto_digest%')
+union all
+-- La copia automática de versiones mientras se escribe.
+select 'trigger', 'chapters_version', 'falta'
+where to_regclass('public.chapters') is not null
+  and not exists (select 1 from pg_trigger where tgname = 'chapters_version');

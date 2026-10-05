@@ -55,6 +55,39 @@ export interface Chapter {
   revision: number;
 }
 
+/** Why a version of a chapter was kept (docs/versiones.md). */
+export type VersionReason = "auto" | "ai" | "conflict" | "manual" | "restore" | "delete";
+
+export const VERSION_REASONS: Record<VersionReason, string> = {
+  auto: "Copia automática",
+  ai: "Antes de aplicar la IA",
+  conflict: "Versión de otro dispositivo",
+  manual: "Guardada por ti",
+  restore: "Antes de restaurar",
+  delete: "Al eliminar el capítulo",
+};
+
+/** A saved copy of a chapter's text; `content` only when one version is asked for. */
+export interface ChapterVersion {
+  id: string;
+  reason: VersionReason;
+  label: string;
+  title: string;
+  words: number;
+  created_at: string;
+  content?: string;
+}
+
+/** A deleted chapter in the trash, with its last version. */
+export interface TrashEntry {
+  source_chapter_id: string;
+  title: string;
+  position: number;
+  words: number;
+  deleted_at: string;
+  versions: number;
+}
+
 export interface Character {
   id: string;
   novel_id: string;

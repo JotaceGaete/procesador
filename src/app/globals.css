@@ -2168,3 +2168,101 @@ details.group > p {
   padding: 4px 6px;
   margin: 0;
 }
+
+/* ---------- Versions, trash and backup (docs/versiones.md) ---------- */
+.chapters .nav-extra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+.version-save {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.version-save input {
+  flex: 1;
+  min-width: 0;
+}
+.versions {
+  list-style: none;
+  margin: 12px 0;
+  padding: 0;
+}
+.versions li {
+  border-top: 1px solid var(--faint);
+}
+.versions li:last-child {
+  border-bottom: 1px solid var(--faint);
+}
+.versions .version {
+  display: grid;
+  grid-template-columns: 11em 1fr auto;
+  gap: 4px 12px;
+  align-items: baseline;
+  width: 100%;
+  padding: 10px 2px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.versions .version:hover,
+.versions .version:focus-visible {
+  background: var(--selection);
+}
+.version-when {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.trash-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 2px;
+}
+.version-head {
+  margin: 0 0 4px;
+}
+.diff {
+  max-height: 55vh;
+  overflow-y: auto;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.diff ins {
+  text-decoration: none;
+  background: color-mix(in srgb, #2e8b57 22%, transparent);
+}
+.diff del {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.diff-gap {
+  font-family: var(--sans);
+}
+.backup {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--faint);
+}
+@media (max-width: 520px) {
+  .versions .version {
+    grid-template-columns: 1fr;
+  }
+  .version-save {
+    flex-direction: column;
+  }
+}

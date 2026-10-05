@@ -46,8 +46,12 @@ Procesador de textos personal para escribir novelas con asistencia de IA. Tú im
 - **Formato** ([diseño](docs/formato-texto.md)): *cursiva* con `Ctrl/⌘+I` o el botón *C* (se escribe `*así*`), y separador de escena con el botón ⁂ (un párrafo `[[separador]]`). *Lectura* los muestra como en el libro. La IA lee y conserva las cursivas; los separadores le llegan como `* * *` y vuelven como separador al insertar o reemplazar.
 - **Concentración** (`Ctrl/⌘ + .`, `Esc` para salir): sólo el texto y el cursor.
 - **Guardado**: automático, por capítulo.
-  - Si un capítulo cambió en otra pestaña o dispositivo, no se pisa: eliges *Cargar esa versión* o *Conservar la mía*.
+  - Si un capítulo cambió en otra pestaña o dispositivo, no se pisa: eliges *Cargar esa versión* o *Conservar la mía* (la otra versión se guarda antes como versión).
   - Al cambiar de capítulo, la app espera a que el actual termine de guardarse.
+- **Versiones, papelera y copia de seguridad** ([diseño](docs/versiones.md)):
+  - *Versiones de este capítulo* (en la lista de capítulos): se guardan solas mientras escribes (como mucho una cada media hora), antes de aplicar una propuesta de la IA, antes de *Conservar la mía* y antes de restaurar; y con nombre cuando tú quieras. Cada una se compara con el texto actual y se puede restaurar (con *Deshacer*).
+  - *Papelera*: un capítulo eliminado se recupera durante 30 días, con su historial.
+  - *Descargar copia de seguridad* (ventana de la novela): un `.zip` con la novela para leer, cada capítulo tal cual, todos los datos y las imágenes originales.
 
 ## Qué se envía a la IA
 
@@ -110,6 +114,7 @@ npm run test:all    # todas
 - **Estados de partida:** base vacía; base anterior al Consejero (2b); base de la fase 1; base actualizada a medias a mano; y base con las fases 2–4 (versiones guardadas en `tests/schema/fixtures`).
 - **Modos de ejecución:** el archivo entero como una sola consulta (como el SQL Editor de Supabase) y sentencia a sentencia (como `psql`).
 - **Regresión:** una ejecución que llega al bloque de triggers sin `story_threads` ya no da `relation "public.story_threads" does not exist`.
+- **Versiones y papelera:** copia automática cada media hora (nunca de un texto vacío ni al reordenar), sin repetir, poda a 100 automáticas, papelera con historial, recuperación, vaciado a los 30 días, duplicar sin versiones, recuento de palabras sin separadores.
 - **Comprobación estática:** ninguna sentencia se refiere a una tabla antes del `create table` que la garantiza.
 
 `npm run test:e2e` levanta un entorno desechable y lo elimina al terminar. No usa claves reales ni crea recursos externos:
@@ -127,12 +132,14 @@ npm run test:all    # todas
 | `tests/unit/auth.test.ts` | Sesión firmada y caducidad, cierre por defecto sin `APP_PASSWORD` |
 | `tests/unit/providers.test.ts` | Claude, GPT y Grok: streaming, caché del manuscrito, rechazos, errores, cancelación |
 | `tests/e2e/api.test.mjs` | Biblioteca, capítulos, revisiones y conflictos, memoria, aislamiento entre novelas, duplicar, borrar, construcción de contexto y cada proveedor |
-| `tests/e2e/security.test.mjs` | Las 31 rutas sin sesión, cookies falsificadas, 503 sin contraseña, clave pública sin acceso a tablas, funciones ni al bucket, claves fuera del bundle, manuscrito fuera de los logs |
+| `tests/e2e/security.test.mjs` | Las 55 rutas sin sesión, cookies falsificadas, 503 sin contraseña, clave pública sin acceso a tablas, funciones ni al bucket, claves fuera del bundle, manuscrito fuera de los logs |
 | `tests/unit/images.test.ts` | Formato y tamaño de imagen leídos de los bytes (JPEG, PNG, WebP, AVIF), rutas y URLs versionadas |
 | `tests/e2e/assets-reuse.test.mjs` | Archivos repetidos (antes de subir y al terminar, sólo dentro de la novela) y reemplazar: sólo esta imagen o todos los usos, conservando pie, etiqueta, orden y principal, sin tocar otros usos |
 | `tests/e2e/assets.test.mjs` | Archivos: subida firmada de un solo uso, original conservado, derivados, caché versionada, galería (principal única, orden, límite), archivos compartidos sin duplicar, borrado seguro, aislamiento entre novelas, limpieza, duplicar novela, nada llega a la IA |
 | `tests/e2e/gallery-ui.test.mjs` | Galería en el navegador: tarjetas con iniciales sin imagen, subir con selector y arrastrando, imagen principal, visor con pie y etapa, ordenar, eliminar, Escape, límite de 40, sólo miniaturas y versiones reducidas, móvil |
 | `tests/unit/manuscript.test.ts` | Formato del marcador (línea propia, dentro de un párrafo, repetidos), recuento de palabras, sustitución y restauración en el asistente, resolución de impresión, cursivas y separadores (lectura, alternar, ida y vuelta con la IA) |
+| `tests/unit/versions.test.ts` | Comparación de versiones (reconstruye ambos textos, palabra a palabra, capítulos largos), ZIP (CRC, nombres UTF-8), contenido y nombres de la copia de seguridad |
+| `tests/e2e/versions.test.mjs` | Copia automática, versiones a pedido sin repetir, antes de *Conservar la mía*, papelera y recuperación con historial, copia de seguridad; en la interfaz: guardar, comparar, restaurar y deshacer, versión antes de la IA, conflicto, recuperar de la papelera, descargar el ZIP |
 | `tests/e2e/format.test.mjs` | Cursiva con `Ctrl/⌘+I` y con el botón, separador como bloque, Lectura, lo que reciben los modelos (`* * *`, nunca el marcador), escena y reescritura que vuelven con separador y sin negritas, teléfono |
 | `tests/e2e/manuscript.test.mjs` | Imágenes del manuscrito: insertar, editar, mover, quitar y recuperar, sin colocar, borrar capítulo, reutilización y archivo compartido con galerías, reemplazar, borrado seguro, orientación EXIF, asistente, duplicar novela reescribiendo marcadores, aislamiento |
 | `tests/e2e/manuscript-ui.test.mjs` | Insertar con botón, pegar y arrastrar; tarjeta; escribir sobre la imagen; quitar y recuperar; vista de lectura; desde una galería; reemplazo compartido; protección en el asistente; móvil |

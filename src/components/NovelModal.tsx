@@ -6,6 +6,7 @@ import { GUIDE_SECTIONS, compileGuide } from "@/lib/guide";
 import { api } from "@/lib/client";
 import Modal from "./Modal";
 import BuildStamp from "./BuildStamp";
+import BackupButton from "./BackupButton";
 
 type Tab = "novela" | "guia";
 
@@ -74,6 +75,7 @@ export default function NovelModal({ novel, onClose, onSaved }: { novel: Novel; 
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
               />
             </label>
+            <BackupButton novelId={novel.id} />
           </>
         ) : (
           <>

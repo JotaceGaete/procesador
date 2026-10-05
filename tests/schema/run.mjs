@@ -27,8 +27,10 @@ const OLD = {
 const TABLES = [
   "novels", "chapters", "characters", "relationships", "places", "facts", "fact_characters", "assets",
   "character_images", "manuscript_images", "ai_usage", "story_threads", "chapter_digests", "novel_digests",
-  "advisor_conversations", "advisor_messages", "advisor_observations",
+  "advisor_conversations", "advisor_messages", "advisor_observations", "chapter_versions",
 ];
+/** What only schema.sql brings (versions and trash), not actualizar-consejero.sql. */
+const AFTER_CONSEJERO = /chapter_versions|save_chapter_version|trash_chapter|chapter_trash|restore_chapter|chapter_version_auto|chapters_version/;
 
 let bin, dir, port;
 
@@ -110,16 +112,21 @@ function assertDataKept(db, beforeFp) {
     assert.equal(now, value, `datos de ${key} intactos`);
   }
 }
-/** Up to date: the verification query returns nothing, and the app's core actions work. */
-function assertComplete(db) {
-  assert.equal(must(db, VERIFY), "", "verificar.sql: nada falta");
-  for (const t of TABLES) {
+/**
+ * Up to date: the verification query returns nothing, and the app's core actions work.
+ * `consejeroOnly`: after actualizar-consejero.sql, only what came later may be missing.
+ */
+function assertComplete(db, { consejeroOnly = false } = {}) {
+  const missing = must(db, VERIFY).split("\n").filter(Boolean);
+  assert.deepEqual(consejeroOnly ? missing.filter((l) => !AFTER_CONSEJERO.test(l)) : missing, [], "verificar.sql: nada falta");
+  for (const t of consejeroOnly ? TABLES.filter((t) => !AFTER_CONSEJERO.test(t)) : TABLES) {
     assert.equal(must(db, `select relrowsecurity from pg_class where oid = 'public.${t}'::regclass`), "t", `${t} con RLS`);
     assert.equal(must(db, `select has_table_privilege('anon', 'public.${t}', 'select')`), "f", `${t} cerrada a anon`);
   }
   for (const t of ["novels", "story_threads", "chapter_digests", "novel_digests", "advisor_conversations", "advisor_observations"])
     assert.equal(must(db, `select count(*) from pg_trigger where tgname = '${t}_touch'`), "1", `${t}_touch`);
   assert.equal(must(db, "select count(*) from pg_trigger where tgname = 'chapters_touch'"), "1");
+  if (!consejeroOnly) assert.equal(must(db, "select count(*) from pg_trigger where tgname = 'chapters_version'"), "1");
   assert.equal(must(db, "select count(*) from information_schema.columns where table_name = 'novels' and column_name = 'auto_digest'"), "1");
 }
 
@@ -250,7 +257,7 @@ for (const state of ["anterior al Consejero (2b)", "Consejero fase 1", "parcialm
     const before = fingerprint(db);
     must(db, MIGRATION);
     must(db, MIGRATION);
-    assertComplete(db);
+    assertComplete(db, { consejeroOnly: true });
     assertDataKept(db, before);
     must(db, SCHEMA);
     assertComplete(db);
@@ -264,4 +271,99 @@ test("an unrelated table called projects survives", () => {
   must(db, "create table public.projects (id int primary key, name text); insert into public.projects values (1, 'ajeno');", "psql");
   must(db, SCHEMA);
   assert.equal(must(db, "select name from public.projects"), "ajeno");
+});
+
+// ---------------------------------------------------------------------------
+// Versiones y papelera (docs/versiones.md)
+// ---------------------------------------------------------------------------
+
+test("versions: an automatic copy of the previous text at most every 30 minutes, never of an empty text", () => {
+  const db = newDb();
+  must(db, SCHEMA);
+  must(db, DATA, "psql");
+  const ch = "22222222-2222-4222-8222-222222222221";
+  const count = () => Number(must(db, `select count(*) from chapter_versions where chapter_id = '${ch}' and reason = 'auto'`));
+  // DATA's update happened with the schema in place: the text before it is the first copy.
+  assert.equal(count(), 1);
+  assert.equal(must(db, `select content from chapter_versions where chapter_id = '${ch}'`), "Texto del uno.");
+  must(db, `update chapters set content = 'Otra cosa.' where id = '${ch}'`);
+  assert.equal(count(), 1, "a recent copy exists: no new one");
+  must(db, `update chapter_versions set created_at = now() - interval '31 minutes' where chapter_id = '${ch}'`);
+  must(db, `update chapters set content = 'Y otra.' where id = '${ch}'`);
+  assert.equal(count(), 2, "half an hour later, a new one");
+  assert.equal(must(db, `select content from chapter_versions where chapter_id = '${ch}' order by created_at desc limit 1`), "Otra cosa.");
+  // Reordering or renaming is not an edit of the text.
+  must(db, `update chapter_versions set created_at = now() - interval '31 minutes' where chapter_id = '${ch}'`);
+  must(db, `update chapters set title = 'Nuevo', position = 9 where id = '${ch}'`);
+  assert.equal(count(), 2);
+  // A chapter that starts empty leaves no empty version.
+  const empty = must(db, "insert into chapters (novel_id, title, position) values ('11111111-1111-4111-8111-111111111111', 'Vacío', 3) returning id");
+  must(db, `update chapters set content = 'Primeras palabras.' where id = '${empty}'`);
+  assert.equal(must(db, `select count(*) from chapter_versions where chapter_id = '${empty}'`), "0");
+});
+
+test("versions: saved on demand, identical ones not repeated (except the author's), at most 100 automatic ones", () => {
+  const db = newDb();
+  must(db, SCHEMA);
+  must(db, DATA, "psql");
+  const ch = "22222222-2222-4222-8222-222222222222";
+  const save = (reason, label = "", content = null) =>
+    must(db, `select public.save_chapter_version('${ch}', '${reason}', '${label}', ${content === null ? "null" : `'${content}'`})`);
+  const a = save("ai");
+  assert.equal(save("ai"), a, "the same text again: the same version");
+  assert.notEqual(save("manual", "Primer borrador"), a, "the author's own always counts");
+  assert.equal(must(db, `select label from chapter_versions where reason = 'manual'`), "Primer borrador");
+  assert.equal(save("ai", "", ""), "", "an empty text is not saved");
+  for (let i = 0; i < 105; i++) save("ai", "", `Texto ${i}`);
+  assert.equal(must(db, `select count(*) from chapter_versions where chapter_id = '${ch}' and reason <> 'manual'`), "100");
+  assert.equal(must(db, `select count(*) from chapter_versions where chapter_id = '${ch}' and reason = 'manual'`), "1", "never pruned");
+  assert.equal(must(db, `select words from chapter_versions where content = 'Texto 104'`), "2");
+});
+
+test("trash: deleting keeps the text and the history; restoring brings both back; 30 days later it is gone", () => {
+  const db = newDb();
+  must(db, SCHEMA);
+  must(db, DATA, "psql");
+  const novel = "11111111-1111-4111-8111-111111111111";
+  const ch = "22222222-2222-4222-8222-222222222221";
+  must(db, `select public.save_chapter_version('${ch}', 'manual', 'Antes de cortar')`);
+  must(db, `select public.trash_chapter('${ch}')`);
+  assert.equal(must(db, `select count(*) from chapters where id = '${ch}'`), "0");
+  const trash = must(db, `select source_chapter_id || '|' || title || '|' || versions from public.chapter_trash('${novel}')`);
+  assert.equal(trash, `${ch}|Uno|3`, "one entry, with its three versions (auto, manual, delete)");
+  // The last chapter can't go.
+  const r = run(db, `select public.trash_chapter('22222222-2222-4222-8222-222222222222')`);
+  assert.ok(!r.ok && /al menos un capítulo/.test(r.error));
+
+  const restored = must(db, `select public.restore_chapter('${novel}', '${ch}')`);
+  assert.equal(must(db, `select title || '|' || content || '|' || position from chapters where id = '${restored}'`), "Uno|Texto del uno, corregido.|3");
+  assert.equal(must(db, `select count(*) from chapter_versions where chapter_id = '${restored}'`), "3", "its history came back");
+  assert.equal(must(db, `select count(*) from public.chapter_trash('${novel}')`), "0");
+  assert.ok(!run(db, `select public.restore_chapter('${novel}', '${ch}')`).ok, "not twice");
+
+  // Deleted again, and forgotten for a month.
+  must(db, `select public.trash_chapter('${restored}')`);
+  assert.equal(must(db, `select count(*) from public.chapter_trash('${novel}')`), "1", "one entry, not two");
+  must(db, `update chapter_versions set created_at = now() - interval '31 days' where chapter_id is null`);
+  assert.equal(must(db, `select count(*) from public.chapter_trash('${novel}')`), "0");
+  assert.equal(must(db, `select count(*) from chapter_versions where chapter_id is null`), "0", "emptied");
+});
+
+test("versions: duplicating a novel copies no versions and rewriting its markers leaves none", () => {
+  const db = newDb();
+  must(db, SCHEMA);
+  must(db, DATA, "psql");
+  const mimg = must(db, "select id from manuscript_images limit 1");
+  must(db, `update chapters set content = 'Con imagen.' || chr(10) || '[[imagen:${mimg}]]' where id = '22222222-2222-4222-8222-222222222222'`);
+  const before = must(db, "select count(*) from chapter_versions");
+  must(db, "select public.duplicate_novel('11111111-1111-4111-8111-111111111111', 'Copia')");
+  assert.ok(must(db, "select id from novels where title = 'Copia'"));
+  assert.match(must(db, "select content from chapters c join novels n on n.id = c.novel_id where n.title = 'Copia' and c.title = 'Dos'"), /\[\[imagen:/);
+  assert.equal(must(db, "select count(*) from chapter_versions"), before);
+});
+
+test("word_count: separators don't count, like images", () => {
+  const db = newDb();
+  must(db, SCHEMA);
+  assert.equal(must(db, "select public.word_count('Uno dos.' || chr(10) || '[[separador]]' || chr(10) || 'Tres.')"), "3");
 });

@@ -8,6 +8,7 @@ import { chapterLabel } from "@/lib/ai/context";
 import type { SaveState } from "./useAutosave";
 import ChapterEditor, { type EditorHandle, type Selection } from "./ChapterEditor";
 import ChapterNav from "./ChapterNav";
+import { TrashModal, VersionsModal } from "./Versions";
 import NovelModal from "./NovelModal";
 import MemoryModal from "./MemoryModal";
 import AssistantPanel from "./AssistantPanel";
@@ -83,7 +84,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
   // Chapters written in during this visit: leaving one may re-read it (Consejero, auto_digest).
   const edited = useRef(new Set<string>());
   const [focusMode, setFocusMode] = useState(false);
-  const [modal, setModal] = useState<"novel" | "memory" | "images" | null>(null);
+  const [modal, setModal] = useState<"novel" | "memory" | "images" | "versions" | "trash" | null>(null);
   const editorRef = useRef<EditorHandle>(null);
 
   const openChapter = useCallback(async (id: string) => {
@@ -268,6 +269,37 @@ export default function Workspace({ novelId }: { novelId: string }) {
     };
   }, []);
 
+  /**
+   * Keeps the text as it is now as a version (docs/versiones.md) before something replaces it.
+   * The text is taken right away, so what follows can change the editor at once.
+   */
+  const keepVersion = useCallback(
+    (reason: "ai" | "restore") => {
+      const content = editorRef.current?.getContent();
+      if (!chapter || content === undefined) return Promise.resolve();
+      return api(`/api/chapters/${chapter.id}/versions`, { method: "POST", json: { reason, content } });
+    },
+    [chapter],
+  );
+  const keepBeforeAI = useCallback(
+    () =>
+      keepVersion("ai").catch(() =>
+        setNotice("No se pudo guardar una versión del texto anterior. Deshacer (Ctrl/⌘+Z) sigue disponible."),
+      ),
+    [keepVersion],
+  );
+  /** Versiones → Restaurar: the current text becomes a version first; if that fails, nothing changes. */
+  const restoreVersion = useCallback(
+    async (text: string) => {
+      await keepVersion("restore");
+      setModal(null);
+      setReading(null);
+      editorRef.current?.replaceAll(text);
+      setApplied("Versión restaurada en el manuscrito.");
+    },
+    [keepVersion],
+  );
+
   const afterApply = useCallback((ok: boolean, message: string) => {
     if (ok) {
       setApplied(message);
@@ -276,13 +308,18 @@ export default function Workspace({ novelId }: { novelId: string }) {
     return ok;
   }, []);
   const applyRewrite = useCallback(
-    (original: Selection, text: string) =>
-      afterApply(editorRef.current?.applyRewrite(original, text) ?? false, "Reemplazado en el manuscrito."),
-    [afterApply],
+    (original: Selection, text: string) => {
+      void keepBeforeAI();
+      return afterApply(editorRef.current?.applyRewrite(original, text) ?? false, "Reemplazado en el manuscrito.");
+    },
+    [afterApply, keepBeforeAI],
   );
   const insertAtCursor = useCallback(
-    (text: string) => afterApply(editorRef.current?.insertAtCursor(text) ?? false, "Escena insertada en el cursor."),
-    [afterApply],
+    (text: string) => {
+      void keepBeforeAI();
+      return afterApply(editorRef.current?.insertAtCursor(text) ?? false, "Escena insertada en el cursor.");
+    },
+    [afterApply, keepBeforeAI],
   );
   const clearSelection = useCallback(() => editorRef.current?.clearSelection(), []);
 
@@ -379,6 +416,14 @@ export default function Workspace({ novelId }: { novelId: string }) {
         onSelect={switchChapter}
         onChange={setChapters}
         onClose={() => toggle("navOpen", setNavOpen)}
+        onVersions={() => {
+          if (narrow()) setNavOpen(false);
+          setModal("versions");
+        }}
+        onTrash={() => {
+          if (narrow()) setNavOpen(false);
+          setModal("trash");
+        }}
         beforeDeleteCurrent={async (neighborId) => {
           if (!(await leaveChapter())) return false;
           await openChapter(neighborId);
@@ -630,6 +675,27 @@ export default function Workspace({ novelId }: { novelId: string }) {
           onFiles={(files) => {
             setModal(null);
             insertFiles(files);
+          }}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal === "versions" && (
+        <VersionsModal
+          chapterId={chapter.id}
+          chapterTitle={current ? chapterLabel(chapterIndex, current.title) : chapter.title}
+          getContent={getContent}
+          onRestore={restoreVersion}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal === "trash" && (
+        <TrashModal
+          novelId={novel.id}
+          onRestored={(id, list) => {
+            setChapters(list);
+            setModal(null);
+            refreshManuscriptImages();
+            void switchChapter(id);
           }}
           onClose={() => setModal(null)}
         />

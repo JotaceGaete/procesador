@@ -422,6 +422,31 @@ create table if not exists public.novel_digests (
 );
 select public.procesador_secure_table('public.novel_digests', true);
 
+-- Versiones de capítulo (docs/versiones.md): copias completas del texto de un capítulo.
+-- chapter_id null = el capítulo se eliminó y sus versiones están en la papelera;
+-- source_chapter_id recuerda de qué capítulo eran. No se copian al duplicar una novela.
+create table if not exists public.chapter_versions (
+  id                uuid primary key default gen_random_uuid(),
+  novel_id          uuid not null references public.novels(id) on delete cascade,
+  chapter_id        uuid,
+  source_chapter_id uuid not null,
+  title             text not null default '',
+  position          integer not null default 0,
+  content           text not null,
+  words             integer not null default 0,
+  -- auto: mientras se escribe (como mucho una cada 30 minutos); ai: antes de aplicar una
+  -- propuesta de la IA; conflict: la versión de otra pestaña o dispositivo, antes de
+  -- «Conservar la mía»; manual: guardada por el autor; restore: antes de restaurar otra
+  -- versión; delete: al eliminar el capítulo.
+  reason            text not null check (reason in ('auto', 'ai', 'conflict', 'manual', 'restore', 'delete')),
+  label             text not null default '' check (length(label) <= 200),
+  created_at        timestamptz not null default now(),
+  foreign key (chapter_id, novel_id) references public.chapters(id, novel_id) on delete set null (chapter_id)
+);
+create index if not exists chapter_versions_chapter_idx on public.chapter_versions(chapter_id, created_at desc);
+create index if not exists chapter_versions_trash_idx on public.chapter_versions(novel_id, source_chapter_id) where chapter_id is null;
+select public.procesador_secure_table('public.chapter_versions', false);
+
 -- ---------------------------------------------------------------------------
 -- Triggers
 -- ---------------------------------------------------------------------------
@@ -435,6 +460,21 @@ begin
     update public.novels set updated_at = now() where id = new.novel_id;
   end if;
   return new;
+end $$;
+
+-- Copia automática mientras se escribe: el texto anterior a un guardado, si el capítulo no
+-- tiene ninguna versión de los últimos 30 minutos. Así siempre hay un punto al que volver
+-- de cada media hora de trabajo, sin depender del navegador.
+create or replace function public.chapter_version_auto() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  if new.content is distinct from old.content and btrim(old.content) <> ''
+     and coalesce(current_setting('procesador.copying', true), '') <> 'on'
+     and not exists (select 1 from public.chapter_versions
+                     where chapter_id = new.id and created_at > now() - interval '30 minutes') then
+    perform public.save_chapter_version(new.id, 'auto', '', old.content);
+  end if;
+  return null;
 end $$;
 
 -- Al añadir: se coloca al final, la primera del personaje es la principal y hay un máximo por personaje.
@@ -482,15 +522,21 @@ drop trigger if exists chapters_touch on public.chapters;
 create trigger chapters_touch before update on public.chapters
   for each row execute function public.touch_chapter();
 
+drop trigger if exists chapters_version on public.chapters;
+create trigger chapters_version after update of content on public.chapters
+  for each row execute function public.chapter_version_auto();
+
 -- ---------------------------------------------------------------------------
 -- Funciones usadas por el servidor
 -- ---------------------------------------------------------------------------
--- Palabras de la prosa: los marcadores de imagen no cuentan (como countWords en src/lib/manuscript.ts).
+-- Palabras de la prosa: los marcadores de imagen y los separadores no cuentan (como countWords
+-- en src/lib/manuscript.ts).
 create or replace function public.word_count(t text) returns integer
 language sql immutable set search_path = '' as $$
   select case when btrim(c) = '' then 0
               else coalesce(array_length(regexp_split_to_array(btrim(c), '\s+'), 1), 0) end
-  from (select regexp_replace(t, '\[\[imagen:[0-9a-fA-F-]{36}\]\]', ' ', 'g') as c) x
+  from (select regexp_replace(regexp_replace(t, '\[\[imagen:[0-9a-fA-F-]{36}\]\]', ' ', 'g'),
+                              '\[\[separador\]\]', ' ', 'gi') as c) x
 $$;
 
 -- Biblioteca: novelas con número de capítulos y palabras.
@@ -528,6 +574,103 @@ begin
   update public.chapters c set position = o.ord
   from unnest(p_ids) with ordinality as o(id, ord)
   where c.id = o.id and c.novel_id = p_novel;
+end $$;
+
+-- Guarda una versión de un capítulo: el texto indicado o, sin él, el guardado. Un texto vacío
+-- no se guarda. No repite la última versión si es idéntica (salvo las del autor y la de la
+-- papelera). Conserva las 100 versiones automáticas más recientes de cada capítulo; las
+-- guardadas por el autor y las de la papelera no se podan. Devuelve el id (o null).
+create or replace function public.save_chapter_version(p_chapter uuid, p_reason text, p_label text default '',
+                                                       p_content text default null)
+returns uuid language plpgsql set search_path = '' as $$
+declare c record; v_content text; v_last record; v_id uuid;
+begin
+  select id, novel_id, title, position, content into c from public.chapters where id = p_chapter;
+  if c.id is null then
+    raise exception 'Capítulo no encontrado' using errcode = 'P0002';
+  end if;
+  v_content := coalesce(p_content, c.content);
+  if btrim(v_content) = '' then
+    return null;
+  end if;
+  select id, content into v_last from public.chapter_versions
+  where chapter_id = p_chapter order by created_at desc, id desc limit 1;
+  if p_reason not in ('manual', 'delete') and v_last.id is not null and v_last.content = v_content then
+    return v_last.id;
+  end if;
+  insert into public.chapter_versions (novel_id, chapter_id, source_chapter_id, title, position, content, words, reason, label)
+  values (c.novel_id, c.id, c.id, c.title, c.position, v_content, public.word_count(v_content), p_reason,
+          left(btrim(coalesce(p_label, '')), 200))
+  returning id into v_id;
+  delete from public.chapter_versions where id in (
+    select id from public.chapter_versions
+    where chapter_id = p_chapter and reason not in ('manual', 'delete')
+    order by created_at desc, id desc offset 100);
+  return v_id;
+end $$;
+
+-- Eliminar un capítulo: su texto pasa a la papelera (una versión 'delete') y el capítulo se
+-- borra, en una transacción. Sus versiones quedan en la papelera (chapter_id null). Una
+-- novela conserva siempre al menos un capítulo.
+create or replace function public.trash_chapter(p_chapter uuid)
+returns void language plpgsql set search_path = '' as $$
+declare v_novel uuid;
+begin
+  select novel_id into v_novel from public.chapters where id = p_chapter;
+  if v_novel is null then
+    raise exception 'Capítulo no encontrado' using errcode = 'P0002';
+  end if;
+  -- Dos eliminaciones simultáneas no pueden dejar la novela sin capítulos.
+  perform 1 from public.novels where id = v_novel for update;
+  if (select count(*) from public.chapters where novel_id = v_novel) <= 1 then
+    raise exception 'Una novela necesita al menos un capítulo.' using errcode = '22023';
+  end if;
+  perform public.save_chapter_version(p_chapter, 'delete');
+  delete from public.chapters where id = p_chapter;
+end $$;
+
+-- La papelera de una novela: un capítulo eliminado por fila, con su última versión, el más
+-- reciente primero. Antes vacía lo eliminado hace más de 30 días.
+create or replace function public.chapter_trash(p_novel uuid)
+returns table (source_chapter_id uuid, title text, "position" integer, words integer, deleted_at timestamptz, versions integer)
+language plpgsql set search_path = '' as $$
+#variable_conflict use_column
+begin
+  delete from public.chapter_versions v
+  where v.novel_id = p_novel and v.chapter_id is null
+    and v.source_chapter_id in (select x.source_chapter_id from public.chapter_versions x
+                                where x.novel_id = p_novel and x.chapter_id is null
+                                group by x.source_chapter_id
+                                having max(x.created_at) < now() - interval '30 days');
+  return query
+  select t.source_chapter_id, t.title, t.position, t.words, t.created_at, t.versions
+  from (select distinct on (v.source_chapter_id) v.source_chapter_id, v.title, v.position, v.words, v.created_at,
+               (count(*) over (partition by v.source_chapter_id))::integer as versions
+        from public.chapter_versions v
+        where v.novel_id = p_novel and v.chapter_id is null
+        order by v.source_chapter_id, v.created_at desc, v.id desc) t
+  order by t.created_at desc;
+end $$;
+
+-- Recuperar un capítulo de la papelera: vuelve al final de la novela con el título y el texto
+-- de su última versión, y con todo su historial. Devuelve el id del capítulo.
+create or replace function public.restore_chapter(p_novel uuid, p_source uuid)
+returns uuid language plpgsql set search_path = '' as $$
+declare v record; v_id uuid := gen_random_uuid();
+begin
+  perform 1 from public.novels where id = p_novel for update;
+  select title, content into v from public.chapter_versions
+  where novel_id = p_novel and source_chapter_id = p_source and chapter_id is null
+  order by created_at desc, id desc limit 1;
+  if v.content is null then
+    raise exception 'Ese capítulo ya no está en la papelera' using errcode = 'P0002';
+  end if;
+  insert into public.chapters (id, novel_id, title, position, content)
+  values (v_id, p_novel, v.title,
+          coalesce((select max(position) from public.chapters where novel_id = p_novel), 0) + 1, v.content);
+  update public.chapter_versions set chapter_id = v_id, source_chapter_id = v_id
+  where novel_id = p_novel and source_chapter_id = p_source and chapter_id is null;
+  return v_id;
 end $$;
 
 -- Usos de cada archivo. Al añadir otra tabla de uso (manuscript_images, place_images…),
@@ -750,11 +893,14 @@ begin
   select (m_mimg ->> m.id::text)::uuid, v_new, (m_asset ->> m.asset_id::text)::uuid,
     (m_chap ->> m.chapter_id::text)::uuid, m.alt, m.decorative, m.caption, m.credit, m.layout, m.align, m.width_pct
   from public.manuscript_images m where m.novel_id = p_novel;
+  -- (copying: reescribir los marcadores no es una edición del autor, no deja versión)
+  perform set_config('procesador.copying', 'on', true);
   for r in select key as old_id, value #>> '{}' as new_id from jsonb_each(m_mimg) loop
     update public.chapters
     set content = regexp_replace(content, '\[\[imagen:' || r.old_id || '\]\]', '[[imagen:' || r.new_id || ']]', 'gi')
     where novel_id = v_new and content ~* ('\[\[imagen:' || r.old_id || '\]\]');
   end loop;
+  perform set_config('procesador.copying', 'off', true);
 
   -- Lectura del Consejero: fichas, cabos y resumen global se copian (son caros de rehacer)
   -- con sus ids reasignados. Una ficha al día de la original lo está en la copia (cuya
@@ -819,7 +965,7 @@ begin
   from unnest(array['novels', 'chapters', 'characters', 'relationships', 'places', 'facts', 'fact_characters',
                     'assets', 'character_images', 'manuscript_images', 'ai_usage', 'story_threads',
                     'chapter_digests', 'novel_digests', 'advisor_conversations', 'advisor_messages',
-                    'advisor_observations']) as t
+                    'advisor_observations', 'chapter_versions']) as t
   where to_regclass('public.' || t) is null
      or not (select relrowsecurity from pg_class where oid = to_regclass('public.' || t));
   if v_missing is not null then
@@ -845,12 +991,19 @@ revoke execute on function public.finalize_asset(uuid, text, text, bigint, integ
   from public, anon, authenticated;
 revoke execute on function public.replace_asset_uses(text, uuid, uuid, boolean) from public, anon, authenticated;
 revoke execute on function public.sync_chapter_images(uuid, uuid[]) from public, anon, authenticated;
+revoke execute on function public.chapter_version_auto() from public, anon, authenticated;
+revoke execute on function public.save_chapter_version(uuid, text, text, text) from public, anon, authenticated;
+revoke execute on function public.trash_chapter(uuid) from public, anon, authenticated;
+revoke execute on function public.chapter_trash(uuid) from public, anon, authenticated;
+revoke execute on function public.restore_chapter(uuid, uuid) from public, anon, authenticated;
 grant execute on function public.word_count(text), public.library(), public.novel_outline(uuid),
   public.reorder_chapters(uuid, uuid[]), public.duplicate_novel(uuid, text),
   public.set_primary_image(uuid), public.reorder_character_images(uuid, uuid[]),
   public.asset_in_use(uuid), public.delete_unused_assets(uuid[]), public.sweep_assets(uuid),
   public.finalize_asset(uuid, text, text, bigint, integer, integer, smallint, text, text, text),
-  public.replace_asset_uses(text, uuid, uuid, boolean), public.sync_chapter_images(uuid, uuid[]) to service_role;
+  public.replace_asset_uses(text, uuid, uuid, boolean), public.sync_chapter_images(uuid, uuid[]),
+  public.save_chapter_version(uuid, text, text, text), public.trash_chapter(uuid), public.chapter_trash(uuid),
+  public.restore_chapter(uuid, uuid) to service_role;
 
 -- ---------------------------------------------------------------------------
 -- Storage: un bucket privado para todos los archivos de las novelas (docs/archivos.md).

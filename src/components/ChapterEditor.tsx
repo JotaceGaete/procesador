@@ -33,6 +33,8 @@ export interface EditorHandle {
   toggleItalic(): void;
   /** Inserts a scene break at the cursor, as its own paragraph (undoable). */
   insertSeparator(): void;
+  /** Replaces the whole text (restoring a version), undoable; the cursor goes to the start. */
+  replaceAll(text: string): void;
   /** Puts the cursor on an image's marker (shows its card). */
   selectImage(id: string): boolean;
   /**
@@ -277,6 +279,16 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
         updateSelection();
       },
       toggleItalic: italic,
+      replaceAll(text) {
+        const el = textareaRef.current;
+        if (!el) return;
+        replaceRange(0, contentRef.current.length, text, "end");
+        requestAnimationFrame(() => {
+          el.setSelectionRange(0, 0);
+          el.scrollTop = 0;
+          updateSelection();
+        });
+      },
       insertSeparator() {
         insertParagraphs(SEPARATOR, textareaRef.current?.selectionEnd ?? cursorRef.current, "end");
       },

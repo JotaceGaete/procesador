@@ -48,15 +48,10 @@ export const PATCH = handler<Ctx>(async (request, { params }) => {
   return NextResponse.json(data);
 });
 
+/** To the trash (docs/versiones.md): its text and history stay recoverable for 30 days. */
 export const DELETE = handler<Ctx>(async (_request, { params }) => {
   const chapter = await getChapter((await params).id);
-  const { count, error: countError } = await db()
-    .from("chapters")
-    .select("id", { count: "exact", head: true })
-    .eq("novel_id", chapter.novel_id);
-  if (countError) throw countError;
-  if ((count ?? 0) <= 1) throw new HttpError(400, "Una novela necesita al menos un capítulo.");
-  const { error } = await db().from("chapters").delete().eq("id", chapter.id);
+  const { error } = await db().rpc("trash_chapter", { p_chapter: chapter.id });
   if (error) throw error;
   return new NextResponse(null, { status: 204 });
 });

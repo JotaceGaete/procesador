@@ -94,8 +94,17 @@ export function useAutosave(endpoint: string, content: string, initial: { conten
     };
   }, [save]);
 
-  /** Keep our text: adopt the server's latest revision and save over it. */
+  /**
+   * Keep our text: the other tab's or device's text is kept first as a version (if that
+   * fails, nothing is overwritten), then ours is saved over the server's latest revision.
+   */
   const overwrite = useCallback(async () => {
+    try {
+      await api(`${endpoint}/versions`, { method: "POST", json: { reason: "conflict" } });
+    } catch {
+      setState("conflict");
+      return;
+    }
     const chapter = await api<{ revision: number }>(endpoint);
     revisionRef.current = chapter.revision;
     blocked.current = false;
