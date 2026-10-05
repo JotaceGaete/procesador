@@ -27,6 +27,7 @@ import AssistantPanel from "./AssistantPanel";
 import { ChapterImagesModal, ImageCard, ReadingView, type Pending } from "./ManuscriptImages";
 import { addManuscriptImage, rejectReason, replaceImage } from "@/lib/upload";
 import { imageAt, imageIds } from "@/lib/manuscript";
+import { chapterHeading } from "@/lib/presentation";
 import { resolveAnchor, type InsertTarget } from "@/lib/placement";
 
 interface Loaded {
@@ -592,6 +593,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
         {reading !== null && (
           <ReadingView
             text={reading}
+            heading={current ? chapterHeading(chapterIndex, current.title) : undefined}
             images={manuscriptImages}
             pending={pending}
             onOpen={(id) => {

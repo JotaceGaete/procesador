@@ -5,7 +5,8 @@
  * Pure: DOCX and EPUB are written from this, never from the raw text.
  */
 import { chapterLabel } from "../ai/context";
-import { MIN_PRINT_PPI, blocks, inlineSpans, printPpi, strayMarkers, type Span } from "../manuscript";
+import { MIN_PRINT_PPI, countWords, printPpi, strayMarkers, type Span } from "../manuscript";
+import { chapterHeading, present } from "../presentation";
 import { cleanBook, isbnProblem, trimOf, type BookMeta } from "../book";
 
 export interface ExportImage {
@@ -95,44 +96,35 @@ export function bookModel(src: ExportSource): BookModel {
 
   const chapters = src.chapters.map((c, i) => {
     const heading = chapterLabel(i, c.title);
-    const own = c.title.trim() && !/^cap[ií]tulo\s+\d+$/i.test(c.title.trim()) ? c.title.trim() : "";
+    const own = chapterHeading(i, c.title).title;
     const out: BookBlock[] = [];
-    let first = true;
-    for (const b of blocks(c.content)) {
-      if (b.kind === "separator") {
-        out.push({ kind: "break" });
-        first = true;
-      } else if (b.kind === "image") {
-        const image = images.get(b.id);
-        const file = image && files.get(image.asset_id);
-        if (!image || !file) {
-          checks.push({ level: "warning", message: `${heading}: una imagen ya no existe y se omite.` });
-          continue;
-        }
-        placed.add(image.id);
-        used.set(file.id, file);
-        out.push({ kind: "image", image, file });
-        if (!image.decorative && !image.alt.trim())
-          checks.push({
-            level: "warning",
-            message: `${heading}: la imagen «${file.file_name || "sin nombre"}» no tiene texto alternativo (EPUB: los lectores de pantalla no podrán describirla).`,
-          });
-        const ppi = printPpi(file.width, image.layout === "page" ? 100 : image.width_pct, textWidthCm);
-        if (ppi < MIN_PRINT_PPI)
-          checks.push({
-            level: "info",
-            message: `${heading}: la imagen «${file.file_name || "sin nombre"}» se imprimiría a ${ppi} ppp en este tamaño de página (se recomiendan ${MIN_PRINT_PPI} o más). En pantalla y en EPUB no importa.`,
-          });
-        first = true;
-      } else {
-        for (const p of b.text.split(/\n\s*\n/)) {
-          const t = p.trim();
-          if (!t) continue;
-          words += (t.match(/\S+/g) ?? []).filter((w) => !/^\*+$/.test(w)).length;
-          out.push({ kind: "para", spans: inlineSpans(t), first });
-          first = false;
-        }
+    words += countWords(c.content);
+    // Paragraphs and their indent as the book reads them (src/lib/presentation.ts), as in Lectura.
+    for (const b of present(c.content)) {
+      if (b.kind === "break" || b.kind === "para") {
+        out.push(b);
+        continue;
       }
+      const image = images.get(b.id);
+      const file = image && files.get(image.asset_id);
+      if (!image || !file) {
+        checks.push({ level: "warning", message: `${heading}: una imagen ya no existe y se omite.` });
+        continue;
+      }
+      placed.add(image.id);
+      used.set(file.id, file);
+      out.push({ kind: "image", image, file });
+      if (!image.decorative && !image.alt.trim())
+        checks.push({
+          level: "warning",
+          message: `${heading}: la imagen «${file.file_name || "sin nombre"}» no tiene texto alternativo (EPUB: los lectores de pantalla no podrán describirla).`,
+        });
+      const ppi = printPpi(file.width, image.layout === "page" ? 100 : image.width_pct, textWidthCm);
+      if (ppi < MIN_PRINT_PPI)
+        checks.push({
+          level: "info",
+          message: `${heading}: la imagen «${file.file_name || "sin nombre"}» se imprimiría a ${ppi} ppp en este tamaño de página (se recomiendan ${MIN_PRINT_PPI} o más). En pantalla y en EPUB no importa.`,
+        });
     }
     if (strayMarkers(c.content).length)
       checks.push({ level: "warning", message: `${heading}: hay un marcador de imagen dentro de un párrafo; se exporta como texto.` });

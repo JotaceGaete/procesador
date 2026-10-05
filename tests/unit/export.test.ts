@@ -72,7 +72,7 @@ test("bookModel: chapters, paragraphs, italics, images and the checks", () => {
     "a default title («Capítulo 2») isn't repeated as the chapter's own",
   );
   const kinds = m.chapters[0].blocks.map((b) => (b.kind === "para" ? `p${b.first ? "1" : ""}` : b.kind));
-  assert.deepEqual(kinds, ["p1", "p", "break", "p1", "image", "p1"], "no indent after a heading, a scene break or an image");
+  assert.deepEqual(kinds, ["p1", "p", "p", "break", "p1", "image", "p1"], "no indent after a heading, a scene break or an image; each line is a paragraph");
   const first = m.chapters[0].blocks[0];
   assert.ok(first.kind === "para" && first.spans.some((s) => s.italic && s.text === "Rayuela"));
   assert.deepEqual(m.files.map((f) => f.id).sort(), [FILE, FILE2].sort());
@@ -121,7 +121,8 @@ test("docx (libro): well-formed parts, the trim size, mirrored margins, sections
   assert.match(doc, /ISBN: 978-84-376-0494-7/);
   assert.match(doc, /<w:i\/><\/w:rPr><w:t xml:space="preserve">Rayuela<\/w:t>/);
   assert.match(doc, /de un tirón &amp; sin &lt;prisa&gt;\./);
-  assert.match(doc, /<w:br\/><w:t xml:space="preserve">con un salto de línea\.<\/w:t>/);
+  assert.match(doc, /<w:pStyle w:val="Body"\/><\/w:pPr><w:r><w:t xml:space="preserve">con un salto de línea\.<\/w:t>/, "a line of its own is a paragraph");
+  assert.doesNotMatch(doc.slice(doc.indexOf("Capítulo 1")), /<w:br\/>/, "no line breaks in the chapters");
   assert.match(doc, /\* \* \*/);
   assert.equal(doc.match(/<wp:inline /g)?.length, 2);
   assert.match(doc, /descr="El puerto al amanecer"/);
@@ -181,7 +182,7 @@ test("epub: package, metadata, cover, navigation and accessible figures", () => 
   ]);
   const ch1 = text(files, "OEBPS/chapter-001.xhtml");
   assert.match(ch1, /<em>Rayuela<\/em> de un tirón &amp; sin &lt;prisa&gt;\./);
-  assert.match(ch1, /Segundo párrafo,<br\/>con un salto de línea\./);
+  assert.match(ch1, /<p>Segundo párrafo,<\/p>\n<p>con un salto de línea\.<\/p>/);
   assert.match(ch1, /<img src="images\/image1\.png" alt="El puerto al amanecer"\/><figcaption>El puerto<span class="credit">Foto: Archivo<\/span><\/figcaption>/);
   assert.match(ch1, /role="separator"/);
   assert.match(text(files, "OEBPS/chapter-002.xhtml"), /<figure class="page align-center"/);

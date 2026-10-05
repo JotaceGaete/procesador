@@ -172,3 +172,73 @@ test("teléfono: Cursiva and Separador are in the bar and work by touch", async 
   assert.equal(await editor.inputValue(), `Hola *mundo*.\n\n${SEP}`);
   await ctx.close();
 });
+
+// Lectura as a novel's page (src/lib/presentation.ts): the text as a real chapter is typed,
+// with dialogue on lines of its own, some paragraphs separated by blank lines and some not.
+const CHAPTER = [
+  "Llegó al puerto cuando ya no quedaba nadie. El viento traía olor a sal y a gasoil.",
+  "—¿Dónde estabas? —preguntó Elena.",
+  "",
+  "—En el muelle —dijo él—. Esperando.",
+  "",
+  "",
+  "Ella no contestó. Miró *el agua* un largo rato.",
+  "",
+  SEP,
+  "",
+  "A la mañana siguiente el barco ya no estaba.",
+  "Nadie supo decir a qué hora había salido.",
+].join("\n");
+
+for (const device of [
+  { name: "escritorio", context: { viewport: { width: 1280, height: 900 } } },
+  { name: "teléfono", context: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 } },
+]) {
+  test(`Lectura (${device.name}): paragraphs without space between them, indented but after a heading or a break, deliberate scene break`, async () => {
+    await call(`/api/chapters/${chapterId}`, "PATCH", { title: "El muelle" });
+    await setText(CHAPTER);
+    const { ctx, page } = await open(device.context);
+    await page.getByRole("button", { name: "Lectura", exact: true }).click();
+    const reading = page.locator("article.reading");
+    await reading.waitFor();
+
+    assert.equal(await reading.locator(".reading-number").innerText(), "CAPÍTULO 1");
+    assert.equal(await reading.locator("h2").innerText(), "El muelle");
+    const paras = await reading.locator("p").evaluateAll((ps) =>
+      ps.map((p) => {
+        const cs = getComputedStyle(p);
+        return { text: p.textContent, indent: parseFloat(cs.textIndent), before: parseFloat(cs.marginTop), after: parseFloat(cs.marginBottom), top: p.getBoundingClientRect().top, height: p.getBoundingClientRect().height, line: parseFloat(cs.lineHeight), size: parseFloat(cs.fontSize) };
+      }),
+    );
+    assert.deepEqual(
+      paras.map((p) => p.text),
+      [
+        "Llegó al puerto cuando ya no quedaba nadie. El viento traía olor a sal y a gasoil.",
+        "—¿Dónde estabas? —preguntó Elena.",
+        "—En el muelle —dijo él—. Esperando.",
+        "Ella no contestó. Miró el agua un largo rato.",
+        "A la mañana siguiente el barco ya no estaba.",
+        "Nadie supo decir a qué hora había salido.",
+      ],
+      "one paragraph per line, blank lines or not",
+    );
+    assert.deepEqual(paras.map((p) => p.indent > 0), [false, true, true, true, false, true], "no indent after the heading or the break");
+    for (const p of paras) {
+      assert.equal(p.before + p.after, 0, `no space around «${p.text}»`);
+      assert.ok(p.line / p.size >= 1.45 && p.line / p.size <= 1.7, `comfortable leading: ${p.line / p.size}`);
+    }
+    // Consecutive paragraphs (dialogue included) touch: the next one starts where this one ends.
+    for (const i of [0, 1, 2, 4]) assert.ok(Math.abs(paras[i + 1].top - (paras[i].top + paras[i].height)) < 1, `paragraph ${i} → ${i + 1}`);
+    // The scene break opens real space, and shows.
+    const gap = paras[4].top - (paras[3].top + paras[3].height);
+    assert.ok(gap > paras[3].line * 2, `scene break space: ${gap}px`);
+    assert.equal(await reading.locator("hr.scene-break").count(), 1);
+    assert.match(await reading.locator("hr.scene-break").evaluate((el) => getComputedStyle(el, "::after").content), /\* \* \*/);
+    // A comfortable measure: about 65 characters, never wider than the screen.
+    const width = await reading.locator("p").first().evaluate((p) => p.getBoundingClientRect().width / parseFloat(getComputedStyle(p).fontSize));
+    assert.ok(width <= 35, `column of ${width.toFixed(1)}em`);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+    if (process.env.E2E_SHOTS) await reading.screenshot({ path: `${process.env.E2E_SHOTS}/lectura-${device.name}.png` });
+    await ctx.close();
+  });
+}

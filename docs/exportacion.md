@@ -40,8 +40,10 @@ cada capítulo, leído de nuevo al pulsar el botón.
 
 Comunes a los tres:
 
-- **Cursivas** como cursiva real (`*así*` → `<w:i/>` / `<em>`); los saltos de línea dentro de un
-  párrafo se conservan (y en DOCX no estiran la línea justificada anterior).
+- **Párrafos** como en *Lectura* ([presentación](formato-texto.md#presentación-el-texto-guardado-y-el-libro)):
+  una línea con texto es un párrafo, haya o no líneas en blanco entre ellos, sin espacio entre
+  párrafos y con sangría salvo el primero tras un título, un separador o una imagen.
+- **Cursivas** como cursiva real (`*así*` → `<w:i/>` / `<em>`).
 - **Imágenes** con su tamaño respecto de la caja de texto (`width_pct`), alineación, pie y crédito;
   las de página completa en su propia página. Texto alternativo en DOCX (`descr`) y en EPUB
   (`alt`; las decorativas, `alt=""` y `role="presentation"`). Sólo las colocadas en el texto.

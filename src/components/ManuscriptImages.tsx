@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { CharacterImage, ManuscriptImage } from "@/lib/types";
 import { ORIGINAL_TYPES, assetUrl } from "@/lib/images";
-import { MIN_PRINT_PPI, REFERENCE_TEXT_WIDTH_CM, TARGET_PRINT_PPI, blocks, imageIds, inlineSpans, pixelsFor, printPpi, strayMarkers } from "@/lib/manuscript";
+import { MIN_PRINT_PPI, REFERENCE_TEXT_WIDTH_CM, TARGET_PRINT_PPI, imageIds, pixelsFor, printPpi, strayMarkers } from "@/lib/manuscript";
+import { present } from "@/lib/presentation";
 import type { UploadStage } from "@/lib/upload";
 import Modal from "./Modal";
 
@@ -441,17 +442,21 @@ export function ChapterImagesModal({
 }
 
 /**
- * The chapter as it will read: paragraphs with their italics, scene breaks, and images with
- * their caption, credit, layout, alignment and width. Uses the interface's display copy; the
- * book will use the original.
+ * The chapter as it will read: the paragraphs as a printed novel sets them (src/lib/presentation.ts:
+ * one per line, indented, none after the heading, a scene break or an image, no space between
+ * them), its italics, scene breaks with their own space, and images with their caption, credit,
+ * layout, alignment and width. Uses the interface's display copy; the book will use the original.
  */
 export function ReadingView({
   text,
+  heading,
   images,
   pending,
   onOpen,
 }: {
   text: string;
+  /** The chapter's number and own title, as the book opens it. */
+  heading?: { number: string; title: string };
   images: ManuscriptImage[];
   pending: Pending;
   onOpen(id: string): void;
@@ -459,18 +464,21 @@ export function ReadingView({
   const byId = new Map(images.map((i) => [i.id, i]));
   return (
     <article className="reading" aria-label="Vista de lectura">
-      {blocks(text).map((b, n) => {
-        if (b.kind === "text") {
-          return b.text
-            .split(/\n\s*\n/)
-            .filter((p) => p.trim())
-            .map((p, k) => (
-              <p key={`${n}-${k}`}>
-                {inlineSpans(p.trim()).map((s, j) => (s.italic ? <em key={j}>{s.text}</em> : s.text))}
-              </p>
-            ));
+      {heading && (
+        <header className="reading-chapter">
+          <div className="reading-number">{heading.number}</div>
+          {heading.title && <h2>{heading.title}</h2>}
+        </header>
+      )}
+      {present(text).map((b, n) => {
+        if (b.kind === "para") {
+          return (
+            <p key={n} className={b.first ? "first" : undefined}>
+              {b.spans.map((s, j) => (s.italic ? <em key={j}>{s.text}</em> : s.text))}
+            </p>
+          );
         }
-        if (b.kind === "separator") return <hr key={n} className="scene-break" aria-label="Cambio de escena" />;
+        if (b.kind === "break") return <hr key={n} className="scene-break" aria-label="Cambio de escena" />;
         const img = byId.get(b.id);
         if (!img) {
           return (
