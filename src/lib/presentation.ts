@@ -6,6 +6,8 @@
  *   - Every line with text is a paragraph. Whether the author pressed Enter once or left a
  *     blank line between paragraphs (or dialogue lines) is only how the text is typed: blank
  *     lines never become vertical space.
+ *   - A line with nothing visible (only spaces, or invisible characters left by pasting) is a
+ *     blank line too.
  *   - Spaces or tabs at the start of a line are dropped: the indent is the book's, not typed.
  *   - A scene break is a block of its own, with deliberate space and an ornament.
  *   - The first paragraph of the chapter, and the first after a scene break or an image, goes
@@ -20,12 +22,21 @@ export type PresentedBlock =
   | { kind: "break" }
   | { kind: "image"; id: string };
 
-/** The paragraphs of a run of text: one per line with text, trimmed. */
+/**
+ * Nothing to see: whitespace and invisible characters (Unicode Cf: zero-width space, joiners,
+ * BOM, soft hyphen, direction marks; and the blank fillers). Text pasted from Word, Google Docs
+ * or the web often leaves lines made only of these: they are blank lines, never a paragraph
+ * (an empty paragraph would show as a whole empty line).
+ */
+const INVISIBLE = /^[\s\p{Cf}\u115F\u1160\u2800\u3164\uFFA0]*$/u;
+export const isBlankLine = (line: string) => INVISIBLE.test(line);
+
+/** The paragraphs of a run of text: one per line with something visible, trimmed. */
 export function paragraphs(text: string): string[] {
   return text
     .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
+    .filter((l) => !isBlankLine(l))
+    .map((l) => l.trim());
 }
 
 export function present(content: string): PresentedBlock[] {

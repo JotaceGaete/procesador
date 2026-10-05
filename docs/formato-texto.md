@@ -57,12 +57,19 @@ El texto nunca se modifica para conseguirla.
 | Una línea con texto | Un párrafo. Los diálogos son párrafos normales. |
 | Párrafos separados por un Enter, por una línea en blanco o por varias | Lo mismo: párrafos seguidos, **sin espacio entre ellos**. Las líneas en blanco son sólo la forma de teclear. |
 | Espacios o tabuladores al empezar una línea | Se descartan: la sangría la pone la maqueta. |
+| Una línea que parece vacía pero tiene caracteres invisibles (espacio de ancho cero, BOM, guion blando, marcas de dirección; suelen venir al pegar de Word, Google Docs o la web) | Es una línea en blanco: nunca un párrafo vacío (que se vería como una línea entera de hueco). Dentro de un párrafo el texto queda tal cual. |
 | Primer párrafo del capítulo, o tras un separador o una imagen | Sin sangría. Los demás, con sangría de primera línea (1,5 em en pantalla). |
 | `[[separador]]` | Espacio deliberado antes y después (≈ una línea en blanco a cada lado) y `* * *` centrado. |
 
 *Lectura* muestra además el arranque del capítulo como en el libro («CAPÍTULO 3» y el título
 propio del autor; el título por defecto «Capítulo 3» no se repite), en una columna de unos 65
 caracteres (34 em) con interlineado 1,6, sin márgenes entre párrafos.
+
+Criterio comprobado en Chromium (`tests/e2e/format.test.mjs`): entre la última línea de un
+párrafo y la primera del siguiente hay exactamente un interlineado, igual que entre dos líneas
+del mismo párrafo (narración → narración, narración → diálogo, diálogo → diálogo, diálogo →
+narración), escriba el autor uno o dos Enter; sólo `[[separador]]` abre espacio (más de 2,5
+líneas, con el ornamento en medio).
 
 Consecuencia: un salto de línea **dentro** de un párrafo (versos, una carta con líneas cortas)
 se presenta como párrafos distintos. Si hace falta, se añadirá un marcado propio para ello

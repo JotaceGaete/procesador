@@ -36,3 +36,13 @@ test("paragraphs and chapterHeading", () => {
   assert.deepEqual(chapterHeading(2, "Capítulo 3"), { number: "Capítulo 3", title: "" });
   assert.deepEqual(chapterHeading(0, " La llegada "), { number: "Capítulo 1", title: "La llegada" });
 });
+
+test("present: lines with nothing visible (pasted invisible characters) are blank lines, never an empty paragraph", () => {
+  const invisible = ["​", "⁠‌", "﻿", "­", "‎", "  \t", "ㅤ"];
+  for (const line of invisible) {
+    assert.deepEqual(shape(`—Siempre dices lo mismo —dije.\n${line}\nLorena me miró de costado.`), ["¶0 —Siempre dices lo mismo —dije.", "¶ Lorena me miró de costado."], JSON.stringify(line));
+  }
+  assert.deepEqual(shape("Uno.\r\n\r\nDos.\r\n"), ["¶0 Uno.", "¶ Dos."], "Windows line endings");
+  assert.deepEqual(shape("​\n\n[[separador]]\n​\nTras."), ["break", "¶0 Tras."]);
+  assert.deepEqual(shape("Con​unión."), ["¶0 Con​unión."], "inside a paragraph the text is left as it is");
+});
