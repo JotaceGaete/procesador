@@ -307,11 +307,22 @@ export interface Usage {
 
 export type SceneLength = "breve" | "media" | "larga" | "libre";
 
-export const SCENE_LENGTHS: { id: SceneLength; label: string; words: number | null }[] = [
-  { id: "breve", label: "Breve", words: 400 },
-  { id: "media", label: "Media", words: 900 },
-  { id: "larga", label: "Larga", words: 1800 },
-  { id: "libre", label: "Libre", words: null },
+/**
+ * `words` is the reference shown in the panel; `range` what the model is asked for (a target,
+ * not a quota); `warnBelow` the fraction of `words` under which the panel says the scene came
+ * out short and offers "Ampliar" (only where a short scene is a real problem).
+ */
+export const SCENE_LENGTHS: {
+  id: SceneLength;
+  label: string;
+  words: number | null;
+  range: [number, number] | null;
+  warnBelow: number | null;
+}[] = [
+  { id: "breve", label: "Breve", words: 400, range: [300, 500], warnBelow: null },
+  { id: "media", label: "Media", words: 900, range: [800, 1000], warnBelow: 0.6 },
+  { id: "larga", label: "Larga", words: 1800, range: [1500, 2100], warnBelow: 0.6 },
+  { id: "libre", label: "Libre", words: null, range: null, warnBelow: null },
 ];
 
 export type ProviderId = "anthropic" | "openai" | "xai";

@@ -5,3 +5,8 @@ export function formatTokens(n: number) {
 export function formatUsd(n: number) {
   return `US$ ${n.toLocaleString("es", { minimumFractionDigits: n < 0.01 ? 4 : 2, maximumFractionDigits: n < 0.01 ? 4 : 2 })}`;
 }
+
+/** "1.800", "12.345": thousands grouped (toLocaleString("es") leaves four digits ungrouped). */
+export function formatCount(n: number) {
+  return String(Math.round(n)).replace(/\B(?=(\d{3})+$)/g, ".");
+}

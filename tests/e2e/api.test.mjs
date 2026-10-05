@@ -325,7 +325,7 @@ test("Desarrollar escena (Claude): WRITE instructions, guide, relevant memory, a
   assert.ok(!system.includes("Ardió la bodega"), "other chapters' text not sent by default");
   const prompt = sent.messages[0].content;
   assert.ok(prompt.includes("<argumento>") && prompt.includes("Elena no dormía."));
-  assert.match(prompt, /400 palabras/);
+  assert.match(prompt, /alrededor de 300–500 palabras/);
 });
 
 // ---------------------------------------------------------------- editing with the other providers

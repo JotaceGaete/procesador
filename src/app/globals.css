@@ -634,6 +634,13 @@ input:focus,
 .context-view > p {
   margin: 6px 0 0;
 }
+/* A scene well below the length asked: said, not flagged as an error. */
+.length-note {
+  margin: 8px 0 0;
+}
+.length-note .link {
+  font-size: inherit;
+}
 .retry-with {
   margin: 10px 0 0;
 }

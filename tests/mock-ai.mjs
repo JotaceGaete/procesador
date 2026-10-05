@@ -6,6 +6,12 @@
 // prompt makes the provider decline.
 
 const SCENE = "<escena>Juan dejó las llaves sobre la mesa. Elena no levantó la vista.\n\n—¿Café? —dijo él.</escena>";
+// A developed scene (~700 words, with dialogue): asked to widen a draft (<borrador>), or
+// "ESCENA-LARGA" in the argument. Any other scene request gets the short SCENE.
+const LONG_SCENE = (tag) =>
+  `<escena>${tag}. ${Array.from({ length: 45 }, (_, i) => `Juan cruzó la cocina despacio, paso ${i + 1}, sin mirarla.\n\n—¿Vas a seguir callada? —preguntó él.`).join("\n\n")}</escena>`;
+const sceneReply = (prompt) =>
+  prompt.includes("<borrador>") ? LONG_SCENE("ESCENA-AMPLIADA") : prompt.includes("ESCENA-LARGA") ? LONG_SCENE("ESCENA-DESARROLLADA") : SCENE;
 const EDIT = "Bien el ritmo.\n\n<reescritura>Texto propuesto por el modelo.</reescritura>";
 // "MANTEN-IMAGENES" in a request: a rewrite that keeps (and reorders) the image placeholders.
 const EDIT_KEEP = "Bien.\n\n<reescritura>Primero la imagen.\n\n[IMAGEN 1]\n\nY el texto reescrito.</reescritura>";
@@ -132,7 +138,7 @@ export function handleAI(req, res, body, log) {
     const text =
       readingReply((json.system ?? []).map?.((b) => b.text).join("\n") ?? String(json.system ?? ""), json.messages?.[0]?.content ?? "") ??
       adviceReply((json.system ?? []).map?.((b) => b.text).join("\n") ?? "", json.messages?.[0]?.content ?? "") ??
-      (system.includes("<escena>") ? SCENE : body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : EDIT);
+      (system.includes("<escena>") ? sceneReply(String(json.messages?.[0]?.content ?? "")) : body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : EDIT);
     sse(res, [
       [
         "message_start",
@@ -173,7 +179,7 @@ export function handleAI(req, res, body, log) {
     const text =
       readingReply(instructions, String(json.input ?? "")) ??
       adviceReply(instructions, String(json.input ?? "")) ??
-      (instructions.includes("<escena>") ? SCENE : body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : EDIT);
+      (instructions.includes("<escena>") ? sceneReply(String(json.input ?? "")) : body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : EDIT);
     const half = Math.floor(text.length / 2);
     let n = 0;
     const refuse = instructions.includes("REFUSE-ME");
@@ -243,7 +249,7 @@ export function handleAI(req, res, body, log) {
   res.writeHead(200, { "content-type": "text/event-stream" });
   const finish = system.includes("REFUSE-ME") ? "content_filter" : "stop";
   res.write(
-    `data: ${JSON.stringify({ choices: [{ delta: { content: readingReply(system, json.messages?.[1]?.content ?? "") ?? adviceReply(system, json.messages?.[1]?.content ?? "") ?? (system.includes("<escena>") ? SCENE : EDIT) }, finish_reason: finish }] })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ delta: { content: readingReply(system, json.messages?.[1]?.content ?? "") ?? adviceReply(system, json.messages?.[1]?.content ?? "") ?? (system.includes("<escena>") ? sceneReply(json.messages?.[1]?.content ?? "") : EDIT) }, finish_reason: finish }] })}\n\n`,
   );
   res.write(
     `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 1200, completion_tokens: 30, prompt_tokens_details: { cached_tokens: 1000 } } })}\n\n`,

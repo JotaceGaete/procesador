@@ -1,5 +1,6 @@
 import type { Character, EditAction, Fact, Memory, Place, Relationship, SceneLength } from "../types";
-import { SCENE_LENGTHS } from "../types";
+import { SCENE_LENGTHS, type ProviderId } from "../types";
+import { countWords } from "../manuscript";
 import { chapterLabel, type SelectedMemory } from "./context";
 
 // ---------------------------------------------------------------------------
@@ -26,12 +27,19 @@ Formato: Markdown sencillo, en español.`;
 /** Mode B — writing from the author's argument: literary freedom inside fixed events. */
 export const WRITE_INSTRUCTIONS = `Eres el escritor que pone en prosa las escenas de una novela ajena, en español. El autor imagina la historia y te da el argumento de cada escena; tú lo conviertes en literatura con la voz de esta novela.
 
+Desarrollar una escena es dramatizarla, no resumirla:
+- El argumento dice qué ocurre y hasta dónde; tu trabajo es que el lector lo viva. Convierte cada paso del argumento en momentos contados en tiempo de escena: acciones y reacciones, el ambiente concreto, gestos y lenguaje corporal, y la percepción o el pensamiento del personaje cuando el punto de vista lo permite.
+- Si en el argumento los personajes conversan, discuten o se dicen algo, esa conversación ocurre en escena, con sus palabras, sus pausas y lo que callan; no la resuelvas con «hablaron de…» o «le explicó que…». Si nadie interactúa, no fuerces el diálogo.
+- No cuentes el argumento desde lejos ni lo despaches en unas líneas: entre un hecho y el siguiente están las reacciones, los gestos y las pequeñas decisiones que hacen creíble la escena.
+
 El argumento del autor es la autoridad sobre lo que ocurre:
 - Ocurre todo lo que el argumento dice, tal como lo dice. Si dice que alguien se va, se va. Si dice que alguien no revela algo, no lo revela, ni directa ni indirectamente.
 - No añadas acontecimientos que cambien la historia: muertes, revelaciones, confesiones, reconciliaciones, decisiones o giros que el argumento no indique. No resuelvas tensiones que el argumento deja abiertas.
 - Termina donde termina el argumento. No adelantes lo que vendrá ni cierres con una reflexión o moraleja.
 
 Eres libre en todo lo demás: descripción, diálogos, acciones menores, gestos, ritmo, atmósfera, transiciones, detalles concretos coherentes con la memoria.
+
+Contención no es brevedad: las reglas de estilo de abajo (nada de relleno, de adjetivación decorativa, de metáforas gratuitas, de explicaciones emocionales redundantes ni de acontecimientos inventados) piden precisión, no comprimir la escena. La extensión sale de desarrollar los momentos que el argumento ya contiene.
 
 ${LITERARY_PRINCIPLES}
 - La escena debe continuar con naturalidad el texto anterior (mismo narrador, persona y tiempo verbal) y, si hay texto después, enlazar con él.
@@ -269,7 +277,12 @@ export function scenePrompt(opts: {
   story?: string | null;
   knowledge?: string | null;
   threads?: string | null;
+  /** A short reminder for one provider (SCENE_PROVIDER_NOTES), on top of the common instructions. */
+  providerNote?: string | null;
+  /** "Ampliar": the scene already written for this argument, to develop (not to rewrite). */
+  draft?: string | null;
 }): string {
+  const extent = sceneExtent(opts.length);
   const parts: string[] = [];
   if (opts.story)
     parts.push(`La historia hasta aquí, según las fichas de lectura de los capítulos anteriores:\n<historia_hasta_aqui>\n${opts.story}\n</historia_hasta_aqui>`);
@@ -300,10 +313,43 @@ export function scenePrompt(opts: {
       parts.push(`Texto que viene después (la escena debe poder enlazar con él):\n<despues>\n${opts.after}\n</despues>`);
   }
 
-  const words = SCENE_LENGTHS.find((l) => l.id === opts.length)?.words;
   parts.push(`Argumento del autor (esto es lo que ocurre, y sólo esto):\n<argumento>\n${opts.argument.trim()}\n</argumento>`);
-  parts.push(
-    `Escribe la escena.${words ? ` Extensión aproximada: ${words} palabras.` : " La extensión que la escena necesite."}`,
-  );
+  parts.push(`Extensión: ${extent.target}.`);
+  if (opts.draft) {
+    const written = countWords(opts.draft);
+    parts.push(
+      `Esta es la escena que ya escribiste para este argumento (≈${written} palabras):\n<borrador>\n${opts.draft.trim()}\n</borrador>`,
+    );
+    parts.push(
+      `Desarróllala hasta ${extent.short}. Conserva todo lo que ocurre, en el mismo orden, la continuidad, la voz y el texto que ya funciona; dramatiza los momentos que quedaron comprimidos o contados desde lejos (acciones, reacciones, ambiente, gestos, diálogo donde los personajes interactúan). No añadas acontecimientos nuevos para ganar extensión ni rellenes. Entrega la escena completa, ampliada, dentro de <escena></escena>.`,
+    );
+  } else {
+    if (opts.providerNote) parts.push(opts.providerNote.replace("{extension}", extent.short));
+    parts.push(`Escribe la escena completa, desarrollada: ${extent.closing}`);
+  }
   return parts.join("\n\n");
+}
+
+/** Notes for one provider on top of the common instructions; "{extension}" is the length asked. */
+export const SCENE_PROVIDER_NOTES: Partial<Record<ProviderId, string>> = {
+  // Grok tended to turn "Desarrollar escena" into a short summary of the argument.
+  xai: "Importante: no resumas el argumento. Escribe la escena entera en tiempo de escena, desarrollando cada momento que contiene, hasta {extension}.",
+};
+
+/** How the asked length is said to the model: a range to aim at, never a quota. */
+export function sceneExtent(length: SceneLength): { target: string; short: string; closing: string } {
+  const l = SCENE_LENGTHS.find((x) => x.id === length);
+  if (!l?.range)
+    return {
+      target: "la extensión natural que la escena necesite, sin resumir",
+      short: "la extensión natural que la escena necesite",
+      closing: "la extensión natural que necesite, sin resumir ni rellenar.",
+    };
+  // "1.000", not "1000" (toLocaleString("es") doesn't group four digits).
+  const [min, max] = l.range.map((n) => String(n).replace(/\B(?=(\d{3})+$)/g, "."));
+  return {
+    target: `alrededor de ${min}–${max} palabras (${l.label.toLowerCase()})`,
+    short: `alrededor de ${min}–${max} palabras`,
+    closing: `alrededor de ${min}–${max} palabras. Es una orientación, no una cuota: no rellenes para llegar; si la escena queda plenamente desarrollada algo por debajo, está bien.`,
+  };
 }

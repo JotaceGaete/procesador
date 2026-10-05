@@ -45,7 +45,7 @@ test("scene prompt: argument, chapter, surrounding text and length", () => {
   assert.ok(p.includes("<argumento>\nJuan se va.\n</argumento>"));
   assert.ok(p.includes("<capitulo_anterior>\nFIN CAP 1"));
   assert.ok(p.includes("<antes>\nANTES") && p.includes("<despues>\nDESPUES"));
-  assert.match(p, /400 palabras/);
+  assert.match(p, /alrededor de 300–500 palabras/);
   assert.match(
     scenePrompt({ argument: "x", length: "libre", chapter: "C", previousChapterTail: null, before: "", after: "" }),
     /principio del capítulo/,

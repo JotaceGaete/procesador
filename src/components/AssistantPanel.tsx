@@ -21,13 +21,13 @@ import {
 import { estimateTokens } from "@/lib/ai/context";
 import { readPref, writePref } from "@/lib/client";
 import { BUILD, diagEnabled } from "@/lib/diag";
-import { appendImages, protectImages, restoreImages } from "@/lib/manuscript";
+import { appendImages, countWords, protectImages, restoreImages } from "@/lib/manuscript";
 import type { Selection } from "./ChapterEditor";
 import AdvisorOverview from "./AdvisorOverview";
 import AdvisorReading from "./AdvisorReading";
 import AdvisorConsult from "./AdvisorConsult";
 import AdvisorSaved from "./AdvisorSaved";
-import { formatTokens } from "./format";
+import { formatCount, formatTokens } from "./format";
 import UsageLine from "./UsageLine";
 import ContextView from "./ContextView";
 
@@ -483,6 +483,20 @@ function AssistantPanel(props: Props) {
   const showResult = !overview && last && (output || runningHere || notice);
   const parsed = last ? parse(output, last.mode) : null;
   const others = providers.filter((p) => p !== last?.provider);
+  // A finished scene well below the length asked (Media, Larga): said discreetly, with "Ampliar".
+  // Never automatic: widening is another request, only when the author asks for it.
+  const asked = last?.mode === "scene" ? SCENE_LENGTHS.find((l) => l.id === last.body.length) : undefined;
+  const sceneWords = parsed?.proposal && last?.mode === "scene" ? countWords(parsed.proposal) : 0;
+  const short =
+    !runningHere &&
+    !notice &&
+    asked?.words &&
+    asked.warnBelow &&
+    parsed?.proposal &&
+    (parsed.complete || parsed.untagged) &&
+    sceneWords < asked.words * asked.warnBelow
+      ? { words: sceneWords, asked: asked.words }
+      : null;
   const req = buildRequest();
   const canRun = Boolean(req && provider && !running && (mode === "scene" || current.character !== "required" || character));
   const manuscriptTokens = estimateTokens(novelChars);
@@ -844,6 +858,18 @@ function AssistantPanel(props: Props) {
             </div>
           )}
 
+          {short && (
+            <p className="length-note muted small">
+              ≈{formatCount(short.words)} palabras de ~{formatCount(short.asked)} solicitadas ·{" "}
+              <button
+                className="link small"
+                title="Desarrolla los momentos que quedaron comprimidos, sin añadir acontecimientos"
+                onClick={() => run({ ...last, body: { ...last.body, expand: parsed.proposal } }, last.provider)}
+              >
+                Ampliar
+              </button>
+            </p>
+          )}
           {notice && <p className={`notice ${notice.kind}`}>{notice.message}</p>}
           {!runningHere && (readParts || usage) && <UsageLine parts={readParts} usage={usage} />}
 

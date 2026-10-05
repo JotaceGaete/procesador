@@ -17,7 +17,14 @@ import {
   type Manuscript,
   type SelectedMemory,
 } from "@/lib/ai/context";
-import { EDIT_INSTRUCTIONS, WRITE_INSTRUCTIONS, editPrompt, memoryBlock, scenePrompt } from "@/lib/ai/prompts";
+import {
+  EDIT_INSTRUCTIONS,
+  SCENE_PROVIDER_NOTES,
+  WRITE_INSTRUCTIONS,
+  editPrompt,
+  memoryBlock,
+  scenePrompt,
+} from "@/lib/ai/prompts";
 import { getProvider, type CompletionRequest } from "@/lib/ai/providers";
 import {
   guideSection,
@@ -149,6 +156,9 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
     const before = await plain(content.slice(near.start, cursor));
     const after = await plain(content.slice(cursor, near.end));
     const length = (SCENE_LENGTHS.some((l) => l.id === body.length) ? body.length : "media") as SceneLength;
+    // "Ampliar": the scene the model already wrote, to develop with the same context.
+    const draft = typeof body.expand === "string" && body.expand.trim() ? body.expand : null;
+    if (draft && draft.length > MAX_SELECTION_CHARS) throw new HttpError(400, "La escena es demasiado larga para ampliarla.");
 
     // The Consejero's reading of the novel, as far as this point (docs/asistente-contexto.md).
     const [rows, digests, threads, global] = await Promise.all([
@@ -291,6 +301,8 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
         story: story.story,
         knowledge: story.knowledge,
         threads: story.threads,
+        providerNote: SCENE_PROVIDER_NOTES[body.provider as ProviderId] ?? null,
+        draft,
       }),
       signal,
       role: "write",
