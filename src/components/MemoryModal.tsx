@@ -15,6 +15,7 @@ import {
 } from "@/lib/types";
 import { api } from "@/lib/client";
 import { chapterLabel } from "@/lib/ai/context";
+import { COMMON_RELATIONS, resolveRelation, usedRelations } from "@/lib/relations";
 import Modal from "./Modal";
 import { CharacterTimeEditor } from "./Chronology";
 import type { AgeAnchor, StoryDate } from "@/lib/chronology";
@@ -59,24 +60,6 @@ const TABS: { id: MemoryKind; label: string; create: string; empty: string }[] =
   },
 ];
 
-const RELATION_SUGGESTIONS = [
-  "hermano de",
-  "hermana de",
-  "padre de",
-  "madre de",
-  "hijo de",
-  "hija de",
-  "pareja de",
-  "amante de",
-  "ex pareja de",
-  "amigo de",
-  "enemigo de",
-  "desconfía de",
-  "le debe a",
-  "trabaja para",
-  "le teme a",
-  "está enamorado de",
-];
 
 type Draft = Record<string, unknown>;
 
@@ -118,9 +101,14 @@ export default function MemoryModal({
     setBusy(true);
     setError("");
     try {
+      // Relaciones personalizadas: the form already used in the novel, never a trivial duplicate.
+      const draft =
+        tab === "relationships"
+          ? { ...editing.draft, kind: resolveRelation(String(editing.draft.kind), memory.relationships, editing.id).kind }
+          : editing.draft;
       const saved = editing.id
-        ? await api<never>(`/api/memory/${tab}/${editing.id}`, { method: "PATCH", json: editing.draft })
-        : await api<never>(`/api/novels/${novelId}/memory/${tab}`, { method: "POST", json: editing.draft });
+        ? await api<never>(`/api/memory/${tab}/${editing.id}`, { method: "PATCH", json: draft })
+        : await api<never>(`/api/novels/${novelId}/memory/${tab}`, { method: "POST", json: draft });
       const list = memory[tab] as { id: string }[];
       const next = editing.id ? list.map((x) => (x.id === editing.id ? saved : x)) : [...list, saved];
       onChange({ ...memory, [tab]: next });
@@ -308,20 +296,13 @@ export default function MemoryModal({
                     </option>
                   ))}
                 </select>
-                <input
+                <RelationKind
                   value={String(d.kind)}
-                  list="relation-kinds"
-                  placeholder="hermano de, desconfía de…"
-                  onChange={(e) => set("kind", e.target.value)}
-                  required
-                  autoFocus
-                  aria-label="Relación"
+                  original={editing.id ? String(JSON.parse(editing.original).kind ?? "") : ""}
+                  relationships={memory.relationships}
+                  editingId={editing.id}
+                  onChange={(v) => set("kind", v)}
                 />
-                <datalist id="relation-kinds">
-                  {RELATION_SUGGESTIONS.map((o) => (
-                    <option key={o} value={o} />
-                  ))}
-                </datalist>
                 <select value={String(d.to_id)} onChange={(e) => set("to_id", e.target.value)} aria-label="Con">
                   {memory.characters.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -537,6 +518,102 @@ function Field(props: {
         />
       )}
     </label>
+  );
+}
+
+const CUSTOM = "__nueva-relacion__";
+
+/**
+ * The kind of a relationship (docs/relaciones.md): the common ones, the ones already used in this
+ * novel, or «+ Crear relación personalizada» to write any other. What the author writes is kept
+ * as written; if the novel (or the common list) already has it with other case, spacing or
+ * accents, that form is used and the form says so.
+ */
+function RelationKind({
+  value,
+  original,
+  relationships,
+  editingId,
+  onChange,
+}: {
+  value: string;
+  original: string;
+  relationships: Relationship[];
+  editingId: string | null;
+  onChange(v: string): void;
+}) {
+  const used = usedRelations(relationships, editingId);
+  const options = [...COMMON_RELATIONS, ...used];
+  // The relationship's own kind, exactly as stored, is always there to keep (old data may have
+  // a variant of another form): editing never changes it behind the author's back.
+  const own = original && !options.includes(original) ? original : "";
+  const listed = (v: string) => options.includes(v) || (!!own && v === own);
+  const [custom, setCustom] = useState(() => !!value && !listed(value));
+  const resolved = custom ? resolveRelation(value, relationships, editingId) : null;
+  const known = resolved?.reused ?? null;
+  const selectValue = custom ? CUSTOM : value;
+  return (
+    <span className="relation-kind">
+      <select
+        value={selectValue}
+        onChange={(e) => {
+          if (e.target.value === CUSTOM) {
+            setCustom(true);
+            onChange("");
+          } else {
+            setCustom(false);
+            onChange(e.target.value);
+          }
+        }}
+        required
+        autoFocus={!custom}
+        aria-label="Relación"
+      >
+        <option value="" disabled>
+          Elige la relación…
+        </option>
+        {own && (
+          <optgroup label="Esta relación">
+            <option value={own}>{own}</option>
+          </optgroup>
+        )}
+        <optgroup label="Comunes">
+          {COMMON_RELATIONS.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </optgroup>
+        {used.length > 0 && (
+          <optgroup label="Usadas en esta novela">
+            {used.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </optgroup>
+        )}
+        <option value={CUSTOM}>+ Crear relación personalizada</option>
+      </select>
+      {custom && (
+        <>
+          <input
+            value={value}
+            placeholder="amante de, socio de, padrino de…"
+            onChange={(e) => onChange(e.target.value)}
+            required
+            autoFocus
+            aria-label="Relación personalizada"
+            maxLength={80}
+          />
+          {known && (
+            <span className="muted small" role="status">
+              Ya existe como «{known}»: se usará esa forma.
+            </span>
+          )}
+        </>
+      )}
+    </span>
   );
 }
 

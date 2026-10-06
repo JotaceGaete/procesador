@@ -864,6 +864,14 @@ details.group > p {
   display: grid;
   grid-template-columns: 1fr 1.2fr 1fr;
   gap: 8px;
+  align-items: start;
+}
+/* Relaciones personalizadas: the kind's select, and the text field when the author creates one. */
+.relation-kind {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
 .two {
   display: grid;

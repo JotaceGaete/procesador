@@ -77,7 +77,7 @@ test("memory: add characters, a relationship and a fact through the UI", async (
   await page.getByRole("button", { name: "Relaciones" }).click();
   await page.getByRole("button", { name: "Añadir" }).click();
   await label("Personaje").selectOption({ label: "Elena" });
-  await label("Relación").fill("desconfía de");
+  await label("Relación").selectOption({ label: "desconfía de" });
   await label("Con").selectOption({ label: "Juan" });
   await page.getByRole("button", { name: "Guardar" }).click();
   await page.waitForSelector("text=Elena → desconfía de → Juan");

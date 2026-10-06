@@ -90,3 +90,17 @@ test("both modes explain the manuscript's format: italics *así*, scene breaks *
     assert.match(instructions, /No uses negritas/);
   }
 });
+
+test("relaciones personalizadas: in the Asistente's memory block like any other kind", async () => {
+  const { memoryBlock } = await import("@/lib/ai/prompts");
+  const naty = { id: "naty", name: "Naty" } as never;
+  const emily = { id: "emily", name: "Emily" } as never;
+  const selected = {
+    characters: [naty, emily],
+    relationships: [{ id: "r", novel_id: "n", from_id: "naty", to_id: "emily", kind: "Ex amante de", note: "" }],
+    places: [],
+    facts: [],
+  };
+  const block = memoryBlock(selected as never, { characters: [naty, emily], relationships: selected.relationships, places: [], facts: [] } as never, [], null);
+  assert.ok(block.includes("Naty → Ex amante de → Emily"), block);
+});
