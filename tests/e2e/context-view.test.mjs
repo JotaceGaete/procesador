@@ -4,7 +4,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { BASE, PASSWORD, aiLog, clearAiLog, client, events, login, resetDb } from "./helpers.mjs";
+import { BASE, PASSWORD, aiLog, clearAiLog, client, events, login, resetDb, textEditor } from "./helpers.mjs";
 
 const CH1 = "Capítulo uno. Pilar recordó el juicio y la tarde en que todo empezó. FINAL-DEL-UNO.";
 const CH2 = "Anaís miró el mar desde la ventana.";
@@ -146,6 +146,7 @@ for (const device of [
 ]) {
   test(`${device.name}: «Ver contexto» lista lo que se enviará y se despliega`, async () => {
     const ctx = await browser.newContext(device.context);
+    await textEditor(ctx);
     await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
     // Chapter 2 open, as if the author left it there.
     await ctx.addInitScript(([novel, ch]) => localStorage.setItem(`chapter:${novel}`, ch), [s.novel, s.ch2]);

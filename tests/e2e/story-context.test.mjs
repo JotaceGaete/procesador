@@ -5,7 +5,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { BASE, PASSWORD, STACK, aiLog, clearAiLog, client, events, login, resetDb } from "./helpers.mjs";
+import { BASE, PASSWORD, STACK, aiLog, clearAiLog, client, events, login, resetDb, textEditor } from "./helpers.mjs";
 
 const KEY = process.env.E2E_SERVICE_KEY;
 // Rows straight into the database, one by one (they don't share the same keys).
@@ -142,6 +142,7 @@ for (const device of [
 ]) {
   test(`${device.name}: «Ver contexto» muestra lo ocurrido antes, lo que saben, los hilos y los avisos`, async () => {
     const ctx = await browser.newContext(device.context);
+    await textEditor(ctx);
     await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
     await ctx.addInitScript(([n, c]) => localStorage.setItem(`chapter:${n}`, c), [novel, ch[3]]);
     const page = await ctx.newPage();

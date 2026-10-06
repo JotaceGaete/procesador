@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import zlib from "node:zlib";
 import fs from "node:fs";
 import { chromium } from "playwright";
-import { BASE, PASSWORD, client, login, resetDb } from "./helpers.mjs";
+import { BASE, PASSWORD, client, login, resetDb, textEditor } from "./helpers.mjs";
 
 let call, browser, novel, ch1;
 
@@ -107,6 +107,7 @@ test("API: the backup carries the novel, its chapters and its memory", async () 
 
 async function open() {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true });
+  await textEditor(ctx);
   await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
   const page = await ctx.newPage();
   page.setDefaultTimeout(15_000);

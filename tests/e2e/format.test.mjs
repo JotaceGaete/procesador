@@ -4,7 +4,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { BASE, PASSWORD, aiLog, clearAiLog, client, events, login, resetDb } from "./helpers.mjs";
+import { BASE, PASSWORD, aiLog, clearAiLog, client, events, login, resetDb, textEditor } from "./helpers.mjs";
 
 const SEP = "[[separador]]";
 let call, browser, novel, chapterId;
@@ -27,6 +27,7 @@ async function setText(content) {
 
 async function open(context = { viewport: { width: 1280, height: 900 } }) {
   const ctx = await browser.newContext(context);
+  await textEditor(ctx);
   await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
   const page = await ctx.newPage();
   page.setDefaultTimeout(15_000);

@@ -87,11 +87,13 @@ test("forged, tampered and expired session cookies are rejected", async () => {
   assert.equal((await hit(BASE, "GET", "/api/novels", { cookie: `procesador_session=${valid}` })).status, 200);
 });
 
-test("pages redirect to /login without a session", async () => {
-  for (const page of ["/", `/novela/${U}`]) {
+test("pages redirect to /login without a session, carrying where the author was going", async () => {
+  for (const [page, next] of [["/", null], [`/novela/${U}`, `/novela/${U}`], [`/novela/${U}?editor=visual`, `/novela/${U}?editor=visual`]]) {
     const res = await hit(BASE, "GET", page);
     assert.equal(res.status, 307);
-    assert.match(res.headers.get("location"), /\/login$/);
+    const to = new URL(res.headers.get("location"), BASE);
+    assert.equal(to.pathname, "/login");
+    assert.equal(to.searchParams.get("next"), next, page);
   }
 });
 

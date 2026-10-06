@@ -3,7 +3,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { BASE, PASSWORD, aiLog, clearAiLog, client, login, resetDb } from "./helpers.mjs";
+import { BASE, PASSWORD, aiLog, clearAiLog, client, login, resetDb, textEditor } from "./helpers.mjs";
 
 let browser, ctx, page, novelA, textBefore, call;
 
@@ -17,6 +17,7 @@ before(async () => {
     process.env.PLAYWRIGHT_CHROMIUM_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } : {},
   );
   ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await textEditor(ctx);
   await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
   page = await ctx.newPage();
   page.on("pageerror", (e) => assert.fail(`page error: ${e.message}`));
@@ -329,6 +330,7 @@ test("library: rename, duplicate, delete with explicit confirmation", async () =
 
 test("mobile: editor alone; chapter drawer closes on pick; assistant as a sheet; no horizontal scroll", async () => {
   const m = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await textEditor(m);
   await m.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
   const mp = await m.newPage();
   await mp.goto(`${BASE}/novela/${novelA}`);

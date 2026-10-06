@@ -3,7 +3,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { BASE, PASSWORD, STACK, client, login, png, resetDb } from "./helpers.mjs";
+import { BASE, PASSWORD, STACK, client, login, png, resetDb, textEditor } from "./helpers.mjs";
 
 let browser, ctx, page, call, novel, erika, juan, elena;
 const assetRequests = [];
@@ -22,6 +22,7 @@ before(async () => {
     process.env.PLAYWRIGHT_CHROMIUM_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } : {},
   );
   ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+  await textEditor(ctx);
   await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
   page = await ctx.newPage();
   page.on("pageerror", (e) => assert.fail(`page error: ${e.message}`));
@@ -325,6 +326,7 @@ test("limit: with 40 images, adding is disabled and says why", async () => {
 
 test("mobile: two-column cards, full-screen viewer, nothing wider than the screen", async () => {
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true });
+  await textEditor(phone);
   await phone.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
   const p = await phone.newPage();
   p.on("pageerror", (e) => assert.fail(`page error: ${e.message}`));
