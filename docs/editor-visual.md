@@ -21,6 +21,12 @@ imagen, separador). Sin fuentes, tamaños, negritas ni listas.
 - En la lista de capítulos: **Editor visual (prueba): no / sí**. Se recuerda en ese dispositivo.
 - O con la dirección: `…/novela/<id>?editor=visual` (y `?editor=texto` para volver).
 - Al cambiar, el texto se guarda primero y el otro editor abre ese mismo texto.
+- Si la dirección se abre sin sesión, la entrada (`/login?next=…`) devuelve después a esa misma
+  página con su `?editor=visual` (antes llevaba siempre a la biblioteca y el parámetro se perdía:
+  en el iPhone se abría el editor de texto). `next` sólo acepta rutas de la propia app.
+- **Indicador temporal:** el pie de versión (ventana de la novela, y la biblioteca) dice qué editor
+  está montado, la preferencia guardada en el dispositivo y si el navegador permite guardarla
+  («Versión … · editor visual · preferencia: visual»).
 
 ## Arquitectura
 

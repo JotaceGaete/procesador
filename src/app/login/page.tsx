@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { safeNext } from "@/lib/next-path";
 
 export default function LoginPage() {
   const [password, setPassword] = useState("");
@@ -17,7 +18,7 @@ export default function LoginPage() {
       body: JSON.stringify({ password }),
     });
     if (res.ok) {
-      window.location.href = "/";
+      window.location.href = safeNext(new URLSearchParams(window.location.search).get("next"));
     } else {
       const data = await res.json().catch(() => ({}));
       setError(data.error ?? "No se pudo entrar");

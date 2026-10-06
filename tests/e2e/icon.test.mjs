@@ -49,7 +49,7 @@ test("only those paths are open: pages and the API still need a session", async 
   for (const path of ["/", "/novela/00000000-0000-4000-8000-000000000000", "/icon.svg.bak", "/iconsx"]) {
     const res = await get(path);
     assert.equal(res.status, 307, path);
-    assert.match(res.headers.get("location"), /\/login$/, path);
+    assert.equal(new URL(res.headers.get("location"), BASE).pathname, "/login", path);
   }
   assert.equal((await get("/api/novels")).status, 401);
 });

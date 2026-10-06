@@ -11,7 +11,11 @@ export async function proxy(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
-  return NextResponse.redirect(new URL("/login", request.url));
+  // Back to where the author was going after logging in (with its query: ?editor=visual).
+  const login = new URL("/login", request.url);
+  const next = request.nextUrl.pathname + request.nextUrl.search;
+  if (next !== "/") login.searchParams.set("next", next);
+  return NextResponse.redirect(login);
 }
 
 export const config = {

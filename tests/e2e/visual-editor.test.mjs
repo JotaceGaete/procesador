@@ -477,3 +477,85 @@ test("the conversion report runs on a real backup downloaded from Procesador", a
   assert.match(md, /Párrafos \/ imágenes \/ separadores \| 3 \/ 1 \/ 1 \|/);
   await ctx.close();
 });
+
+// ---------------------------------------------------------------- activation on the phone
+// The real problem on the iPhone: opening the link with ?editor=visual without a session went
+// through the login, which dropped the query and went to the library; the novel then opened in
+// the plain editor. These tests check the mounted editor in the DOM, not just that the page loads.
+
+const IPHONE = {
+  ...PHONE,
+  userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+};
+
+/** What is really mounted: the visual editor (editable, with its blocks) and no textarea. */
+async function assertVisualMounted(page, what) {
+  const root = page.locator('[data-editor="visual"] .visual-text[contenteditable="true"]');
+  await root.waitFor({ timeout: 15_000 });
+  assert.equal(await page.locator("textarea.editor").count(), 0, `${what}: no plain editor`);
+  assert.equal(await root.locator("figure").count(), 1, `${what}: the image block`);
+  assert.equal(await root.locator("hr.scene-break").count(), 1, `${what}: the scene break`);
+  assert.ok(!/\[\[|\*/.test(await page.locator(".visual-editor").innerText()), `${what}: nothing technical in sight`);
+}
+
+/** The version footer (novel window): which editor is mounted and the saved preference. */
+async function footerDiag(page) {
+  if (!(await page.locator("nav.chapters").isVisible())) await page.locator(".topbar .chapter-title").tap();
+  await page.getByRole("button", { name: "Novela, copia y exportación" }).tap();
+  await page.locator(".modal-foot .build-stamp .editor-diag").waitFor();
+  const text = await page.locator(".modal-foot .build-stamp").innerText();
+  await page.keyboard.press("Escape");
+  return text;
+}
+
+test("iPhone: the link with ?editor=visual, opened without a session, goes through the login and lands in the visual editor", async () => {
+  await setText(CENTRAL);
+  const ctx = await browser.newContext(IPHONE);
+  contexts.add(ctx);
+  const page = await ctx.newPage();
+  page.setDefaultTimeout(15_000);
+  page.on("pageerror", (e) => assert.fail(`page error: ${e.message}`));
+  await page.goto(`${BASE}/novela/${novel}?editor=visual`);
+  assert.equal(new URL(page.url()).pathname, "/login");
+  await page.locator("#password").fill(PASSWORD);
+  await page.keyboard.press("Enter");
+  await page.waitForURL((u) => u.pathname === `/novela/${novel}` && u.searchParams.get("editor") === "visual");
+  await assertVisualMounted(page, "after the login");
+  assert.match(await footerDiag(page), /editor visual · preferencia: visual/);
+  // Remembered on this device: the novel without ?editor= (from the library) opens it again.
+  await page.goto(`${BASE}/`);
+  await page.getByText("Visual", { exact: true }).first().tap();
+  await assertVisualMounted(page, "from the library");
+});
+
+test("iPhone: the switch in the chapter drawer turns it on, and it stays after reloading and changing chapter", async () => {
+  await setText(CENTRAL);
+  const other = (await call(`/api/novels/${novel}/chapters`, "POST", { title: "Otro" })).data.id;
+  const { revision } = (await call(`/api/chapters/${other}`)).data;
+  await call(`/api/chapters/${other}`, "PATCH", { content: CENTRAL, revision });
+  const ctx = await browser.newContext(IPHONE);
+  contexts.add(ctx);
+  await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
+  const page = await ctx.newPage();
+  page.setDefaultTimeout(15_000);
+  page.on("pageerror", (e) => assert.fail(`page error: ${e.message}`));
+  await page.goto(`${BASE}/novela/${novel}`);
+  await page.locator("textarea.editor").waitFor();
+  assert.match(await footerDiag(page), /editor de texto · preferencia: sin elegir/);
+  if (!(await page.locator("nav.chapters").isVisible())) await page.locator(".topbar .chapter-title").tap();
+  await page.getByRole("button", { name: /Editor visual \(prueba\): no/ }).tap();
+  await assertVisualMounted(page, "after the switch");
+  await page.reload();
+  await assertVisualMounted(page, "after reloading");
+  if (!(await page.locator("nav.chapters").isVisible())) await page.locator(".topbar .chapter-title").tap();
+  await page.locator(".chapter-name", { hasText: "Otro" }).tap();
+  await page.waitForFunction(() => /Otro/.test(document.querySelector(".topbar .chapter-title")?.textContent ?? ""));
+  await assertVisualMounted(page, "in another chapter");
+  assert.match(await footerDiag(page), /editor visual · preferencia: visual/);
+  // And back to the plain editor with the same switch.
+  if (!(await page.locator("nav.chapters").isVisible())) await page.locator(".topbar .chapter-title").tap();
+  await page.getByRole("button", { name: /Editor visual \(prueba\): sí/ }).tap();
+  await page.locator("textarea.editor").waitFor();
+  assert.equal(await page.locator(".visual-editor").count(), 0);
+  await call(`/api/chapters/${other}`, "DELETE");
+});
