@@ -18,6 +18,7 @@ import { api, readPref, writePref } from "@/lib/client";
 import { chapterLabel } from "@/lib/ai/context";
 import type { SaveState } from "./useAutosave";
 import ChapterEditor, { type EditorHandle, type Selection } from "./ChapterEditor";
+import VisualEditor from "./VisualEditor";
 import ChapterNav from "./ChapterNav";
 import { TrashModal, VersionsModal } from "./Versions";
 import { ChronologyModal } from "./Chronology";
@@ -98,6 +99,14 @@ export default function Workspace({ novelId }: { novelId: string }) {
   // Chapters written in during this visit: leaving one may re-read it (Consejero, auto_digest).
   const edited = useRef(new Set<string>());
   const [focusMode, setFocusMode] = useState(false);
+  // Editor visual, Fase A (docs/editor-visual.md): behind a switch, per device; the plain editor stays the default.
+  // `?editor=visual` or `?editor=texto` sets it (and is remembered).
+  const [visualEditor, setVisualEditor] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const asked = new URLSearchParams(window.location.search).get("editor");
+    if (asked === "visual" || asked === "texto") writePref("editor", asked);
+    return (asked ?? readPref("editor")) === "visual";
+  });
   const [modal, setModal] = useState<"novel" | "memory" | "images" | "versions" | "trash" | "chronology" | null>(null);
   const editorRef = useRef<EditorHandle>(null);
 
@@ -168,6 +177,15 @@ export default function Workspace({ novelId }: { novelId: string }) {
   }
 
   const narrow = () => !window.matchMedia("(min-width: 1000px)").matches;
+  /** Switches editor: the text is saved first, and the other editor opens that text. */
+  const toggleVisualEditor = useCallback(async () => {
+    if (!(await leaveChapter())) return;
+    const next = !visualEditor;
+    writePref("editor", next ? "visual" : "texto");
+    // The other editor opens the saved text (the chapter as the server has it now).
+    if (chapter) await openChapter(chapter.id);
+    setVisualEditor(next);
+  }, [visualEditor, leaveChapter, chapter, openChapter]);
 
   const switchChapter = useCallback(
     async (id: string) => {
@@ -479,6 +497,8 @@ export default function Workspace({ novelId }: { novelId: string }) {
           void refreshChronology();
           setModal("chronology");
         }}
+        visualEditor={visualEditor}
+        onToggleVisualEditor={() => void toggleVisualEditor()}
         onNovel={() => {
           if (narrow()) setNavOpen(false);
           setModal("novel");
@@ -577,19 +597,38 @@ export default function Workspace({ novelId }: { novelId: string }) {
             {focusMode ? "Salir" : "Concentración"}
           </button>
         </header>
-        <ChapterEditor
-          key={chapter.id}
-          ref={editorRef}
-          chapterId={chapter.id}
-          initial={{ content: chapter.content, revision: chapter.revision }}
-          focusMode={focusMode}
-          onSelection={setSelection}
-          onStats={setStats}
-          onSaveState={onSaveState}
-          onCaret={onCaret}
-          onImageFiles={insertFiles}
-          hidden={reading !== null}
-        />
+        {visualEditor ? (
+          <VisualEditor
+            key={`${chapter.id}:visual`}
+            ref={editorRef}
+            chapterId={chapter.id}
+            initial={{ content: chapter.content, revision: chapter.revision }}
+            focusMode={focusMode}
+            onSelection={setSelection}
+            onStats={setStats}
+            onSaveState={onSaveState}
+            onCaret={onCaret}
+            onImageFiles={insertFiles}
+            hidden={reading !== null}
+            heading={current ? chapterHeading(chapterIndex, current.title) : undefined}
+            images={manuscriptImages}
+            pending={pending}
+          />
+        ) : (
+          <ChapterEditor
+            key={chapter.id}
+            ref={editorRef}
+            chapterId={chapter.id}
+            initial={{ content: chapter.content, revision: chapter.revision }}
+            focusMode={focusMode}
+            onSelection={setSelection}
+            onStats={setStats}
+            onSaveState={onSaveState}
+            onCaret={onCaret}
+            onImageFiles={insertFiles}
+            hidden={reading !== null}
+          />
+        )}
         {reading !== null && (
           <ReadingView
             text={reading}

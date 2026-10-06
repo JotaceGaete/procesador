@@ -21,6 +21,9 @@ interface Props {
   timeWarnings: number;
   /** The novel: data, Guía Maestra, backup and the book's exports (also reachable on a phone, where the title is hidden). */
   onNovel(): void;
+  /** Editor visual, Fase A (docs/editor-visual.md): the switch, per device. */
+  visualEditor: boolean;
+  onToggleVisualEditor(): void;
   /** Moves the editor to another chapter before the current one is deleted. */
   beforeDeleteCurrent(neighborId: string): Promise<boolean>;
 }
@@ -39,6 +42,8 @@ export default function ChapterNav({
   onChronology,
   timeWarnings,
   onNovel,
+  visualEditor,
+  onToggleVisualEditor,
   beforeDeleteCurrent,
 }: Props) {
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -182,6 +187,9 @@ export default function ChapterNav({
           {timeWarnings > 0 && (
             <span className="muted"> · {timeWarnings === 1 ? "1 advertencia" : `${timeWarnings} advertencias`}</span>
           )}
+        </button>
+        <button className="link" onClick={onToggleVisualEditor} aria-pressed={visualEditor}>
+          Editor visual (prueba): {visualEditor ? "sí" : "no"}
         </button>
         <button className="link" onClick={onNovel}>
           Novela, copia y exportación

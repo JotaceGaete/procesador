@@ -26,7 +26,7 @@
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 /** Any marker-looking text, valid or not. */
 export const MARKER_RE = new RegExp(`\\[\\[imagen:(${UUID})\\]\\]`, "gi");
-const LINE_MARKER_RE = new RegExp(`^[ \\t]*\\[\\[imagen:(${UUID})\\]\\][ \\t]*$`, "i");
+export const LINE_MARKER_RE = new RegExp(`^[ \\t]*\\[\\[imagen:(${UUID})\\]\\][ \\t]*$`, "i");
 
 export function marker(id: string) {
   return `[[imagen:${id}]]`;
@@ -36,7 +36,7 @@ export function marker(id: string) {
 export const SEPARATOR = "[[separador]]";
 /** Any separator-looking text, on its own line or not. */
 export const SEPARATOR_RE = /\[\[separador\]\]/gi;
-const LINE_SEPARATOR_RE = /^[ \t]*\[\[separador\]\][ \t]*$/i;
+export const LINE_SEPARATOR_RE = /^[ \t]*\[\[separador\]\][ \t]*$/i;
 
 export type Block =
   | { kind: "text"; text: string; start: number; end: number }
