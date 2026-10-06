@@ -63,6 +63,8 @@ Procesador de textos personal para escribir novelas con asistencia de IA. Tú im
   - *DOCX · Manuscrito*: formato de envío a editoriales (A4 o carta, Times 12, doble espacio, «Apellido / TÍTULO / página»). *DOCX · Libro*: maquetado con el tamaño de página, preliminares, cornisas y números de página, listo para pasar a PDF desde Word o LibreOffice. *EPUB*: EPUB 3 válido (epubcheck), con índice, portada y texto alternativo.
   - Cursivas, separadores e imágenes (tamaño, pie, crédito, página completa) salen como en *Lectura*. Antes de exportar, comprobaciones que nunca bloquean: imágenes sin texto alternativo o con poca resolución para imprimir, ISBN erróneo, capítulos vacíos.
 
+- **Icono** ([diseño](docs/icono.md)): una P cuya asta termina en plumín, crema sobre borgoña; favicon, icono de Apple y manifiesto para accesos directos (`npm run icons` los regenera).
+
 ## Qué se envía a la IA
 
 Sólo lo relevante. El manuscrito completo nunca se envía por defecto.
@@ -162,6 +164,7 @@ npm run test:all    # todas
 | `tests/unit/presentation.test.ts` | Presentación: un párrafo por línea con o sin líneas en blanco, diálogos, sangría tecleada descartada, sin sangría tras el inicio, un separador o una imagen; cabecera del capítulo |
 | `tests/unit/export.test.ts` | Datos del libro y su validación, ISBN, modelo y comprobaciones; DOCX manuscrito y libro (XML bien formado, página, márgenes, secciones, cornisas, cursivas, imágenes); EPUB (OPF, índice, portada, figuras accesibles, ZIP) |
 | `tests/e2e/export.test.mjs` | Datos del libro en la API y la copia de seguridad; pestaña *Libro*: comprobaciones, las tres descargas revisadas por dentro (WebP → JPEG, PNG intacto), guardar; duplicar con portada; teléfono |
+| `tests/e2e/icon.test.mjs` | Icono: favicon, SVG, Apple y manifiesto públicos y con su tipo, iconos del manifiesto con su tamaño, etiquetas en la página de entrada, y el resto de la app sigue cerrado |
 | `tests/e2e/ui.test.mjs` | Flujo completo en el navegador: autoguardado, memoria, guía, capítulos, retomar posición, Desarrollar escena e insertar con deshacer, Original/Propuesta, cambio de proveedor, conflicto, concentración, móvil, capítulo de 1 MB |
 
 Requisitos de la E2E:

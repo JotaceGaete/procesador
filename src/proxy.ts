@@ -15,5 +15,7 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!login$|api/login$|_next/static|_next/image|favicon.ico).*)"],
+  // The icons and the manifest are public: the login page shows them, and browsers fetch the
+  // manifest without cookies (docs/icono.md).
+  matcher: ["/((?!login$|api/login$|_next/static|_next/image|favicon\\.ico$|icon\\.svg$|apple-icon\\.png$|manifest\\.webmanifest$|icons/).*)"],
 };
