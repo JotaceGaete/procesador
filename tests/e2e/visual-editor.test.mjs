@@ -559,3 +559,46 @@ test("iPhone: the switch in the chapter drawer turns it on, and it stays after r
   assert.equal(await page.locator(".visual-editor").count(), 0);
   await call(`/api/chapters/${other}`, "DELETE");
 });
+
+/** The TEMPORARY on-screen diagnostic, as rows {key: value}. */
+const diagRows = (page) =>
+  page.locator(".editor-diag-bar dl > div").evaluateAll((rows) => Object.fromEntries(rows.map((r) => [r.dataset.key, r.querySelector("dd").textContent])));
+
+test("the on-screen diagnostic (temporary) tells which editor was requested and which is really mounted, and why", async () => {
+  await setText(CENTRAL);
+  const ctx = await browser.newContext(IPHONE);
+  contexts.add(ctx);
+  await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
+  const page = await ctx.newPage();
+  page.setDefaultTimeout(15_000);
+  await page.goto(`${BASE}/novela/${novel}?editor=visual`);
+  await assertVisualMounted(page, "diag visual");
+  await page.waitForFunction(() => /^creado hace/.test(document.querySelector('.editor-diag-bar [data-key="ProseMirror"] dd')?.textContent ?? ""));
+  let d = await diagRows(page);
+  assert.match(d["commit"], /^[0-9a-f]{7}$|^\?$/);
+  assert.equal(d["editor solicitado"], "visual (al abrir: visual por query)");
+  assert.match(d["editor montado"], /^visual \d+×\d+, editable=true$/);
+  assert.equal(d["preferencia almacenada"], "visual");
+  assert.equal(d["query editor"], "al abrir: visual · ahora: visual");
+  assert.equal(d["storage disponible"], "sí");
+  assert.equal(d["error del editor visual"], "ninguno");
+  assert.match(d["user-agent"], /iPhone/);
+  if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/diag-iphone-visual.png` });
+
+  // From the library, without the query: the preference decides, and it says so.
+  await page.goto(`${BASE}/novela/${novel}`);
+  await assertVisualMounted(page, "diag by preference");
+  await page.waitForFunction(() => /por preferencia/.test(document.querySelector('.editor-diag-bar [data-key="editor solicitado"] dd')?.textContent ?? ""));
+  d = await diagRows(page);
+  assert.equal(d["query editor"], "al abrir: (ninguna) · ahora: (ninguna)");
+
+  await page.goto(`${BASE}/novela/${novel}?editor=texto`);
+  await page.locator("textarea.editor").waitFor();
+  await page.waitForFunction(() => /textarea/.test(document.querySelector('.editor-diag-bar [data-key="editor montado"] dd')?.textContent ?? ""));
+  d = await diagRows(page);
+  assert.equal(d["editor solicitado"], "texto (al abrir: texto por query)");
+  assert.match(d["editor montado"], /^texto \(textarea\)/);
+  assert.equal(d["preferencia almacenada"], "texto");
+  assert.equal(d["ProseMirror"], "no creado");
+  if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/diag-iphone-texto.png` });
+});
