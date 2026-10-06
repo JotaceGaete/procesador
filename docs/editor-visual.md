@@ -33,10 +33,6 @@ imagen, separador). Sin fuentes, tamaños, negritas ni listas.
 - Si la dirección se abre sin sesión, la entrada (`/login?next=…`) devuelve después a esa misma
   página con su `?editor=` (antes llevaba siempre a la biblioteca y el parámetro se perdía).
   `next` sólo acepta rutas de la propia app.
-- **Indicadores temporales (se retiran al cerrar la transición):** una franja de diagnóstico sobre
-  el editor (editor solicitado y por qué —«visual (por defecto)», «texto (por preferencia)»…—,
-  editor montado, preferencia guardada, ProseMirror creado, errores) y el pie de versión de la
-  ventana de la novela («editor visual · preferencia: sin elegir (visual por defecto)»).
 
 ## Arquitectura
 

@@ -19,7 +19,6 @@ import { chapterLabel } from "@/lib/ai/context";
 import type { SaveState } from "./useAutosave";
 import ChapterEditor, { type EditorHandle, type Selection } from "./ChapterEditor";
 import VisualEditor from "./VisualEditor";
-import EditorDiag, { VisualEditorBoundary, editorDecision } from "./EditorDiag";
 import ChapterNav from "./ChapterNav";
 import { TrashModal, VersionsModal } from "./Versions";
 import { ChronologyModal } from "./Chronology";
@@ -110,10 +109,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
     if (asked === "visual" || asked === "texto") writePref("editor", asked);
     const pref = readPref("editor");
     const chosen = asked === "visual" || asked === "texto" ? asked : pref === "visual" || pref === "texto" ? pref : null;
-    const result = chosen !== "texto";
-    // TEMPORARY diagnostic (EditorDiag): record this decision as it was made, nothing more.
-    Object.assign(editorDecision, { query: asked, pref, result: result ? "visual" : "texto", source: chosen === null ? "por defecto" : asked === chosen ? "query" : "preferencia" });
-    return result;
+    return chosen !== "texto";
   });
   const [modal, setModal] = useState<"novel" | "memory" | "images" | "versions" | "trash" | "chronology" | null>(null);
   const editorRef = useRef<EditorHandle>(null);
@@ -605,9 +601,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
             {focusMode ? "Salir" : "Concentración"}
           </button>
         </header>
-        <EditorDiag requested={visualEditor} />
         {visualEditor ? (
-          <VisualEditorBoundary>
           <VisualEditor
             key={`${chapter.id}:visual`}
             ref={editorRef}
@@ -624,7 +618,6 @@ export default function Workspace({ novelId }: { novelId: string }) {
             images={manuscriptImages}
             pending={pending}
           />
-          </VisualEditorBoundary>
         ) : (
           <ChapterEditor
             key={chapter.id}

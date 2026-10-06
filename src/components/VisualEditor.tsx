@@ -29,7 +29,6 @@ import type { ManuscriptImage } from "@/lib/types";
 import { useAutosave, type SaveState } from "./useAutosave";
 import { pendingLabel, type Pending } from "./ManuscriptImages";
 import type { EditorHandle, Selection } from "./ChapterEditor";
-import { visualState } from "./EditorDiag";
 
 interface Props {
   chapterId: string;
@@ -299,7 +298,6 @@ const VisualEditor = forwardRef<EditorHandle, Props>(function VisualEditor(props
       },
     });
     viewRef.current = view;
-    visualState.viewCreated = Date.now(); // TEMPORARY diagnostic (EditorDiag)
     let pos: { cursor?: number; scroll?: number } = {};
     try {
       pos = JSON.parse(readPref(positionKey) ?? "{}");

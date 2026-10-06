@@ -514,15 +514,8 @@ async function assertVisualMounted(page, what) {
   assert.ok(!/\[\[|\*/.test(await page.locator(".visual-editor").innerText()), `${what}: nothing technical in sight`);
 }
 
-/** The version footer (novel window): which editor is mounted and the saved preference. */
-async function footerDiag(page) {
-  if (!(await page.locator("nav.chapters").isVisible())) await page.locator(".topbar .chapter-title").tap();
-  await page.getByRole("button", { name: "Novela, copia y exportación" }).tap();
-  await page.locator(".modal-foot .build-stamp .editor-diag").waitFor();
-  const text = await page.locator(".modal-foot .build-stamp").innerText();
-  await page.keyboard.press("Escape");
-  return text;
-}
+/** The editor saved on this device (null: never chose, the visual editor by default). */
+const storedEditor = (page) => page.evaluate(() => localStorage.getItem("editor"));
 
 test("iPhone: the link with ?editor=visual, opened without a session, goes through the login and lands in the visual editor", async () => {
   await setText(CENTRAL);
@@ -537,7 +530,7 @@ test("iPhone: the link with ?editor=visual, opened without a session, goes throu
   await page.keyboard.press("Enter");
   await page.waitForURL((u) => u.pathname === `/novela/${novel}` && u.searchParams.get("editor") === "visual");
   await assertVisualMounted(page, "after the login");
-  assert.match(await footerDiag(page), /editor visual · preferencia: visual/);
+  assert.equal(await storedEditor(page), "visual");
   // Remembered on this device: the novel without ?editor= (from the library) opens it again.
   await page.goto(`${BASE}/`);
   await page.getByText("Visual", { exact: true }).first().tap();
@@ -559,7 +552,7 @@ test("iPhone: a new device enters the visual editor; the switch goes back to tex
   await page.goto(`${BASE}/`);
   await page.getByText("Visual", { exact: true }).first().tap();
   await assertVisualMounted(page, "new device, by default");
-  assert.match(await footerDiag(page), /editor visual · preferencia: sin elegir \(visual por defecto\)/);
+  assert.equal(await storedEditor(page), null, "the default is not written as a choice");
 
   // Back to the plain editor with the switch.
   await (await editorSwitch(page, true)).tap();
@@ -579,7 +572,7 @@ test("iPhone: a new device enters the visual editor; the switch goes back to tex
   await page.goto(`${BASE}/`);
   await page.getByText("Visual", { exact: true }).first().tap();
   await plain("re-entering the novel from the library");
-  assert.match(await footerDiag(page), /editor de texto · preferencia: texto/);
+  assert.equal(await storedEditor(page), "texto");
 
   // And on again: visual, remembered.
   await (await editorSwitch(page, true)).tap();
@@ -627,55 +620,24 @@ test("iPhone 375×627 with 14 chapters: the switch is at the top of the drawer, 
   for (const id of extra) await call(`/api/chapters/${id}`, "DELETE");
 });
 
-/** The TEMPORARY on-screen diagnostic, as rows {key: value}. */
-const diagRows = (page) =>
-  page.locator(".editor-diag-bar dl > div").evaluateAll((rows) => Object.fromEntries(rows.map((r) => [r.dataset.key, r.querySelector("dd").textContent])));
-
-test("the on-screen diagnostic (temporary) tells which editor was requested and which is really mounted, and why", async () => {
+test("no diagnostic in the interface: neither on the editor screen nor in the version footer", async () => {
   await setText(CENTRAL);
   const ctx = await browser.newContext(IPHONE);
   contexts.add(ctx);
   await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
   const page = await ctx.newPage();
   page.setDefaultTimeout(15_000);
-  // A new device (Safari private window): nothing stored, the default.
+  page.on("pageerror", (e) => assert.fail(`page error: ${e.message}`));
   await page.goto(`${BASE}/novela/${novel}`);
-  await assertVisualMounted(page, "diag default");
-  await page.waitForFunction(() => /^creado hace/.test(document.querySelector('.editor-diag-bar [data-key="ProseMirror"] dd')?.textContent ?? ""));
-  let d = await diagRows(page);
-  assert.equal(d["editor solicitado"], "visual (por defecto)");
-  assert.equal(d["preferencia almacenada"], "(nada)");
-  assert.equal(d["query editor"], "al abrir: (ninguna) · ahora: (ninguna)");
-  if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/diag-iphone-default.png` });
-
-  await page.goto(`${BASE}/novela/${novel}?editor=visual`);
-  await assertVisualMounted(page, "diag visual");
-  await page.waitForFunction(() => /^creado hace/.test(document.querySelector('.editor-diag-bar [data-key="ProseMirror"] dd')?.textContent ?? ""));
-  d = await diagRows(page);
-  assert.match(d["commit"], /^[0-9a-f]{7}$|^\?$/);
-  assert.equal(d["editor solicitado"], "visual (por query)");
-  assert.match(d["editor montado"], /^visual \d+×\d+, editable=true$/);
-  assert.equal(d["preferencia almacenada"], "visual");
-  assert.equal(d["query editor"], "al abrir: visual · ahora: visual");
-  assert.equal(d["storage disponible"], "sí");
-  assert.equal(d["error del editor visual"], "ninguno");
-  assert.match(d["user-agent"], /iPhone/);
-  if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/diag-iphone-visual.png` });
-
-  // From the library, without the query: the preference decides, and it says so.
-  await page.goto(`${BASE}/novela/${novel}`);
-  await assertVisualMounted(page, "diag by preference");
-  await page.waitForFunction(() => /por preferencia/.test(document.querySelector('.editor-diag-bar [data-key="editor solicitado"] dd')?.textContent ?? ""));
-  d = await diagRows(page);
-  assert.equal(d["query editor"], "al abrir: (ninguna) · ahora: (ninguna)");
-
-  await page.goto(`${BASE}/novela/${novel}?editor=texto`);
-  await page.locator("textarea.editor").waitFor();
-  await page.waitForFunction(() => /textarea/.test(document.querySelector('.editor-diag-bar [data-key="editor montado"] dd')?.textContent ?? ""));
-  d = await diagRows(page);
-  assert.equal(d["editor solicitado"], "texto (por query)");
-  assert.match(d["editor montado"], /^texto \(textarea\)/);
-  assert.equal(d["preferencia almacenada"], "texto");
-  assert.equal(d["ProseMirror"], "no creado");
-  if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/diag-iphone-texto.png` });
+  await assertVisualMounted(page, "by default");
+  const leftovers = async (where) => {
+    assert.equal(await page.locator('.editor-diag-bar, .editor-diag, .editor-diag-error, [aria-label*="Diagnóstico"]').count(), 0, `${where}: no diagnostic element`);
+    assert.ok(!/Diagnóstico|editor solicitado|editor montado|preferencia almacenada|user-agent/i.test(await page.locator("body").innerText()), `${where}: no diagnostic text`);
+  };
+  await leftovers("editor screen");
+  if (!(await page.locator("nav.chapters").isVisible())) await page.locator(".topbar .chapter-title").tap();
+  await page.getByRole("button", { name: "Novela, copia y exportación" }).tap();
+  await page.locator(".modal-foot .build-stamp").waitFor();
+  assert.ok(!/preferencia|editor/i.test(await page.locator(".modal-foot .build-stamp").innerText()), "version footer: only the version");
+  await leftovers("novel window");
 });
