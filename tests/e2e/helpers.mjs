@@ -80,3 +80,10 @@ export function png(width, height) {
     chunk("IEND", Buffer.alloc(0)),
   ]);
 }
+
+/**
+ * The plain-text editor, chosen explicitly (as an author does with the switch): these tests drive
+ * the textarea. The visual editor is the default (docs/editor-visual.md); the plain one stays as
+ * the manual fallback, and these tests keep it covered.
+ */
+export const textEditor = (ctx) => ctx.addInitScript(() => localStorage.setItem("editor", "texto"));

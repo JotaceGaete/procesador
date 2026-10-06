@@ -4,7 +4,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { BASE, PASSWORD, aiLog, clearAiLog, client, login, resetDb } from "./helpers.mjs";
+import { BASE, PASSWORD, aiLog, clearAiLog, client, login, resetDb, textEditor } from "./helpers.mjs";
 
 let call, browser, novel, ch, elena, pedro;
 
@@ -154,6 +154,7 @@ for (const device of DEVICES) {
     for (const id of ch) await call(`/api/chapters/${id}/time`, "DELETE");
     const marta = (await call(`/api/novels/${novel}/memory/characters`, "POST", { name: `Marta ${device.name}` })).data.id;
     const ctx = await browser.newContext(device.context);
+    await textEditor(ctx);
     await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
     await ctx.addInitScript(([n, c]) => localStorage.setItem(`chapter:${n}`, c), [novel, ch[1]]);
     const page = await ctx.newPage();

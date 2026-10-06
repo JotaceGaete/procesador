@@ -100,16 +100,19 @@ export default function Workspace({ novelId }: { novelId: string }) {
   // Chapters written in during this visit: leaving one may re-read it (Consejero, auto_digest).
   const edited = useRef(new Set<string>());
   const [focusMode, setFocusMode] = useState(false);
-  // Editor visual, Fase A (docs/editor-visual.md): behind a switch, per device; the plain editor stays the default.
-  // `?editor=visual` or `?editor=texto` sets it (and is remembered).
+  // Editor visual (docs/editor-visual.md): the default. The plain editor stays as a manual fallback,
+  // chosen with the switch in the chapter list and remembered per device. `?editor=visual` or
+  // `?editor=texto` sets it too (and is remembered). With nothing stored, nothing is written: a
+  // device that never chose follows the default.
   const [visualEditor, setVisualEditor] = useState(() => {
-    if (typeof window === "undefined") return false;
+    if (typeof window === "undefined") return true;
     const asked = new URLSearchParams(window.location.search).get("editor");
     if (asked === "visual" || asked === "texto") writePref("editor", asked);
     const pref = readPref("editor");
-    const result = (asked ?? pref) === "visual";
+    const chosen = asked === "visual" || asked === "texto" ? asked : pref === "visual" || pref === "texto" ? pref : null;
+    const result = chosen !== "texto";
     // TEMPORARY diagnostic (EditorDiag): record this decision as it was made, nothing more.
-    Object.assign(editorDecision, { query: asked, pref, result: result ? "visual" : "texto", source: asked !== null ? "query" : pref !== null ? "preferencia" : "por defecto" });
+    Object.assign(editorDecision, { query: asked, pref, result: result ? "visual" : "texto", source: chosen === null ? "por defecto" : asked === chosen ? "query" : "preferencia" });
     return result;
   });
   const [modal, setModal] = useState<"novel" | "memory" | "images" | "versions" | "trash" | "chronology" | null>(null);

@@ -4,7 +4,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { BASE, PASSWORD, aiLog, clearAiLog, client, login, resetDb } from "./helpers.mjs";
+import { BASE, PASSWORD, aiLog, clearAiLog, client, login, resetDb, textEditor } from "./helpers.mjs";
 
 const SCENE = "Juan dejó las llaves sobre la mesa. Elena no levantó la vista.\n\n—¿Café? —dijo él.";
 const TEXT = "Primer párrafo.\n\nPÁRRAFO-INTERMEDIO que no debe tocarse.\n\nÚltimo párrafo del capítulo.";
@@ -35,6 +35,7 @@ async function open(device, text = TEXT) {
   const { revision } = (await call(`/api/chapters/${chapterId}`)).data;
   await call(`/api/chapters/${chapterId}`, "PATCH", { content: text, revision });
   const ctx = await browser.newContext(device.context);
+  await textEditor(ctx);
   await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
   const page = await ctx.newPage();
   page.setDefaultTimeout(15_000);

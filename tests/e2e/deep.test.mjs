@@ -4,7 +4,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { BASE, PASSWORD, STACK, aiLog, clearAiLog, client, events, login, resetDb } from "./helpers.mjs";
+import { BASE, PASSWORD, STACK, aiLog, clearAiLog, client, events, login, resetDb, textEditor } from "./helpers.mjs";
 
 let call, novel, ch, browser, page;
 const s = {};
@@ -240,6 +240,7 @@ test("panel: lectura profunda shows its rounds and, discreetly, what it read; th
     process.env.PLAYWRIGHT_CHROMIUM_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } : {},
   );
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await textEditor(ctx);
   await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
   page = await ctx.newPage();
   page.on("pageerror", (e) => assert.fail(`page error: ${e.message}`));

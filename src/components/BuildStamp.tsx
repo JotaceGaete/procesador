@@ -14,7 +14,7 @@ function editorDiag(): string {
     const key = "procesador-diag-probe";
     localStorage.setItem(key, "1");
     localStorage.removeItem(key);
-    saved = localStorage.getItem("editor") ?? "sin elegir";
+    saved = localStorage.getItem("editor") ?? "sin elegir (visual por defecto)";
   } catch {
     saved = "no se puede guardar en este navegador";
   }

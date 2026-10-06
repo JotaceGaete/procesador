@@ -5,7 +5,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { BASE, PASSWORD, client, login, resetDb } from "./helpers.mjs";
+import { BASE, PASSWORD, client, login, resetDb, textEditor } from "./helpers.mjs";
 
 const TEXT = "Uno.\n\nDos.\n\nTres.";
 const A = "Juan vuelve tarde. Elena finge dormir.";
@@ -33,6 +33,7 @@ after(async () => browser?.close());
 
 async function open(device) {
   const ctx = await browser.newContext(device.context);
+  await textEditor(ctx);
   await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
   const page = await ctx.newPage();
   page.on("pageerror", (e) => assert.fail(`page error: ${e.message}`));

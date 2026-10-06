@@ -4,7 +4,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { BASE, PASSWORD, aiLog, clearAiLog, client, events, login, resetDb } from "./helpers.mjs";
+import { BASE, PASSWORD, aiLog, clearAiLog, client, events, login, resetDb, textEditor } from "./helpers.mjs";
 
 const SECRET = "REVELACION-20";
 let call, browser, novel, ch, elena, pedro;
@@ -122,6 +122,7 @@ const DEVICES = [
 
 async function open(device, chapterId) {
   const ctx = await browser.newContext(device.context);
+  await textEditor(ctx);
   await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
   await ctx.addInitScript(([n, c]) => localStorage.setItem(`chapter:${n}`, c), [novel, chapterId]);
   const page = await ctx.newPage();

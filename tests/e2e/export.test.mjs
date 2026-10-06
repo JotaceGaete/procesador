@@ -7,7 +7,7 @@ import zlib from "node:zlib";
 import fs from "node:fs";
 import crypto from "node:crypto";
 import { chromium } from "playwright";
-import { BASE, PASSWORD, client, login, png, resetDb } from "./helpers.mjs";
+import { BASE, PASSWORD, client, login, png, resetDb, textEditor } from "./helpers.mjs";
 
 let call, cookie, browser, novel, ch1, ch2;
 const s = {};
@@ -67,6 +67,7 @@ function unzip(buf) {
 
 async function open() {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true });
+  await textEditor(ctx);
   await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
   const page = await ctx.newPage();
   page.setDefaultTimeout(15_000);
@@ -201,6 +202,7 @@ test("duplicating the novel copies the book, with the cover pointing to the copy
 
 test("mobile: the Libro tab fits and exports", async () => {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, acceptDownloads: true });
+  await textEditor(ctx);
   await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
   const page = await ctx.newPage();
   page.setDefaultTimeout(15_000);

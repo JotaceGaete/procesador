@@ -3,7 +3,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { BASE, PASSWORD, STACK, client, login, png, resetDb } from "./helpers.mjs";
+import { BASE, PASSWORD, STACK, client, login, png, resetDb, textEditor } from "./helpers.mjs";
 
 let browser, ctx, page, call, cookie, novel, chapterId, erika, galleryAsset;
 
@@ -77,6 +77,7 @@ before(async () => {
     process.env.PLAYWRIGHT_CHROMIUM_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } : {},
   );
   ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await textEditor(ctx);
   await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
   page = await ctx.newPage();
   page.on("pageerror", (e) => assert.fail(`page error: ${e.message}`));
@@ -284,6 +285,7 @@ test("assistant: a rewrite that drops an image is not applied without asking", a
 test("mobile: every action reachable, card as a bottom sheet, reading view fits", async () => {
   await savedState();
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  await textEditor(phone);
   await phone.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
   const p = await phone.newPage();
   p.on("pageerror", (e) => assert.fail(`page error: ${e.message}`));

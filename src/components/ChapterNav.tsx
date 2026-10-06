@@ -21,7 +21,7 @@ interface Props {
   timeWarnings: number;
   /** The novel: data, Guía Maestra, backup and the book's exports (also reachable on a phone, where the title is hidden). */
   onNovel(): void;
-  /** Editor visual, Fase A (docs/editor-visual.md): the switch, per device. */
+  /** Editor visual (docs/editor-visual.md): on by default; the switch turns it off (plain editor), per device. */
   visualEditor: boolean;
   onToggleVisualEditor(): void;
   /** Moves the editor to another chapter before the current one is deleted. */
@@ -112,6 +112,16 @@ export default function ChapterNav({
           Ocultar
         </button>
       </header>
+      {/* At the top, never below the list: on a phone the drawer would hide it under the chapters. */}
+      <button type="button" role="switch" aria-checked={visualEditor} className="editor-switch" onClick={onToggleVisualEditor}>
+        <span className="editor-switch-text">
+          <span className="editor-switch-label">Editor visual</span>
+          <span className="editor-switch-state">{visualEditor ? "Activado" : "Desactivado · editor de texto"}</span>
+        </span>
+        <span className="editor-switch-track" aria-hidden="true">
+          <span className="editor-switch-knob" />
+        </span>
+      </button>
       <ol>
         {chapters.map((c, i) => (
           <li key={c.id} className={c.id === currentId ? "current" : undefined}>
@@ -187,9 +197,6 @@ export default function ChapterNav({
           {timeWarnings > 0 && (
             <span className="muted"> · {timeWarnings === 1 ? "1 advertencia" : `${timeWarnings} advertencias`}</span>
           )}
-        </button>
-        <button className="link" onClick={onToggleVisualEditor} aria-pressed={visualEditor}>
-          Editor visual (prueba): {visualEditor ? "sí" : "no"}
         </button>
         <button className="link" onClick={onNovel}>
           Novela, copia y exportación

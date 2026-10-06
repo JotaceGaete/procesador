@@ -13,7 +13,7 @@ import { BUILD } from "@/lib/diag";
 
 /** What the Workspace decided when it started, recorded by it (not recomputed here). */
 export const editorDecision = {
-  /** «query», «preferencia» or «por defecto». */
+  /** «query», «preferencia» or «por defecto» (shown as «visual (por defecto)», «texto (por preferencia)»…). */
   source: "",
   query: null as string | null,
   pref: null as string | null,
@@ -35,6 +35,16 @@ function storage(): string {
   }
 }
 
+/** «por defecto», «por preferencia», «por query»: the source reads as it is, never «por por». */
+const source = (s: string) => (!s ? "?" : s.startsWith("por ") ? s : `por ${s}`);
+
+/** «visual (por defecto)»; after the switch, also what it was on opening. */
+function solicited(requested: boolean): string {
+  const now = requested ? "visual" : "texto";
+  const opened = `${editorDecision.result || "?"} (${source(editorDecision.source)})`;
+  return editorDecision.result === now ? opened : `${now} (con el interruptor; al abrir: ${opened})`;
+}
+
 function read(requested: boolean): [string, string][] {
   const visual = document.querySelector<HTMLElement>(".visual-editor");
   const pm = document.querySelector<HTMLElement>(".visual-editor .visual-text");
@@ -53,7 +63,7 @@ function read(requested: boolean): [string, string][] {
   const mounted = pm ? "visual" : textarea ? "texto (textarea)" : visual ? "visual sin ProseMirror" : "ninguno";
   return [
     ["commit", BUILD.sha],
-    ["editor solicitado", `${requested ? "visual" : "texto"} (al abrir: ${editorDecision.result || "?"} por ${editorDecision.source || "?"})`],
+    ["editor solicitado", solicited(requested)],
     ["editor montado", `${mounted}${pm ? ` ${box(visual)}, editable=${pm.contentEditable}` : textarea ? ` ${box(textarea)}` : ""}`],
     ["preferencia almacenada", pref],
     ["query editor", `al abrir: ${editorDecision.query ?? "(ninguna)"} · ahora: ${new URLSearchParams(location.search).get("editor") ?? "(ninguna)"}`],

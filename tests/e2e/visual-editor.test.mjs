@@ -1,5 +1,6 @@
-// Editor visual, Fase A (docs/editor-visual.md): the chapter as the book shows it, edited in
-// place, behind a switch (?editor=visual), with `chapters.content` kept in today's format.
+// Editor visual (docs/editor-visual.md): the chapter as the book shows it, edited in place, with
+// `chapters.content` kept in today's format. The default editor; the plain one is the fallback
+// chosen with the switch at the top of the chapter drawer (or ?editor=texto).
 import { test, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
@@ -348,21 +349,36 @@ test("Consejero's «Ir», versions, word count and images on the visual editor",
   await ctx.close();
 });
 
-test("the switch: the plain editor stays the default; the visual one is opt-in and remembered", async () => {
+/** The editor switch at the top of the chapter drawer (opened if needed): role switch, ON/OFF. */
+async function editorSwitch(page, tap = false) {
+  if (!(await page.locator("nav.chapters").isVisible())) await page.locator(".topbar .chapter-title")[tap ? "tap" : "click"]();
+  return page.getByRole("switch", { name: /Editor visual/ });
+}
+
+test("the switch: the visual editor is the default; the plain one is the manual fallback, remembered", async () => {
   await setText(CENTRAL);
-  const { ctx, page } = await open(DESKTOP, "?editor=texto");
-  await page.locator("textarea.editor").waitFor();
-  assert.equal(await page.locator(".visual-editor").count(), 0);
-  if (!(await page.locator("nav.chapters").isVisible())) await page.locator(".topbar .chapter-title").click();
-  await page.getByRole("button", { name: /Editor visual \(prueba\): no/ }).click();
+  // A device that never chose: no query, nothing stored.
+  const { ctx, page } = await open(DESKTOP, "");
   await page.locator(".visual-editor .visual-text figure").waitFor();
-  // Remembered on this device: the address without ?editor= opens the visual editor.
-  await page.goto(`${BASE}/novela/${novel}`);
-  await page.locator(".visual-editor .visual-text").waitFor();
-  if (!(await page.locator("nav.chapters").isVisible())) await page.locator(".topbar .chapter-title").click();
-  await page.getByRole("button", { name: /Editor visual \(prueba\): sí/ }).click();
+  assert.equal(await page.locator("textarea.editor").count(), 0);
+  assert.equal(await page.evaluate(() => localStorage.getItem("editor")), null, "the default is not written as a choice");
+  let sw = await editorSwitch(page);
+  assert.equal(await sw.getAttribute("aria-checked"), "true");
+  assert.match(await sw.innerText(), /Activado/);
+  await sw.click();
   await page.locator("textarea.editor").waitFor();
   assert.equal(await page.locator("textarea.editor").inputValue(), CENTRAL);
+  assert.equal(await page.evaluate(() => localStorage.getItem("editor")), "texto");
+  assert.equal(await sw.getAttribute("aria-checked"), "false");
+  assert.match(await sw.innerText(), /Desactivado/);
+  // Remembered on this device: the address without ?editor= opens the plain editor.
+  await page.goto(`${BASE}/novela/${novel}`);
+  await page.locator("textarea.editor").waitFor();
+  assert.equal(await page.locator(".visual-editor").count(), 0);
+  sw = await editorSwitch(page);
+  await sw.click();
+  await page.locator(".visual-editor .visual-text figure").waitFor();
+  assert.equal(await page.evaluate(() => localStorage.getItem("editor")), "visual");
   await ctx.close();
 });
 
@@ -528,7 +544,7 @@ test("iPhone: the link with ?editor=visual, opened without a session, goes throu
   await assertVisualMounted(page, "from the library");
 });
 
-test("iPhone: the switch in the chapter drawer turns it on, and it stays after reloading and changing chapter", async () => {
+test("iPhone: a new device enters the visual editor; the switch goes back to text, and that stays (reload, other chapter, re-entering the novel)", async () => {
   await setText(CENTRAL);
   const other = (await call(`/api/novels/${novel}/chapters`, "POST", { title: "Otro" })).data.id;
   const { revision } = (await call(`/api/chapters/${other}`)).data;
@@ -539,25 +555,76 @@ test("iPhone: the switch in the chapter drawer turns it on, and it stays after r
   const page = await ctx.newPage();
   page.setDefaultTimeout(15_000);
   page.on("pageerror", (e) => assert.fail(`page error: ${e.message}`));
-  await page.goto(`${BASE}/novela/${novel}`);
+  // From the library, as the author does: no query, nothing stored.
+  await page.goto(`${BASE}/`);
+  await page.getByText("Visual", { exact: true }).first().tap();
+  await assertVisualMounted(page, "new device, by default");
+  assert.match(await footerDiag(page), /editor visual · preferencia: sin elegir \(visual por defecto\)/);
+
+  // Back to the plain editor with the switch.
+  await (await editorSwitch(page, true)).tap();
   await page.locator("textarea.editor").waitFor();
-  assert.match(await footerDiag(page), /editor de texto · preferencia: sin elegir/);
-  if (!(await page.locator("nav.chapters").isVisible())) await page.locator(".topbar .chapter-title").tap();
-  await page.getByRole("button", { name: /Editor visual \(prueba\): no/ }).tap();
-  await assertVisualMounted(page, "after the switch");
+  assert.equal(await page.locator(".visual-editor").count(), 0);
+  assert.equal(await page.evaluate(() => localStorage.getItem("editor")), "texto");
+  const plain = async (what) => {
+    await page.locator("textarea.editor").waitFor();
+    assert.equal(await page.locator(".visual-editor").count(), 0, `${what}: no visual editor`);
+  };
   await page.reload();
-  await assertVisualMounted(page, "after reloading");
+  await plain("after reloading");
   if (!(await page.locator("nav.chapters").isVisible())) await page.locator(".topbar .chapter-title").tap();
   await page.locator(".chapter-name", { hasText: "Otro" }).tap();
   await page.waitForFunction(() => /Otro/.test(document.querySelector(".topbar .chapter-title")?.textContent ?? ""));
-  await assertVisualMounted(page, "in another chapter");
-  assert.match(await footerDiag(page), /editor visual · preferencia: visual/);
-  // And back to the plain editor with the same switch.
-  if (!(await page.locator("nav.chapters").isVisible())) await page.locator(".topbar .chapter-title").tap();
-  await page.getByRole("button", { name: /Editor visual \(prueba\): sí/ }).tap();
-  await page.locator("textarea.editor").waitFor();
-  assert.equal(await page.locator(".visual-editor").count(), 0);
+  await plain("in another chapter");
+  await page.goto(`${BASE}/`);
+  await page.getByText("Visual", { exact: true }).first().tap();
+  await plain("re-entering the novel from the library");
+  assert.match(await footerDiag(page), /editor de texto · preferencia: texto/);
+
+  // And on again: visual, remembered.
+  await (await editorSwitch(page, true)).tap();
+  await assertVisualMounted(page, "switched on again");
+  await page.reload();
+  await assertVisualMounted(page, "on again, after reloading");
+  assert.equal(await page.evaluate(() => localStorage.getItem("editor")), "visual");
   await call(`/api/chapters/${other}`, "DELETE");
+});
+
+test("iPhone 375×627 with 14 chapters: the switch is at the top of the drawer, in sight without scrolling", async () => {
+  await setText(CENTRAL);
+  const extra = [];
+  for (let i = 0; i < 13; i++) extra.push((await call(`/api/novels/${novel}/chapters`, "POST", { title: `Capítulo largo de prueba número ${i + 2}` })).data.id);
+  const ctx = await browser.newContext({ ...IPHONE, viewport: { width: 375, height: 627 } });
+  contexts.add(ctx);
+  await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
+  const page = await ctx.newPage();
+  page.setDefaultTimeout(15_000);
+  page.on("pageerror", (e) => assert.fail(`page error: ${e.message}`));
+  await page.goto(`${BASE}/novela/${novel}`);
+  await assertVisualMounted(page, "375×627, by default");
+  const sw = await editorSwitch(page, true);
+  await sw.waitFor();
+  const geo = await page.evaluate(() => {
+    const nav = document.querySelector("nav.chapters");
+    const el = document.querySelector('nav.chapters [role="switch"]');
+    const r = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return { top: r.top, bottom: r.bottom, h: r.height, vh: innerHeight, scrollTop: nav.scrollTop, overflows: nav.scrollHeight > nav.clientHeight, hit: !!hit && el.contains(hit), firstChapter: document.querySelector("nav.chapters .chapter-name").getBoundingClientRect().top };
+  });
+  assert.ok(geo.overflows, `the list is longer than the screen: ${JSON.stringify(geo)}`);
+  assert.equal(geo.scrollTop, 0);
+  assert.ok(geo.top >= 0 && geo.bottom <= geo.vh, `in sight without scrolling: ${JSON.stringify(geo)}`);
+  assert.ok(geo.hit, `nothing covers it: ${JSON.stringify(geo)}`);
+  assert.ok(geo.top < geo.firstChapter, `above the chapters: ${JSON.stringify(geo)}`);
+  assert.ok(geo.h >= 44, `a finger-sized target: ${JSON.stringify(geo)}`);
+  assert.equal(await sw.getAttribute("aria-checked"), "true");
+  if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/switch-375x627-on.png` });
+  await sw.tap();
+  await page.locator("textarea.editor").waitFor();
+  if (!(await page.locator("nav.chapters").isVisible())) await page.locator(".topbar .chapter-title").tap();
+  assert.equal(await sw.getAttribute("aria-checked"), "false");
+  if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/switch-375x627-off.png` });
+  for (const id of extra) await call(`/api/chapters/${id}`, "DELETE");
 });
 
 /** The TEMPORARY on-screen diagnostic, as rows {key: value}. */
@@ -571,12 +638,22 @@ test("the on-screen diagnostic (temporary) tells which editor was requested and 
   await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
   const page = await ctx.newPage();
   page.setDefaultTimeout(15_000);
+  // A new device (Safari private window): nothing stored, the default.
+  await page.goto(`${BASE}/novela/${novel}`);
+  await assertVisualMounted(page, "diag default");
+  await page.waitForFunction(() => /^creado hace/.test(document.querySelector('.editor-diag-bar [data-key="ProseMirror"] dd')?.textContent ?? ""));
+  let d = await diagRows(page);
+  assert.equal(d["editor solicitado"], "visual (por defecto)");
+  assert.equal(d["preferencia almacenada"], "(nada)");
+  assert.equal(d["query editor"], "al abrir: (ninguna) · ahora: (ninguna)");
+  if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/diag-iphone-default.png` });
+
   await page.goto(`${BASE}/novela/${novel}?editor=visual`);
   await assertVisualMounted(page, "diag visual");
   await page.waitForFunction(() => /^creado hace/.test(document.querySelector('.editor-diag-bar [data-key="ProseMirror"] dd')?.textContent ?? ""));
-  let d = await diagRows(page);
+  d = await diagRows(page);
   assert.match(d["commit"], /^[0-9a-f]{7}$|^\?$/);
-  assert.equal(d["editor solicitado"], "visual (al abrir: visual por query)");
+  assert.equal(d["editor solicitado"], "visual (por query)");
   assert.match(d["editor montado"], /^visual \d+×\d+, editable=true$/);
   assert.equal(d["preferencia almacenada"], "visual");
   assert.equal(d["query editor"], "al abrir: visual · ahora: visual");
@@ -596,7 +673,7 @@ test("the on-screen diagnostic (temporary) tells which editor was requested and 
   await page.locator("textarea.editor").waitFor();
   await page.waitForFunction(() => /textarea/.test(document.querySelector('.editor-diag-bar [data-key="editor montado"] dd')?.textContent ?? ""));
   d = await diagRows(page);
-  assert.equal(d["editor solicitado"], "texto (al abrir: texto por query)");
+  assert.equal(d["editor solicitado"], "texto (por query)");
   assert.match(d["editor montado"], /^texto \(textarea\)/);
   assert.equal(d["preferencia almacenada"], "texto");
   assert.equal(d["ProseMirror"], "no creado");

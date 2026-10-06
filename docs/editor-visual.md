@@ -1,7 +1,8 @@
 # Editor visual · Fase A (prueba de viabilidad)
 
-> Estado: **Fase A terminada, detrás de un interruptor.** El editor de texto plano sigue siendo
-> el predeterminado. Sin cambios en el modelo de datos ni en Supabase.
+> Estado: **Fase A terminada y validada en un iPhone real (Safari).** El editor visual es el
+> **predeterminado**; el editor de texto plano sigue disponible como alternativa manual durante la
+> transición. Sin cambios en el modelo de datos ni en Supabase.
 
 ## Objetivo
 
@@ -16,17 +17,26 @@ de la cursiva.
 No es un procesador de texto genérico: sólo existen los elementos del libro (párrafo, cursiva,
 imagen, separador). Sin fuentes, tamaños, negritas ni listas.
 
-## Cómo se activa
+## Cómo se elige el editor
 
-- En la lista de capítulos: **Editor visual (prueba): no / sí**. Se recuerda en ese dispositivo.
-- O con la dirección: `…/novela/<id>?editor=visual` (y `?editor=texto` para volver).
+- **Por defecto, el editor visual.** Un dispositivo o navegador que nunca eligió (o una ventana
+  privada) entra directamente al editor visual. El predeterminado no se guarda como elección: si
+  algún día cambia, esos dispositivos lo siguen.
+- **Interruptor «Editor visual» (Activado / Desactivado)**, lo primero del cajón de capítulos, por
+  encima de la lista: siempre a la vista, también en un teléfono con muchos capítulos. Desactivado
+  abre el editor de texto antiguo. La elección se guarda **en ese dispositivo y en ese dominio**
+  (`localStorage`, clave `editor`: `visual` o `texto`) y se mantiene al recargar, al cambiar de
+  capítulo y al volver a entrar en la novela.
+- O con la dirección: `…/novela/<id>?editor=texto` (o `?editor=visual`), que también se guarda.
+- Orden: `?editor=` en la dirección → elección guardada → editor visual.
 - Al cambiar, el texto se guarda primero y el otro editor abre ese mismo texto.
 - Si la dirección se abre sin sesión, la entrada (`/login?next=…`) devuelve después a esa misma
-  página con su `?editor=visual` (antes llevaba siempre a la biblioteca y el parámetro se perdía:
-  en el iPhone se abría el editor de texto). `next` sólo acepta rutas de la propia app.
-- **Indicador temporal:** el pie de versión (ventana de la novela, y la biblioteca) dice qué editor
-  está montado, la preferencia guardada en el dispositivo y si el navegador permite guardarla
-  («Versión … · editor visual · preferencia: visual»).
+  página con su `?editor=` (antes llevaba siempre a la biblioteca y el parámetro se perdía).
+  `next` sólo acepta rutas de la propia app.
+- **Indicadores temporales (se retiran al cerrar la transición):** una franja de diagnóstico sobre
+  el editor (editor solicitado y por qué —«visual (por defecto)», «texto (por preferencia)»…—,
+  editor montado, preferencia guardada, ProseMirror creado, errores) y el pie de versión de la
+  ventana de la novela («editor visual · preferencia: sin elegir (visual por defecto)»).
 
 ## Arquitectura
 

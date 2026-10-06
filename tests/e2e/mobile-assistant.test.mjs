@@ -4,7 +4,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { BASE, PASSWORD, client, login, resetDb } from "./helpers.mjs";
+import { BASE, PASSWORD, client, login, resetDb, textEditor } from "./helpers.mjs";
 
 const PHONES = [
   { name: "360 × 740", width: 360, height: 740 },
@@ -30,6 +30,7 @@ after(async () => browser?.close());
 
 async function phone({ width, height }, init) {
   const ctx = await browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 });
+  await textEditor(ctx);
   await ctx.request.post(`${BASE}/api/login`, { data: { password: PASSWORD } });
   if (init) await ctx.addInitScript(init);
   const page = await ctx.newPage();
