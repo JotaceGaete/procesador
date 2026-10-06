@@ -1,5 +1,6 @@
 -- Actualización de una base existente a las fases 1 a 5 del Consejero.
 -- Es la parte nueva de supabase/schema.sql; ejecutar el schema.sql completo también sirve.
+-- Las versiones y la papelera (docs/versiones.md) no están aquí: llegan con schema.sql completo.
 --
 -- Idempotente: se puede ejecutar varias veces. No borra ni modifica datos existentes:
 -- añade la columna novels.auto_digest, las tablas nuevas con sus índices, cada una

@@ -180,7 +180,7 @@ test("Desarrollar escena: estimate shown, proposal only, request carries guide a
   textBefore = await editor().inputValue();
   await clearAiLog();
   await page.getByRole("button", { name: "Desarrollar escena" }).click();
-  await page.waitForSelector("text=Insertar en el cursor");
+  await page.waitForSelector("text=Insertar al final");
   assert.equal(await editor().inputValue(), textBefore, "the manuscript is untouched until the author inserts");
 
   const req = (await aiLog()).at(-1);
@@ -193,14 +193,15 @@ test("Desarrollar escena: estimate shown, proposal only, request carries guide a
 });
 
 test("Desarrollar escena: insert at the cursor as new paragraphs; the proposal leaves the panel; Ctrl+Z removes it", async () => {
-  await page.getByRole("button", { name: "Insertar en el cursor" }).click();
+  await page.getByRole("button", { name: "Insertar al final" }).click();
+  await page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
   const after = await editor().inputValue();
   assert.ok(after.startsWith(textBefore));
   assert.ok(after.includes("\n\nJuan dejó las llaves sobre la mesa."));
   // Used: it leaves the panel; the cursor is right after the scene, in the manuscript.
   assert.equal(await page.locator(".result").count(), 0);
   assert.ok(await editor().evaluate((el) => document.activeElement === el && el.selectionStart === el.selectionEnd && el.value.slice(0, el.selectionStart).endsWith("—dijo él.")));
-  assert.match(await page.locator(".editor-notice.applied").innerText(), /Escena insertada en el cursor\. Deshacer \(Ctrl\/⌘\+Z\)/);
+  assert.match(await page.locator(".editor-notice.applied").innerText(), /Escena insertada al final del capítulo\. Deshacer \(Ctrl\/⌘\+Z\)/);
   await page.keyboard.press("Control+z");
   assert.equal(await editor().inputValue(), textBefore);
 });
@@ -219,10 +220,13 @@ test("edit: chosen provider answers; Original / Propuesta; replace; Ctrl+Z", asy
   await page.getByRole("button", { name: "Proponer cambios" }).click();
   await page.waitForSelector("text=Reemplazar selección");
   assert.equal((await aiLog()).at(-1).provider, "openai");
-  assert.deepEqual(await page.locator(".compare h3").allInnerTexts(), ["Original", "Propuesta"]);
+  // Before applying, the comparison: the author's text and the proposal (docs/asistente-contexto.md §9).
+  assert.deepEqual(await page.locator(".compare-tabs button").allInnerTexts(), ["Cambios", "Propuesta", "Tu texto"]);
+  await page.getByLabel("Cambios que propone la IA").locator("ins").waitFor();
 
   const before = await editor().inputValue();
   await page.getByRole("button", { name: "Reemplazar selección" }).click();
+  await page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
   assert.ok((await editor().inputValue()).startsWith("Texto propuesto por el modelo."));
   // Used: the proposal leaves the panel, the cursor is at the end of the new text (not selecting it).
   assert.equal(await page.locator(".result").count(), 0);

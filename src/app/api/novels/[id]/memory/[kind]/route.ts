@@ -4,6 +4,7 @@ import { db, getNovel } from "@/lib/supabase";
 import { HttpError, pickFields, readJson } from "@/lib/http";
 import { isMemoryKind, MAX_CHARACTERS, MEMORY_KINDS } from "@/lib/memory";
 import { readCharacterIds, setFactCharacters } from "@/lib/memory-server";
+import { readCharacterTime } from "@/lib/chronology-server";
 
 type Ctx = { params: Promise<{ id: string; kind: string }> };
 
@@ -24,10 +25,12 @@ export const POST = handler<Ctx>(async (request, { params }) => {
     if ((count ?? 0) >= MAX_CHARACTERS) throw new HttpError(400, `Máximo ${MAX_CHARACTERS} personajes por novela.`);
   }
   const characterIds = kind === "facts" ? (readCharacterIds(body.character_ids) ?? []) : undefined;
+  // Cronología: the age anchor, approximate age and death (docs/cronologia-edades.md).
+  const time = kind === "characters" ? await readCharacterTime(body, novel.id) : {};
 
   const { data, error } = await db()
     .from(config.table)
-    .insert({ ...fields, novel_id: novel.id })
+    .insert({ ...fields, ...time, novel_id: novel.id })
     .select("*")
     .single();
   if (error) throw error;

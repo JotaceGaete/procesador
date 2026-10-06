@@ -4,6 +4,7 @@ import { assertId, db } from "@/lib/supabase";
 import { HttpError, pickFields, readJson } from "@/lib/http";
 import { isMemoryKind, MEMORY_KINDS } from "@/lib/memory";
 import { readCharacterIds, setFactCharacters } from "@/lib/memory-server";
+import { readCharacterTime } from "@/lib/chronology-server";
 import { deleteUnusedAssets } from "@/lib/assets-server";
 
 type Ctx = { params: Promise<{ kind: string; id: string }> };
@@ -22,10 +23,19 @@ export const PATCH = handler<Ctx>(async (request, { params }) => {
   if (config.required in fields && !fields[config.required]?.trim()) throw new HttpError(400, config.label);
   if ("status" in fields && !["approved", "suggested"].includes(String(fields.status))) throw new HttpError(400, "Estado de hecho desconocido.");
   const characterIds = kind === "facts" ? readCharacterIds(body.character_ids) : undefined;
-  if (!Object.keys(fields).length && !characterIds) throw new HttpError(400, "Nada que guardar");
+  // Cronología: the character's time fields, validated against its own novel.
+  let time = {};
+  if (kind === "characters" && ["age_anchor", "age_approx", "death"].some((k) => k in body)) {
+    const { data: owner, error: ownerError } = await db().from("characters").select("novel_id").eq("id", id).maybeSingle();
+    if (ownerError) throw ownerError;
+    if (!owner) throw new HttpError(404, "Elemento no encontrado");
+    time = await readCharacterTime(body, owner.novel_id);
+  }
+  const changes = { ...fields, ...time };
+  if (!Object.keys(changes).length && !characterIds) throw new HttpError(400, "Nada que guardar");
 
-  const query = Object.keys(fields).length
-    ? db().from(config.table).update(fields).eq("id", id).select("*").maybeSingle()
+  const query = Object.keys(changes).length
+    ? db().from(config.table).update(changes).eq("id", id).select("*").maybeSingle()
     : db().from(config.table).select("*").eq("id", id).maybeSingle();
   const { data, error } = await query;
   if (error) throw error;

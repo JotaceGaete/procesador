@@ -170,6 +170,17 @@ input:focus,
   text-overflow: ellipsis;
   max-width: 40%;
 }
+.topbar .format-actions {
+  display: inline-flex;
+  gap: 10px;
+}
+.topbar .format {
+  font-family: var(--serif);
+  font-size: 15px;
+}
+.topbar .format:disabled {
+  opacity: 0.4;
+}
 .topbar .chapter-title {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1404,19 +1415,62 @@ details.group > p {
 }
 
 /* ---------- Images of the book ---------- */
+/* Lectura: the page of a novel, not of a website (src/lib/presentation.ts). Paragraphs follow one
+   another without space, with a first-line indent (none after the heading, a scene break or an
+   image); only scene breaks and images open deliberate space. A column of about 65 characters. */
 .reading {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 24px max(24px, calc((100% - 66ch) / 2)) 30vh;
+  padding: 24px max(24px, calc((100% - 34em) / 2)) 30vh;
   font-family: var(--serif);
   font-size: 19px;
-  line-height: 1.7;
+  /* A novel's leading: 1.45 (27.5 px at 19 px). Paragraphs follow at this same step: no margin,
+     no extra space for dialogue. Measured and protected in tests/e2e/format.test.mjs. */
+  line-height: 1.45;
   color: var(--prose);
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures;
 }
 .reading p {
-  margin: 0 0 1em;
-  white-space: pre-wrap;
+  margin: 0;
+  text-indent: 1.5em;
+  overflow-wrap: break-word;
+}
+.reading p.first {
+  text-indent: 0;
+}
+.reading-chapter {
+  text-align: center;
+  margin: 2.5em 0 2.2em;
+}
+.reading-number {
+  font-size: 0.8em;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.reading-chapter h2 {
+  font-family: var(--serif);
+  font-weight: normal;
+  font-size: 1.45em;
+  line-height: 1.3;
+  margin: 0.4em 0 0;
+}
+/* A scene break: one blank line's worth of space on each side, and the ornament between. */
+.reading .scene-break {
+  border: 0;
+  height: auto;
+  margin: 1.6em 0;
+  text-align: center;
+  overflow: visible;
+  line-height: 1;
+}
+.reading .scene-break::after {
+  content: "* * *";
+  color: var(--muted);
+  letter-spacing: 0.5em;
+  padding-left: 0.5em;
 }
 .reading::after {
   content: "";
@@ -2145,4 +2199,296 @@ details.group > p {
   border: 1px dashed #c9a400;
   padding: 4px 6px;
   margin: 0;
+}
+
+/* ---------- Versions, trash and backup (docs/versiones.md) ---------- */
+.chapters .nav-extra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+.version-save {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.version-save input {
+  flex: 1;
+  min-width: 0;
+}
+.versions {
+  list-style: none;
+  margin: 12px 0;
+  padding: 0;
+}
+.versions li {
+  border-top: 1px solid var(--faint);
+}
+.versions li:last-child {
+  border-bottom: 1px solid var(--faint);
+}
+.versions .version {
+  display: grid;
+  grid-template-columns: 11em 1fr auto;
+  gap: 4px 12px;
+  align-items: baseline;
+  width: 100%;
+  padding: 10px 2px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.versions .version:hover,
+.versions .version:focus-visible {
+  background: var(--selection);
+}
+.version-when {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.trash-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 2px;
+}
+.version-head {
+  margin: 0 0 4px;
+}
+.diff {
+  max-height: 55vh;
+  overflow-y: auto;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.diff ins {
+  text-decoration: none;
+  background: color-mix(in srgb, #2e8b57 22%, transparent);
+}
+.diff del {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.diff-gap {
+  font-family: var(--sans);
+}
+.backup {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--faint);
+}
+@media (max-width: 520px) {
+  .versions .version {
+    grid-template-columns: 1fr;
+  }
+  .version-save {
+    flex-direction: column;
+  }
+}
+
+/* ---------- Comparar antes de aplicar (docs/asistente-contexto.md) ---------- */
+.compare-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.compare-tabs button {
+  border: 1px solid var(--faint);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.compare-tabs button.on {
+  color: var(--text);
+  border-color: var(--text);
+}
+.compare-summary,
+.insert-where {
+  margin: 4px 0 0;
+}
+.panel .diff {
+  max-height: 45vh;
+  font-size: 15px;
+}
+.diff-mark {
+  display: inline-block;
+  margin: 2px 0;
+  padding: 0 6px;
+  border: 1px dashed var(--muted);
+  border-radius: 4px;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--muted);
+}
+@media (max-width: 999px) {
+  /* In the bottom sheet, the comparison leaves room for the buttons below it. */
+  .panel .diff {
+    max-height: 32dvh;
+  }
+}
+
+/* ---------- Where a scene goes (docs/asistente-contexto.md §11) ---------- */
+.insert-where strong {
+  font-weight: 600;
+}
+.insert-options {
+  margin: 4px 0 0;
+}
+
+/* ---------- Cronología (docs/cronologia-edades.md) ---------- */
+.story-date {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.story-date input {
+  width: 7em;
+}
+.story-date input[aria-label="Día"] {
+  width: 4.5em;
+}
+.age-at {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.age-at input[aria-label="Años que tenía"] {
+  width: 5em;
+}
+.age-now {
+  color: var(--text);
+}
+.chrono-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: flex-end;
+}
+.chrono-head p {
+  flex: 1 1 18em;
+  margin: 0;
+}
+/* The table scrolls inside the window on a phone; the page never does. */
+.chrono-table-wrap {
+  overflow-x: auto;
+  margin: 12px 0;
+  max-width: 100%;
+}
+.chrono-table {
+  border-collapse: collapse;
+  font-size: 14px;
+  min-width: 100%;
+}
+.chrono-table th,
+.chrono-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--faint);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.chrono-table tr.current th[scope="row"] {
+  font-weight: 600;
+}
+.chrono-table td.warned {
+  color: var(--danger);
+  font-weight: 600;
+}
+.time-label.estimated {
+  font-style: italic;
+  color: var(--muted);
+}
+.time-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  white-space: normal;
+  min-width: 18em;
+}
+.interval-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.interval input {
+  width: 4em;
+}
+.time-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+.chrono-warnings h3 {
+  font-size: 15px;
+  margin: 8px 0 4px;
+}
+.chrono-warnings ul {
+  margin: 0;
+  padding-left: 1.2em;
+}
+.chrono-warnings li {
+  margin: 4px 0;
+}
+.warning-level {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.warning.error .warning-level {
+  color: var(--danger);
+}
+.warning.review .warning-level {
+  color: var(--accent);
+}
+
+/* ---------- Libro: datos y exportación (docs/exportacion.md) ---------- */
+.book-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+.book-export {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--faint);
+}
+.book-export h3 {
+  font-size: 15px;
+  margin: 0 0 6px;
+}
+.book-checks {
+  margin: 6px 0;
+  padding-left: 1.2em;
+  font-size: 14px;
+}
+.book-checks li {
+  margin: 3px 0;
+}
+.book-checks li.warning::marker {
+  color: var(--danger);
+}
+.book-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 4px;
 }

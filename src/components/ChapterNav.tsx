@@ -13,11 +13,19 @@ interface Props {
   onSelect(id: string): void;
   onChange(chapters: ChapterInfo[]): void;
   onClose(): void;
+  /** The current chapter's versions, and the novel's trash (docs/versiones.md). */
+  onVersions(): void;
+  onTrash(): void;
+  /** Cronología (docs/cronologia-edades.md), with the time warnings not dismissed. */
+  onChronology(): void;
+  timeWarnings: number;
+  /** The novel: data, Guía Maestra, backup and the book's exports (also reachable on a phone, where the title is hidden). */
+  onNovel(): void;
   /** Moves the editor to another chapter before the current one is deleted. */
   beforeDeleteCurrent(neighborId: string): Promise<boolean>;
 }
 
-/** Discreet chapter list: select, add, rename, reorder (↑ ↓) and delete. */
+/** Discreet chapter list: select, add, rename, reorder (↑ ↓) and delete (to the trash); versions and trash. */
 export default function ChapterNav({
   hidden,
   novelId,
@@ -26,6 +34,11 @@ export default function ChapterNav({
   onSelect,
   onChange,
   onClose,
+  onVersions,
+  onTrash,
+  onChronology,
+  timeWarnings,
+  onNovel,
   beforeDeleteCurrent,
 }: Props) {
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -74,7 +87,7 @@ export default function ChapterNav({
 
   const remove = (c: ChapterInfo, index: number) => {
     const words = c.words ? ` y sus ${c.words.toLocaleString("es")} palabras` : "";
-    if (!confirm(`¿Eliminar «${chapterLabel(index, c.title)}»${words}? No se puede deshacer.`)) return;
+    if (!confirm(`¿Eliminar «${chapterLabel(index, c.title)}»${words}? Irá a la papelera, donde podrás recuperarlo durante 30 días.`)) return;
     run(async () => {
       if (c.id === currentId) {
         const neighbor = chapters[index + 1] ?? chapters[index - 1];
@@ -157,6 +170,23 @@ export default function ChapterNav({
       <button className="link add" onClick={add} disabled={busy}>
         + Nuevo capítulo
       </button>
+      <p className="nav-extra">
+        <button className="link" onClick={onVersions}>
+          Versiones de este capítulo
+        </button>
+        <button className="link" onClick={onTrash}>
+          Papelera
+        </button>
+        <button className="link" onClick={onChronology}>
+          Cronología
+          {timeWarnings > 0 && (
+            <span className="muted"> · {timeWarnings === 1 ? "1 advertencia" : `${timeWarnings} advertencias`}</span>
+          )}
+        </button>
+        <button className="link" onClick={onNovel}>
+          Novela, copia y exportación
+        </button>
+      </p>
     </nav>
   );
 }

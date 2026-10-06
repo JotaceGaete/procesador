@@ -1,5 +1,5 @@
 import { nameMatcher } from "../ai/context";
-import { MARKER_RE, countWords } from "../manuscript";
+import { countWords, proseOnly } from "../manuscript";
 
 /**
  * The Consejero's deterministic base (docs/consejero.md, phase 1): what can be
@@ -38,10 +38,6 @@ export interface Presence {
   wordsSince: number | null;
 }
 
-/** Image markers become spaces of the same length, so offsets keep matching the real text. */
-export function proseOnly(text: string): string {
-  return text.replace(MARKER_RE, (m) => " ".repeat(m.length));
-}
 
 function mentions(text: string, entity: Named): number[] {
   const one = nameMatcher(entity);

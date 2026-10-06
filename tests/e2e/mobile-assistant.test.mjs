@@ -88,7 +88,8 @@ for (const size of PHONES) {
     await panel.getByRole("button", { name: "Proponer cambios" }).tap();
     await panel.getByRole("button", { name: "Reemplazar selección" }).waitFor();
     assert.equal(await px(panel.locator(".result"), "fontSize"), 14);
-    assert.equal(await px(panel.locator(".compare .prose").last(), "fontSize"), 15);
+    // The comparison before applying (docs/asistente-contexto.md §9): prose at 15 px.
+    assert.equal(await px(panel.locator(".compare .diff").last(), "fontSize"), 15);
     const result = await box(panel.locator(".result"));
     const sheetNow = await box(panel);
     assert.ok(result.top >= sheetNow.top && result.top < sheetNow.top + 80, `the answer at the top of the sheet (${result.top - sheetNow.top}px), not below the controls`);
@@ -141,6 +142,7 @@ test("390: Reemplazar → the proposal leaves, the sheet closes, the cursor ends
   await select(page, editor, 0, first);
   await panel.getByRole("button", { name: "Proponer cambios" }).tap();
   await panel.getByRole("button", { name: "Reemplazar selección" }).tap();
+  await page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
 
   assert.ok((await editor.inputValue()).startsWith(`${REWRITE}\n\nPárrafo 1`));
   assert.ok(!(await panel.isVisible()), "the sheet closes: the manuscript is in view");
@@ -176,8 +178,11 @@ test("360: Insertar una escena → cursor at the end of the scene, ready to keep
   await openAssistant(page);
   await panel.getByRole("button", { name: "Escribir escena" }).tap();
   await page.getByPlaceholder(/Qué ocurre en la escena/).fill("Juan vuelve tarde.");
+  // Deliberately at the cursor (docs/asistente-contexto.md §11): the position is fixed now.
+  await panel.getByRole("radio", { name: "En el cursor" }).tap();
   await panel.getByRole("button", { name: "Desarrollar escena" }).tap();
-  await panel.getByRole("button", { name: "Insertar en el cursor" }).tap();
+  await panel.getByRole("button", { name: "Insertar en el cursor", exact: true }).tap();
+  await page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
   const value = await editor.inputValue();
   const end = value.indexOf("—dijo él.") + "—dijo él.".length;
   assert.ok(value.slice(end).startsWith("\n\nPárrafo 3"), "the scene in its own paragraphs, before the next one");
@@ -229,7 +234,8 @@ test("390: two pending proposals: using one never clears the other", async () =>
   assert.equal(await panel.locator(".result").count(), 0, "each tab shows its own");
   await page.getByPlaceholder(/Qué ocurre en la escena/).fill("Juan vuelve tarde.");
   await panel.getByRole("button", { name: "Desarrollar escena" }).tap();
-  await panel.getByRole("button", { name: "Insertar en el cursor" }).tap();
+  await panel.getByRole("button", { name: "Insertar al final" }).tap();
+  await page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
   assert.ok((await editor.inputValue()).includes("Juan dejó las llaves"));
 
   // The rewrite, never used, is still waiting.
@@ -241,10 +247,10 @@ test("390: two pending proposals: using one never clears the other", async () =>
   // Limpiar in one tab leaves the other alone.
   await page.getByPlaceholder(/Qué ocurre en la escena/).fill("Otra escena.");
   await panel.getByRole("button", { name: "Desarrollar escena" }).tap();
-  await panel.getByRole("button", { name: "Insertar en el cursor" }).waitFor();
+  await panel.getByRole("button", { name: "Insertar al final" }).waitFor();
   await panel.getByRole("button", { name: "Editar selección" }).tap();
   await panel.getByRole("button", { name: "Limpiar" }).tap();
   await panel.getByRole("button", { name: "Escribir escena" }).tap();
-  assert.ok(await panel.getByRole("button", { name: "Insertar en el cursor" }).isVisible());
+  assert.ok(await panel.getByRole("button", { name: "Insertar al final" }).isVisible());
   await ctx.close();
 });

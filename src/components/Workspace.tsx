@@ -2,18 +2,33 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AIPanelSection, Chapter, Fact, ChapterInfo, CharacterImage, ManuscriptImage, Memory, Novel, ProviderId } from "@/lib/types";
+import type {
+  AIPanelSection,
+  Chapter,
+  ChronologyView,
+  Fact,
+  ChapterInfo,
+  CharacterImage,
+  ManuscriptImage,
+  Memory,
+  Novel,
+  ProviderId,
+} from "@/lib/types";
 import { api, readPref, writePref } from "@/lib/client";
 import { chapterLabel } from "@/lib/ai/context";
 import type { SaveState } from "./useAutosave";
 import ChapterEditor, { type EditorHandle, type Selection } from "./ChapterEditor";
 import ChapterNav from "./ChapterNav";
+import { TrashModal, VersionsModal } from "./Versions";
+import { ChronologyModal } from "./Chronology";
 import NovelModal from "./NovelModal";
 import MemoryModal from "./MemoryModal";
 import AssistantPanel from "./AssistantPanel";
 import { ChapterImagesModal, ImageCard, ReadingView, type Pending } from "./ManuscriptImages";
 import { addManuscriptImage, rejectReason, replaceImage } from "@/lib/upload";
 import { imageAt, imageIds } from "@/lib/manuscript";
+import { chapterHeading } from "@/lib/presentation";
+import { resolveAnchor, type InsertTarget } from "@/lib/placement";
 
 interface Loaded {
   novel: Novel;
@@ -83,7 +98,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
   // Chapters written in during this visit: leaving one may re-read it (Consejero, auto_digest).
   const edited = useRef(new Set<string>());
   const [focusMode, setFocusMode] = useState(false);
-  const [modal, setModal] = useState<"novel" | "memory" | "images" | null>(null);
+  const [modal, setModal] = useState<"novel" | "memory" | "images" | "versions" | "trash" | "chronology" | null>(null);
   const editorRef = useRef<EditorHandle>(null);
 
   const openChapter = useCallback(async (id: string) => {
@@ -268,6 +283,42 @@ export default function Workspace({ novelId }: { novelId: string }) {
     };
   }, []);
 
+  /**
+   * Keeps the text as it is now as a version (docs/versiones.md) before something replaces it.
+   * The text is taken right away, so what follows can change the editor at once.
+   */
+  const keepVersion = useCallback(
+    (reason: "ai" | "restore") => {
+      const content = editorRef.current?.getContent();
+      if (!chapter || content === undefined) return Promise.resolve();
+      return api(`/api/chapters/${chapter.id}/versions`, { method: "POST", json: { reason, content } });
+    },
+    [chapter],
+  );
+  /**
+   * Applying a proposal of the Asistente (docs/asistente-contexto.md, «Comparar antes de
+   * aplicar»): the current text is kept as a version first, and only then does the manuscript
+   * change. If the copy can't be saved, nothing is applied (the panel keeps the proposal).
+   */
+  const keepBeforeAI = useCallback(async () => {
+    try {
+      await keepVersion("ai");
+    } catch {
+      throw new Error("No se pudo guardar una copia del texto actual, así que no se ha aplicado nada. Vuelve a intentarlo.");
+    }
+  }, [keepVersion]);
+  /** Versiones → Restaurar: the current text becomes a version first; if that fails, nothing changes. */
+  const restoreVersion = useCallback(
+    async (text: string) => {
+      await keepVersion("restore");
+      setModal(null);
+      setReading(null);
+      editorRef.current?.replaceAll(text);
+      setApplied("Versión restaurada en el manuscrito.");
+    },
+    [keepVersion],
+  );
+
   const afterApply = useCallback((ok: boolean, message: string) => {
     if (ok) {
       setApplied(message);
@@ -275,14 +326,37 @@ export default function Workspace({ novelId }: { novelId: string }) {
     }
     return ok;
   }, []);
+  /** The editor's own edit; if the browser refuses it, nothing was applied (false). */
+  const attempt = (edit: () => boolean | undefined) => {
+    try {
+      return edit() ?? false;
+    } catch {
+      return false;
+    }
+  };
   const applyRewrite = useCallback(
-    (original: Selection, text: string) =>
-      afterApply(editorRef.current?.applyRewrite(original, text) ?? false, "Reemplazado en el manuscrito."),
-    [afterApply],
+    async (original: Selection, text: string) => {
+      await keepBeforeAI();
+      return afterApply(attempt(() => editorRef.current?.applyRewrite(original, text)), "Reemplazado en el manuscrito.");
+    },
+    [afterApply, keepBeforeAI],
   );
-  const insertAtCursor = useCallback(
-    (text: string) => afterApply(editorRef.current?.insertAtCursor(text) ?? false, "Escena insertada en el cursor."),
-    [afterApply],
+  /**
+   * A scene of the Asistente, where the panel says (docs/asistente-contexto.md §11): the
+   * chapter's real end at this moment, or the fixed position, found again by its anchor
+   * after the copy is saved. If that place is gone, nothing is inserted.
+   */
+  const insertScene = useCallback(
+    async (text: string, target: InsertTarget) => {
+      await keepBeforeAI();
+      if (target.kind === "end")
+        return afterApply(attempt(() => editorRef.current?.insertAtEnd(text)), "Escena insertada al final del capítulo.");
+      const at = resolveAnchor(editorRef.current?.getContent() ?? "", target.anchor);
+      if (at === null)
+        throw new Error("El texto alrededor del lugar fijado cambió y ya no se encuentra. Fíjalo de nuevo o inserta al final.");
+      return afterApply(attempt(() => editorRef.current?.insertAt(at, text)), "Escena insertada en el lugar fijado.");
+    },
+    [afterApply, keepBeforeAI],
   );
   const clearSelection = useCallback(() => editorRef.current?.clearSelection(), []);
 
@@ -349,6 +423,18 @@ export default function Workspace({ novelId }: { novelId: string }) {
     [novelId],
   );
 
+  // Cronología (docs/cronologia-edades.md): computed on the server; reloaded when the memory or
+  // the chapters change, and when the view opens (who appears where depends on the texts).
+  const [chronologyView, setChronologyView] = useState<ChronologyView | null>(null);
+  const refreshChronology = useCallback(
+    () => api<ChronologyView>(`/api/novels/${novelId}/chronology`).then(setChronologyView).catch(() => {}),
+    [novelId],
+  );
+  useEffect(() => {
+    if (loaded) void refreshChronology();
+  }, [loaded, memory, chapters, refreshChronology]);
+  const timeWarnings = chronologyView?.warnings.filter((w) => !w.dismissed).length ?? 0;
+
   if (loadError) {
     return (
       <main className="fatal">
@@ -379,6 +465,24 @@ export default function Workspace({ novelId }: { novelId: string }) {
         onSelect={switchChapter}
         onChange={setChapters}
         onClose={() => toggle("navOpen", setNavOpen)}
+        onVersions={() => {
+          if (narrow()) setNavOpen(false);
+          setModal("versions");
+        }}
+        onTrash={() => {
+          if (narrow()) setNavOpen(false);
+          setModal("trash");
+        }}
+        timeWarnings={timeWarnings}
+        onChronology={() => {
+          if (narrow()) setNavOpen(false);
+          void refreshChronology();
+          setModal("chronology");
+        }}
+        onNovel={() => {
+          if (narrow()) setNavOpen(false);
+          setModal("novel");
+        }}
         beforeDeleteCurrent={async (neighborId) => {
           if (!(await leaveChapter())) return false;
           await openChapter(neighborId);
@@ -399,7 +503,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
           >
             ←
           </Link>
-          <button className="link title" onClick={() => setModal("novel")} title="Novela y Guía Maestra">
+          <button className="link title" onClick={() => setModal("novel")} title="Novela, Guía Maestra y libro">
             {novel.title}
           </button>
           <button
@@ -412,6 +516,29 @@ export default function Workspace({ novelId }: { novelId: string }) {
           <span className="spacer" />
           <span className="meta words">{stats.words.toLocaleString("es")} palabras</span>
           <SaveStatus state={save.state} onRetry={save.retry} onOverwrite={save.overwrite} />
+          {/* Formato (docs/formato-texto.md). The text keeps the focus, and with it the selection. */}
+          <span className="format-actions">
+            <button
+              className="link format"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => editorRef.current?.toggleItalic()}
+              disabled={reading !== null}
+              title="Cursiva (Ctrl/⌘+I): *así*"
+              aria-label="Cursiva"
+            >
+              <em>C</em>
+            </button>
+            <button
+              className="link format"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => editorRef.current?.insertSeparator()}
+              disabled={reading !== null}
+              title="Separador de escena"
+              aria-label="Separador de escena"
+            >
+              ⁂
+            </button>
+          </span>
           <button
             className="link"
             onClick={() => {
@@ -466,6 +593,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
         {reading !== null && (
           <ReadingView
             text={reading}
+            heading={current ? chapterHeading(chapterIndex, current.title) : undefined}
             images={manuscriptImages}
             pending={pending}
             onOpen={(id) => {
@@ -562,7 +690,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
         getContent={getContent}
         getCursor={getCursor}
         onApply={applyRewrite}
-        onInsert={insertAtCursor}
+        onInsert={insertScene}
         onClearSelection={clearSelection}
       />
 
@@ -611,6 +739,40 @@ export default function Workspace({ novelId }: { novelId: string }) {
           onClose={() => setModal(null)}
         />
       )}
+      {modal === "versions" && (
+        <VersionsModal
+          chapterId={chapter.id}
+          chapterTitle={current ? chapterLabel(chapterIndex, current.title) : chapter.title}
+          getContent={getContent}
+          onRestore={restoreVersion}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal === "trash" && (
+        <TrashModal
+          novelId={novel.id}
+          onRestored={(id, list) => {
+            setChapters(list);
+            setModal(null);
+            refreshManuscriptImages();
+            void switchChapter(id);
+          }}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal === "chronology" && chronologyView && (
+        <ChronologyModal
+          novelId={novel.id}
+          view={chronologyView}
+          currentChapterId={chapter.id}
+          onChanged={refreshChronology}
+          onGoTo={(id) => {
+            setModal(null);
+            void switchChapter(id);
+          }}
+          onClose={() => setModal(null)}
+        />
+      )}
       {modal === "memory" && (
         <MemoryModal
           novelId={novel.id}
@@ -622,6 +784,8 @@ export default function Workspace({ novelId }: { novelId: string }) {
           manuscriptImages={manuscriptImages}
           onAllImagesChange={setAll}
           onInsertInChapter={insertFromAsset}
+          chronology={chronologyView}
+          currentChapterId={chapter.id}
           onClose={() => setModal(null)}
         />
       )}

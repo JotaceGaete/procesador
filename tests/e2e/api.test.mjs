@@ -320,8 +320,10 @@ test("Desarrollar escena (Claude): WRITE instructions, guide, relevant memory, a
   assert.doesNotMatch(system, /### Rosa/, "unrelated character left out");
   assert.ok(system.includes("Elena → desconfía de → Juan Ortega"));
   assert.ok(system.includes("Casa antigua de dos pisos"), "place named by alias");
-  assert.ok(system.includes("Juan todavía no sabe"));
-  assert.match(system, /posterior al capítulo actual/);
+  // Temporal ignorance (docs/asistente-contexto.md §8): writing chapter 1, the fact of chapter 2
+  // is not sent at all, not even marked as later.
+  assert.ok(!system.includes("Juan todavía no sabe"));
+  assert.doesNotMatch(system, /posterior al capítulo actual/);
   assert.ok(!system.includes("Ardió la bodega"), "other chapters' text not sent by default");
   const prompt = sent.messages[0].content;
   assert.ok(prompt.includes("<argumento>") && prompt.includes("Elena no dormía."));

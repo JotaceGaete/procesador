@@ -72,7 +72,7 @@ Reglas del formato, documentadas en `src/lib/manuscript.ts`, que leen tanto el e
 
 1. Un marcador es `[[imagen:<uuid>]]` **solo en su propia línea** (se ignoran espacios alrededor). El editor lo inserta siempre como párrafo propio, con líneas en blanco antes y después.
 2. Un marcador dentro de un párrafo con texto no es una imagen: el editor lo señala ("marcador dentro de un párrafo") y la exportación lo trata como texto.
-3. La sintaxis `[[…]]` queda reservada para bloques futuros del formato, como un separador de escena `[[separador]]`.
+3. La sintaxis `[[…]]` queda reservada para bloques del formato. Además de la imagen, ya existe el separador de escena `[[separador]]` ([formato del texto](formato-texto.md)).
 
 Los datos (pie, texto alternativo, disposición, archivo) no están en el texto. Cambiarlos no toca el capítulo, no cambia su revisión y no provoca conflictos.
 

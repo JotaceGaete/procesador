@@ -16,6 +16,9 @@ import {
 import { api } from "@/lib/client";
 import { chapterLabel } from "@/lib/ai/context";
 import Modal from "./Modal";
+import { CharacterTimeEditor } from "./Chronology";
+import type { AgeAnchor, StoryDate } from "@/lib/chronology";
+import type { ChronologyView } from "@/lib/types";
 import { CharacterCard, CharacterVisual } from "./CharacterGallery";
 
 interface Props {
@@ -33,6 +36,9 @@ interface Props {
   onAllImagesChange(all: { images: CharacterImage[]; manuscriptImages: ManuscriptImage[] }): void;
   /** Inserts a gallery file in the open chapter, at the cursor, without copying it. */
   onInsertInChapter(assetId: string): void;
+  /** Cronología: the calendar and the ages computed per chapter (docs/cronologia-edades.md). */
+  chronology: ChronologyView | null;
+  currentChapterId: string;
   onClose(): void;
 }
 
@@ -72,7 +78,7 @@ const RELATION_SUGGESTIONS = [
   "está enamorado de",
 ];
 
-type Draft = Record<string, string | string[] | null>;
+type Draft = Record<string, unknown>;
 
 /** Narrative memory of one novel: a list per kind; picking an item swaps the list for its form. */
 export default function MemoryModal({
@@ -85,6 +91,8 @@ export default function MemoryModal({
   onImagesChange,
   onAllImagesChange,
   onInsertInChapter,
+  chronology,
+  currentChapterId,
   onClose,
 }: Props) {
   const [tab, setTab] = useState<MemoryKind>("characters");
@@ -102,7 +110,7 @@ export default function MemoryModal({
     setEditing({ id, draft, original: JSON.stringify(draft) });
   };
   const leave = (then: () => void) => (!dirty || confirm("Hay cambios sin guardar. ¿Descartarlos?")) && then();
-  const set = (key: string, value: string | string[] | null) =>
+  const set = (key: string, value: unknown) =>
     setEditing((e) => e && { ...e, draft: { ...e.draft, [key]: value } });
 
   async function save() {
@@ -181,7 +189,13 @@ export default function MemoryModal({
   };
 
   const blank = (): Draft => {
-    if (tab === "characters") return Object.fromEntries(CHARACTER_SECTIONS.flatMap((s) => s.fields.map((f) => [f.key, ""])));
+    if (tab === "characters")
+      return {
+        ...Object.fromEntries(CHARACTER_SECTIONS.flatMap((s) => s.fields.map((f) => [f.key, ""]))),
+        age_anchor: null,
+        age_approx: false,
+        death: null,
+      };
     if (tab === "places") return { name: "", aliases: "", description: "", notes: "" };
     if (tab === "relationships")
       return { from_id: memory.characters[0]?.id ?? "", kind: "", to_id: memory.characters[1]?.id ?? "", note: "" };
@@ -189,7 +203,8 @@ export default function MemoryModal({
   };
   const toDraft = (item: { id: string }): Draft => {
     const d: Draft = {};
-    for (const key of Object.keys(blank())) d[key] = (item as unknown as Draft)[key] ?? (key === "character_ids" ? [] : "");
+    const empty = blank();
+    for (const key of Object.keys(empty)) d[key] = (item as unknown as Draft)[key] ?? (key === "character_ids" ? [] : empty[key]);
     return d;
   };
 
@@ -232,10 +247,26 @@ export default function MemoryModal({
                 </details>
               ));
               const saved = editing.id ? memory.characters.find((c) => c.id === editing.id) : null;
+              const chapterIndex = chapters.findIndex((c) => c.id === currentChapterId);
+              const timeEditor = (
+                <CharacterTimeEditor
+                  key={`time-${editing.id ?? "new"}`}
+                  value={{
+                    age_anchor: (d.age_anchor as AgeAnchor | null) ?? null,
+                    age_approx: d.age_approx === true,
+                    death: (d.death as StoryDate | null) ?? null,
+                  }}
+                  onChange={(v) => setEditing((e) => e && { ...e, draft: { ...e.draft, ...v } })}
+                  chapters={chapters}
+                  calendar={chronology?.calendar ?? "real"}
+                  now={(saved && chronology?.characters.find((c) => c.id === saved.id)?.ages[chapterIndex]) ?? null}
+                />
+              );
               if (!saved) {
                 return (
                   <>
                     {sections[0]}
+                    {timeEditor}
                     <div className="group static">
                       <span className="group-title">Galería</span>
                       <p className="muted small">Guarda la ficha para añadir la imagen principal y referencias visuales.</p>
@@ -260,6 +291,7 @@ export default function MemoryModal({
                   >
                     {sections[0]}
                   </CharacterVisual>
+                  {timeEditor}
                   {sections.slice(1)}
                 </>
               );

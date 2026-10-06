@@ -2,7 +2,7 @@ import "server-only";
 import { db, getMemory, getNovel, getOutline } from "../supabase";
 import { HttpError } from "../http";
 import { compileGuide } from "../guide";
-import { countWords, describeImages } from "../manuscript";
+import { countWords, forModel, separatorsForModel } from "../manuscript";
 import { buildManuscript, chapterLabel, estimateTokens, excerpts, manuscriptRange, nearbyRange, selectMemory } from "../ai/context";
 import { memoryBlock } from "../ai/prompts";
 import type { CompletionRequest } from "../ai/providers";
@@ -110,11 +110,11 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
   for (const id of input.characterIds ?? []) if (memory.characters.some((c) => c.id === id) && !plan.characterIds.includes(id)) plan.characterIds.push(id);
   const recipe = RECIPES[plan.action];
 
-  // Images become their description; the model never sees a marker.
+  // Images become their description and separators `* * *`; the model never sees a marker.
   const { data: imgs, error } = await db().from("manuscript_images").select("id, alt, caption, decorative").eq("novel_id", novel.id);
   if (error) throw error;
   const described = new Map(imgs.map((i) => [i.id, i.decorative ? "decorativa" : i.alt || i.caption]));
-  const plain = (t: string) => (t.includes("[[imagen:") ? describeImages(t, (id) => described.get(id) ?? "") : t);
+  const plain = (t: string) => (t.includes("[[imagen:") ? forModel(t, (id) => described.get(id) ?? "") : separatorsForModel(t));
 
   const parts: ContextPart[] = [];
   const part = (lbl: string, text: string) => {

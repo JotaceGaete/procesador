@@ -10,11 +10,22 @@ const SCENE = "<escena>Juan dejó las llaves sobre la mesa. Elena no levantó la
 // "ESCENA-LARGA" in the argument. Any other scene request gets the short SCENE.
 const LONG_SCENE = (tag) =>
   `<escena>${tag}. ${Array.from({ length: 45 }, (_, i) => `Juan cruzó la cocina despacio, paso ${i + 1}, sin mirarla.\n\n—¿Vas a seguir callada? —preguntó él.`).join("\n\n")}</escena>`;
+// "ESCENA-FORMATO" in the argument: a scene with italics, a scene break and bold, as models write them.
+const FORMAT_SCENE = "<escena>Leyó *Rayuela* de un tirón.\n\n* * *\n\nAl día siguiente dijo **nunca**.</escena>";
 const sceneReply = (prompt) =>
-  prompt.includes("<borrador>") ? LONG_SCENE("ESCENA-AMPLIADA") : prompt.includes("ESCENA-LARGA") ? LONG_SCENE("ESCENA-DESARROLLADA") : SCENE;
+  prompt.includes("<borrador>")
+    ? LONG_SCENE("ESCENA-AMPLIADA")
+    : prompt.includes("ESCENA-LARGA")
+      ? LONG_SCENE("ESCENA-DESARROLLADA")
+      : prompt.includes("ESCENA-FORMATO")
+        ? FORMAT_SCENE
+        : SCENE;
 const EDIT = "Bien el ritmo.\n\n<reescritura>Texto propuesto por el modelo.</reescritura>";
 // "MANTEN-IMAGENES" in a request: a rewrite that keeps (and reorders) the image placeholders.
 const EDIT_KEEP = "Bien.\n\n<reescritura>Primero la imagen.\n\n[IMAGEN 1]\n\nY el texto reescrito.</reescritura>";
+// "MANTEN-FORMATO" in a request: a rewrite that keeps the italics and the scene break (as * * *).
+const EDIT_FORMAT = "Bien.\n\n<reescritura>*Uno* reescrito.\n\n* * *\n\nDos reescrito.</reescritura>";
+const editReply = (body) => (body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : body.includes("MANTEN-FORMATO") ? EDIT_FORMAT : EDIT);
 
 /**
  * The Consejero's reading (structured JSON). Built from the request itself, so quotes are
@@ -138,7 +149,7 @@ export function handleAI(req, res, body, log) {
     const text =
       readingReply((json.system ?? []).map?.((b) => b.text).join("\n") ?? String(json.system ?? ""), json.messages?.[0]?.content ?? "") ??
       adviceReply((json.system ?? []).map?.((b) => b.text).join("\n") ?? "", json.messages?.[0]?.content ?? "") ??
-      (system.includes("<escena>") ? sceneReply(String(json.messages?.[0]?.content ?? "")) : body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : EDIT);
+      (system.includes("<escena>") ? sceneReply(String(json.messages?.[0]?.content ?? "")) : editReply(body));
     sse(res, [
       [
         "message_start",
@@ -179,7 +190,7 @@ export function handleAI(req, res, body, log) {
     const text =
       readingReply(instructions, String(json.input ?? "")) ??
       adviceReply(instructions, String(json.input ?? "")) ??
-      (instructions.includes("<escena>") ? sceneReply(String(json.input ?? "")) : body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : EDIT);
+      (instructions.includes("<escena>") ? sceneReply(String(json.input ?? "")) : editReply(body));
     const half = Math.floor(text.length / 2);
     let n = 0;
     const refuse = instructions.includes("REFUSE-ME");

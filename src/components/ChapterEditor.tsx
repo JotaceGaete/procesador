@@ -3,7 +3,9 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { readPref, writePref } from "@/lib/client";
 import { useAutosave, type SaveState } from "./useAutosave";
-import { blocks, countWords, imageAt, marker } from "@/lib/manuscript";
+import { SEPARATOR, blocks, countWords, marker, markerLineAt, toggleItalic } from "@/lib/manuscript";
+import { findQuote } from "@/lib/advisor/quotes";
+import { placeAtEnd } from "@/lib/placement";
 
 export interface Selection {
   start: number;
@@ -18,6 +20,10 @@ export interface EditorHandle {
   applyRewrite(original: Selection, rewrite: string): boolean;
   /** Inserts a scene at the cursor as its own paragraphs (undoable). */
   insertAtCursor(text: string): boolean;
+  /** Inserts a scene at a position as its own paragraphs (undoable). */
+  insertAt(position: number, text: string): boolean;
+  /** Inserts a scene after the chapter's last content, as its own paragraph (undoable). */
+  insertAtEnd(text: string): boolean;
   /** The browser's own undo on the manuscript: the same history Ctrl/⌘+Z uses. */
   undo(): void;
   /** Collapses the selection to its end, so nothing is selected. */
@@ -28,6 +34,12 @@ export interface EditorHandle {
   insertImageAfter(existingId: string, id: string): void;
   /** Removes an image's marker from the text (undoable). The image itself stays, not placed. */
   removeImage(id: string): void;
+  /** Cursiva: toggles italics on the selection, or opens a pair at the cursor (undoable). */
+  toggleItalic(): void;
+  /** Inserts a scene break at the cursor, as its own paragraph (undoable). */
+  insertSeparator(): void;
+  /** Replaces the whole text (restoring a version), undoable; the cursor goes to the start. */
+  replaceAll(text: string): void;
   /** Puts the cursor on an image's marker (shows its card). */
   selectImage(id: string): boolean;
   /**
@@ -194,27 +206,44 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
     },
     [replaceRange, updateSelection],
   );
+  /** Cursiva on the current selection (or at the cursor): one undoable edit, the result selected. */
+  const italic = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const edit = toggleItalic(contentRef.current, el.selectionStart, el.selectionEnd);
+    el.focus();
+    el.setSelectionRange(edit.start, edit.end);
+    if (!document.execCommand("insertText", false, edit.text)) {
+      const current = contentRef.current;
+      setContent(current.slice(0, edit.start) + edit.text + current.slice(edit.end));
+    }
+    requestAnimationFrame(() => {
+      el.setSelectionRange(...edit.select);
+      updateSelection();
+    });
+  }, [updateSelection]);
+
   const imageBlock = (id: string) =>
     blocks(contentRef.current).find((b) => b.kind === "image" && b.id === id) as { start: number; end: number } | undefined;
 
   const imageFiles = (list: FileList | null | undefined) => [...(list ?? [])].filter((f) => f.type.startsWith("image/"));
 
-  // Typing on an image's line would turn its marker into plain text: the text starts a new
-  // paragraph below the image instead. `beforeinput` sees every way of typing (keyboards,
+  // Typing on the line of a marker (an image, a separator) would turn it into plain text: the
+  // text starts a new paragraph below it instead. `beforeinput` sees every way of typing (keyboards,
   // phone keyboards, dictation), unlike keydown.
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     const onBeforeInput = (e: InputEvent) => {
       if (e.inputType !== "insertText" || !e.data || el.selectionStart !== el.selectionEnd) return;
-      const img = imageAt(el.value, el.selectionStart);
-      if (!img) return;
+      const line = markerLineAt(el.value, el.selectionStart);
+      if (!line) return;
       e.preventDefault();
-      el.setSelectionRange(img.end, img.end);
+      el.setSelectionRange(line.end, line.end);
       // One undoable step: the new paragraph and what was typed.
       if (!document.execCommand("insertText", false, `\n\n${e.data}`)) {
         const v = el.value;
-        setContent(`${v.slice(0, img.end)}\n\n${e.data}${v.slice(img.end)}`);
+        setContent(`${v.slice(0, line.end)}\n\n${e.data}${v.slice(line.end)}`);
       }
     };
     el.addEventListener("beforeinput", onBeforeInput);
@@ -247,12 +276,37 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
         insertParagraphs(text, cursorRef.current, "end");
         return true;
       },
+      insertAt(position, text) {
+        if (!textareaRef.current) return false;
+        insertParagraphs(text, position, "end");
+        return true;
+      },
+      insertAtEnd(text) {
+        if (!textareaRef.current) return false;
+        const place = placeAtEnd(contentRef.current, text);
+        replaceRange(place.start, place.end, place.text, "end");
+        return true;
+      },
       undo() {
         const el = textareaRef.current;
         if (!el) return;
         el.focus();
         document.execCommand("undo");
         updateSelection();
+      },
+      toggleItalic: italic,
+      replaceAll(text) {
+        const el = textareaRef.current;
+        if (!el) return;
+        replaceRange(0, contentRef.current.length, text, "end");
+        requestAnimationFrame(() => {
+          el.setSelectionRange(0, 0);
+          el.scrollTop = 0;
+          updateSelection();
+        });
+      },
+      insertSeparator() {
+        insertParagraphs(SEPARATOR, textareaRef.current?.selectionEnd ?? cursorRef.current, "end");
       },
       insertImages(ids) {
         if (!ids.length) return;
@@ -293,15 +347,18 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
         if (!el) return false;
         const text = contentRef.current;
         if (expected && text.slice(start, end).toLocaleLowerCase() !== expected.toLocaleLowerCase()) {
-          const lower = text.toLocaleLowerCase();
-          const needle = expected.toLocaleLowerCase();
-          let best = -1;
-          for (let i = lower.indexOf(needle); i !== -1; i = lower.indexOf(needle, i + 1)) {
-            if (best === -1 || Math.abs(i - start) < Math.abs(best - start)) best = i;
+          // The text moved: the nearest occurrence, matched as the Consejero verifies quotes
+          // (without the asterisks of italics, any kind of quotes), else letter by letter.
+          let found = findQuote(text, expected, start);
+          if (!found) {
+            const lower = text.toLocaleLowerCase();
+            const needle = expected.toLocaleLowerCase();
+            for (let i = lower.indexOf(needle); i !== -1; i = lower.indexOf(needle, i + 1)) {
+              if (!found || Math.abs(i - start) < Math.abs(found.start - start)) found = { start: i, end: i + expected.length };
+            }
           }
-          if (best === -1) return false;
-          start = best;
-          end = best + expected.length;
+          if (!found) return false;
+          ({ start, end } = found);
         }
         if (end > text.length) return false;
         el.focus();
@@ -318,7 +375,7 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
         updateSelection();
       },
     }),
-    [flush, replaceRange, updateSelection, insertParagraphs],
+    [flush, replaceRange, updateSelection, insertParagraphs, italic],
   );
 
   return (
@@ -334,6 +391,12 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
       onMouseUp={updateSelection}
       onKeyUp={updateSelection}
       onBlur={savePosition}
+      onKeyDown={(e) => {
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "i") {
+          e.preventDefault();
+          italic();
+        }
+      }}
       hidden={hidden}
       onPaste={(e) => {
         const files = imageFiles(e.clipboardData?.files);

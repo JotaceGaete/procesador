@@ -2,7 +2,7 @@ import type { Character, ContextItem, ContextSection, Memory, Novel, Place } fro
 import { GUIDE_SECTIONS } from "../guide";
 import { countWords } from "../manuscript";
 import { chapterLabel, estimateTokens, nameMatcher, type SelectedMemory } from "./context";
-import { memorySections } from "./prompts";
+import { CHARACTER_LABELS, memorySections, type StoryTime } from "./prompts";
 
 /**
  * "Ver contexto": what a request carries, said for the author. Built from the very pieces
@@ -63,13 +63,22 @@ export function memorySectionsFor(opts: {
   sources: NameSource[];
   /** Included for another reason than being chosen or named (id → reason). */
   extraReasons?: Map<string, string>;
+  /** Cronología: the time at this point and the computed ages. */
+  time?: StoryTime | null;
 }): ContextSection[] {
   const { selected, memory, chapters } = opts;
-  const blocks = memorySections(selected, memory, chapters, opts.currentChapterId);
+  const blocks = memorySections(selected, memory, chapters, opts.currentChapterId, opts.time);
   const names = new Map(memory.characters.map((c) => [c.id, c.name]));
   const placeNames = new Map(memory.places.map((p) => [p.id, p.name]));
   const out: ContextSection[] = [];
 
+  if (blocks.time)
+    out.push({
+      id: "time",
+      label: `Tiempo del relato: ${opts.time!.now}${opts.time!.estimated ? " (heredado del capítulo anterior)" : ""}`,
+      tokens: tokens(blocks.time),
+      items: [],
+    });
   if (blocks.characters) {
     const included = new Set(selected.characters.map((c) => c.id));
     out.push({
@@ -87,7 +96,7 @@ export function memorySectionsFor(opts: {
             reasonFor(c, opts.chosenCharacters, opts.chosenCharacterReason, opts.sources) ??
             opts.extraReasons?.get(c.id) ??
             (other ? `por su relación con ${other}` : undefined),
-          detail: characterSummary(c),
+          detail: characterSummary(c, opts.time?.ages.get(c.id)),
         };
       }),
     });
@@ -128,6 +137,7 @@ export function memorySectionsFor(opts: {
           f.place_id ? placeNames.get(f.place_id) : null,
           f.character_ids.map((id) => names.get(id)).filter(Boolean).join(", ") || null,
         ].filter(Boolean);
+        if (f.story_time.trim()) where.push(f.story_time.trim());
         return { label: clip(f.text.trim(), 200), note: where.join(" · ") || undefined };
       }),
     });
@@ -135,21 +145,16 @@ export function memorySectionsFor(opts: {
   return out;
 }
 
-/** The parts of a character's file that go, named (not their content: the author wrote it). */
-function characterSummary(c: Character): string {
-  const fields: [keyof Character, string][] = [
-    ["role", "rol"],
-    ["description", "descripción"],
-    ["personality", "personalidad"],
-    ["motivations", "motivaciones"],
-    ["voice", "forma de hablar"],
-    ["secrets", "secretos"],
-    ["knows", "qué sabe"],
-    ["unaware", "qué no sabe"],
-    ["arc", "arco"],
-  ];
-  const filled = fields.filter(([k]) => String(c[k] ?? "").trim()).map(([, l]) => l);
-  return filled.length ? `Su ficha completa: ${filled.join(", ")}${filled.length < fields.length ? "…" : ""}` : "Ficha sin datos más allá del nombre";
+/**
+ * What of a character's file goes: every filled field, as the author wrote it (shortened).
+ * It is the author's own data, the same fields that formatCharacter sends.
+ */
+function characterSummary(c: Character, age?: string | null): string {
+  const lines = CHARACTER_LABELS.filter(([k]) => String(c[k] ?? "").trim() && !(age && k === "age")).map(
+    ([k, label]) => `${label}: ${clip(String(c[k]).trim().replace(/\s+/g, " "), 140)}`,
+  );
+  if (age) lines.unshift(`Edad en este punto: ${age}`);
+  return lines.length ? lines.join("\n") : "Ficha sin datos más allá del nombre";
 }
 
 export function sceneTextSections(opts: {
@@ -176,7 +181,7 @@ export function sceneTextSections(opts: {
   };
   if (opts.inManuscript)
     return {
-      text: [{ id: "chapter", label, tokens: 0, items: [{ label: "El lugar del cursor, marcado en la novela completa" }] }],
+      text: [{ id: "chapter", label, tokens: 0, items: [{ label: "El lugar del cursor, al final de la historia hasta aquí" }] }],
       argument,
     };
 
@@ -220,6 +225,29 @@ export function passagesSection(found: { name: string; text: string }[]): Contex
     label: "Pasajes de otros capítulos",
     tokens: tokens(...found.map((f) => f.text)),
     items: found.map((f) => ({ label: `Donde aparece ${f.name}` })),
+  };
+}
+
+/** «Leer toda la historia hasta aquí» (scene): the previous chapters and this one up to the cursor. */
+export function storyManuscriptSection(text: string, chapterIndex: number): ContextSection {
+  const n = chapterIndex + 1;
+  const which =
+    n === 1 ? "El capítulo 1 hasta el cursor" : n === 2 ? "El capítulo 1 y el 2 hasta el cursor" : `Los capítulos 1 a ${n - 1} y el ${n} hasta el cursor`;
+  return {
+    id: "manuscript",
+    label: "La historia hasta aquí",
+    tokens: tokens(text),
+    items: [{ label: `${which} · ≈${wordsLabel(text)}` }, { label: "Nada posterior: ni el resto de este capítulo ni los siguientes" }],
+  };
+}
+
+/** «Ampliar»: the scene already written, sent to be developed. */
+export function draftSection(draft: string): ContextSection {
+  return {
+    id: "draft",
+    label: "La escena a ampliar",
+    tokens: tokens(draft),
+    items: [{ label: `La propuesta anterior · ≈${wordsLabel(draft)}`, detail: `Empieza: «${clip(draft.trim(), 160)}»` }],
   };
 }
 

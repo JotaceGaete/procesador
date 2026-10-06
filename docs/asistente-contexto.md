@@ -1,6 +1,6 @@
 # Asistente: la historia hasta aquí, y «Ver contexto»
 
-> Estado: **fases 1, 2 y 3 implementadas.** Decisiones tomadas al final.
+> Estado: **fases 1, 2 y 3 implementadas, y la Fase 2 del plan profesional** (ignorancia temporal, comparar antes de aplicar, «Ver contexto» de la petición real; §8–§10). Decisiones tomadas al final.
 
 ## El problema
 
@@ -233,3 +233,54 @@ Pendientes:
 4. **Capítulo actual completo hasta el cursor (1.1):** ¿se incluye (propuesta: sí, hasta 6.000 tokens)?
 5. **Texto de la casilla** «Incluir la novela completa»: ¿el propuesto en §4 u otro?
 6. **Orden de fases:** ¿la 1 primero (propuesta) o 1 y 2 juntas?
+
+## 8. Ignorancia temporal al escribir una escena (Fase 2 del plan profesional)
+
+Para escribir una escena, **ignorancia temporal segura antes que un spoiler que el modelo deba fingir no conocer**. Una IA que escribe el capítulo 5 no puede saber lo que el lector y los personajes descubrirán en el 20.
+
+### Qué se encontró
+
+- *Leer también la novela completa* enviaba **toda** la novela: los capítulos posteriores y el texto después del cursor, con una marca donde iba la escena.
+- Los **hechos aprobados** de capítulos posteriores entraban si eran relevantes (un personaje de la escena, un lugar, su nombre en el texto), marcados «posterior al capítulo actual» con la instrucción de usarlos sólo para no contradecirlos. **Sí podía filtrarse:** un hecho «Elena es hija de Pedro» ligado al capítulo 20 llegaba al escribir el capítulo 5 si Elena estaba en escena; pedirle al modelo que no lo use no garantiza que no lo insinúe.
+
+### Qué hace ahora
+
+- **«Leer toda la historia hasta aquí»** (antes *Leer también la novela completa*, sólo en *Escribir escena*): los capítulos anteriores y el actual **hasta el cursor**, con la marca al final. Nunca un capítulo posterior ni el texto después del cursor. En *Editar selección* la opción sigue siendo la novela completa: revisar coherencia necesita ver el conjunto, y no escribe nada nuevo.
+- **Hechos:** al escribir una escena, los de capítulos posteriores **no se envían** (`selectMemory` con `noLaterThan`). «Ver contexto» dice cuántos se dejaron fuera. Al editar o revisar coherencia se siguen enviando, marcados como posteriores.
+- Ya era así: fichas de lectura, revelaciones e hilos sólo de antes del cursor (§1.2–1.4); el resumen global sólo al final de la novela.
+
+### Lo que queda (riesgo residual, registrado en [deuda](deuda.md))
+
+- Un **hecho sin capítulo** se considera conocido desde el principio. Para que un secreto no llegue antes de tiempo, hay que ligarlo al capítulo donde se revela.
+- Los **hechos del capítulo actual** se envían aunque se revelen después del cursor: un hecho está ligado a un capítulo, no a un punto del texto.
+- Las **fichas de personaje** (secretos, qué sabe, arco) y las **relaciones** son atemporales: lo que el autor escribe en ellas llega a todas las escenas. Un «Arco: al final traiciona a Pedro» es un spoiler para el capítulo 5. La solución natural llega con la cronología (campos con «desde el capítulo…»); hasta entonces, conviene escribir en las fichas lo que el personaje es, no lo que le pasará.
+
+## 9. Comparar antes de aplicar
+
+- **Reemplazar selección** muestra, antes de aceptar, el texto actual frente a la propuesta como prosa: tachado lo que se quita, resaltado lo que se añade, con un resumen («La IA propone quitar 4 palabras y añadir 5»). Pestañas *Cambios*, *Propuesta* y *Tu texto*. Las imágenes y los cambios de escena se ven como tales, no como marcadores. Es el mismo motor de comparación que el historial de versiones (`src/lib/diff.ts`), que agrupa en un solo bloque los cambios separados sólo por espacios o puntuación.
+- **Insertar en el cursor** muestra la escena en su lugar, entre el final del párrafo anterior y el comienzo del siguiente, y dónde irá («al principio del capítulo», «en el cursor, entre estos párrafos»…). Sigue al cursor mientras la propuesta espera.
+- **Garantías:** nada toca el manuscrito hasta aceptar; al aceptar se guarda primero una versión del texto actual (`ai`, [versiones](versiones.md)) y sólo si se guardó se aplica; si no se puede guardar, o el fragmento ya no está, la propuesta se queda en el panel con el motivo. Cursivas, separadores e imágenes se conservan (`fromModel`, `restoreImages`). En el teléfono la comparación cabe en la hoja inferior con los botones a la vista.
+
+## 10. «Ver contexto»: correcciones
+
+- El **modelo elegido** entra en el cálculo previo (el bloque propio de Grok se cuenta).
+- **La petición real devuelve su propio inventario** (el primer evento de la respuesta): bajo cada respuesta, *Ver lo que se envió* muestra lo que de verdad se envió, no la estimación previa.
+- **Ampliar** aparece como «La escena a ampliar».
+- **Personajes:** cada ficha muestra sus campos con su contenido (abreviado), los mismos que recibe el modelo. Nunca las instrucciones de Procesador.
+- **Hechos:** con su momento de la historia (`story_time`) cuando lo tienen.
+- **Tokens:** se dice explícitamente que son **estimados** (unos 3,5 caracteres por token); los reales los informa el proveedor bajo la respuesta.
+
+
+## 11. Dónde va una escena
+
+El cursor podía quedar por accidente en mitad del capítulo, y la escena se escribía para ese punto y se insertaba allí. Ahora el destino es una decisión explícita, que se toma antes de escribir la escena y se respeta hasta insertarla.
+
+- **«Dónde va: Al final del capítulo»** (predeterminado). La escena se escribe para continuar el final del capítulo, y *Insertar al final* la pone después del último contenido **tal como esté al aceptar**, sin mirar el cursor. Si el capítulo acaba en espacios o líneas en blanco, se sustituyen por una sola línea en blanco; un último párrafo, una imagen o un separador no se tocan, y la escena nunca queda pegada al último carácter (`placeAtEnd`, `src/lib/placement.ts`).
+- **«Dónde va: En el cursor»** (deliberado). La posición se **fija** al pedir la escena, anclada al texto que la rodea (`anchorAt` / `resolveAnchor`), no a un número que se desplazaría al escribir en otro sitio. *Otra versión*, *Ampliar* y *Probar con…* conservan esa posición.
+- Con destino al final, **«Insertar en el cursor…»** sigue disponible como acción secundaria: primero fija la posición actual del cursor y la muestra en la vista previa, y sólo un segundo clic inserta. *Insertar al final en su lugar* vuelve atrás.
+
+**Mover el cursor mientras la propuesta espera no cambia el destino.** La vista previa dice siempre cuál es («Se insertará al final del capítulo» o «Se insertará en la posición actual», con el texto de alrededor) y es exactamente donde se insertará. Para cambiarlo hay que pedirlo: *Fijar en la posición actual del cursor* o *Insertar al final en su lugar*.
+
+Si el texto alrededor de una posición fijada cambia tanto que ya no se encuentra, la vista previa lo dice, *Insertar en el cursor* queda desactivado y no se adivina otro lugar; el final siempre está disponible.
+
+El orden al aceptar es el de la Fase 0: guardar una versión → comprobar que se guardó → resolver el destino sobre el texto de ese momento → insertar → autoguardado. Si falla la copia, el destino ya no existe o el navegador rechaza la edición, no cambia nada y la propuesta se queda.

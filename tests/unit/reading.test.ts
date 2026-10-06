@@ -148,3 +148,12 @@ test("structured output: the JSON object inside a reply, fences and all", () => 
   assert.throws(() => extractJson("sin json"), InvalidOutput);
   assert.throws(() => extractJson("{roto: }"), InvalidOutput);
 });
+
+test("findQuote: italics and separators don't stop a quote from being found", () => {
+  const text = "Leyó *Rayuela* entera.\n\n[[separador]]\n\nAl día siguiente volvió.";
+  const at = findQuote(text, "Leyó Rayuela entera");
+  assert.ok(at);
+  assert.equal(text.slice(at.start, at.end), "Leyó *Rayuela* entera");
+  assert.ok(findQuote(text, "*Rayuela* entera"));
+  assert.equal(findQuote(text, "separador"), null);
+});

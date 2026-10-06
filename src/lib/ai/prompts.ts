@@ -13,6 +13,12 @@ const LITERARY_PRINCIPLES = `- Es ficción para adultos. Los personajes pueden s
 - Respeta los silencios, la ambigüedad, las frases secas, la crudeza, los regionalismos y la puntuación del autor (raya de diálogo) cuando son parte de la obra.
 - Respeta la memoria narrativa (fichas, relaciones, lugares, hechos): no cambies lo establecido. Un personaje no sabe lo que su ficha dice que desconoce.`;
 
+/** The manuscript's format (docs/formato-texto.md), as the model reads and must write it. */
+const TEXT_FORMAT = `Formato del manuscrito:
+- Las cursivas se marcan con un asterisco a cada lado, dentro de un mismo párrafo: *así*. Conserva exactamente las cursivas del texto que reescribas; en prosa nueva, úsalas sólo donde la novela las usaría (títulos de obras, palabras extranjeras, énfasis o pensamientos, si el texto ya lo hace así).
+- Un salto de escena es una línea que contiene sólo * * *. Consérvalo donde esté; no añadas otros salvo que el argumento indique un corte de escena o de tiempo.
+- No uses negritas, títulos, listas ni ningún otro formato en la prosa.`;
+
 /** Mode A — editing the author's own text: conservative. */
 export const EDIT_INSTRUCTIONS = `Eres el editor literario de un novelista y trabajas sobre su manuscrito, en español. El texto es suyo: tu trabajo es conservador.
 
@@ -22,7 +28,9 @@ ${LITERARY_PRINCIPLES}
 - Sé concreto y breve: cita el fragmento exacto que comentas. Sin elogios de cortesía, sin preámbulos ni resúmenes finales.
 - Si el contexto que recibes no alcanza para juzgar, dilo en una línea en vez de suponer.
 
-Formato: Markdown sencillo, en español.`;
+${TEXT_FORMAT}
+
+Formato de tus comentarios: Markdown sencillo, en español.`;
 
 /** Mode B — writing from the author's argument: literary freedom inside fixed events. */
 export const WRITE_INSTRUCTIONS = `Eres el escritor que pone en prosa las escenas de una novela ajena, en español. El autor imagina la historia y te da el argumento de cada escena; tú lo conviertes en literatura con la voz de esta novela.
@@ -49,13 +57,18 @@ ${LITERARY_PRINCIPLES}
 - Si recibes la historia hasta aquí (fichas de lectura de los capítulos anteriores), lo que saben los personajes o los cabos abiertos, úsalos para la continuidad: nadie sabe lo que todavía no se le ha revelado, y los cabos abiertos siguen abiertos salvo que el argumento diga otra cosa. Son resúmenes derivados del texto: si contradicen la memoria narrativa o el manuscrito, mandan éstos. Una ficha marcada como versión anterior describe un texto que el autor cambió después.
 - Muestra antes que explicar. Un buen detalle concreto vale más que tres adjetivos.
 
+${TEXT_FORMAT}
+
 Formato de respuesta: la escena completa dentro de <escena></escena>, solo prosa, sin títulos ni comentarios. Si el argumento contradice algo de la memoria narrativa (por ejemplo, un personaje que ya murió), escribe igualmente lo que pide el argumento y añade después de la escena una sola línea dentro de <aviso></aviso> señalando la contradicción. No añadas nada más.`;
 
 // ---------------------------------------------------------------------------
 // Memory formatting
 // ---------------------------------------------------------------------------
 
-const CHARACTER_LABELS: [keyof Character, string][] = [
+/** The free-text fields of a character file (the time fields are structured: see StoryTime). */
+export type CharacterTextKey = Exclude<keyof Character, "age_anchor" | "age_approx" | "death">;
+
+export const CHARACTER_LABELS: [CharacterTextKey, string][] = [
   ["aliases", "También llamado"],
   ["age", "Edad"],
   ["role", "Rol"],
@@ -75,9 +88,25 @@ const CHARACTER_LABELS: [keyof Character, string][] = [
   ["notes", "Notas"],
 ];
 
-export function formatCharacter(c: Character): string {
-  const lines = CHARACTER_LABELS.filter(([key]) => c[key]?.trim()).map(([key, label]) => `${label}: ${c[key].trim()}`);
+/**
+ * A character file as the model reads it. With a computed age for this point of the story
+ * (Cronología), it replaces the free note "Edad", which may say the age of another moment.
+ */
+export function formatCharacter(c: Character, age?: string | null): string {
+  const lines = CHARACTER_LABELS.filter(([key]) => c[key]?.trim() && !(age && key === "age")).map(
+    ([key, label]) => `${label}: ${c[key].trim()}`,
+  );
+  if (age) lines.splice(c.aliases.trim() ? 1 : 0, 0, `Edad en este punto de la historia: ${age}`);
   return [`### ${c.name}`, ...lines].join("\n");
+}
+
+/** The story's time at this point (Cronología): the chapter's time and each character's age. */
+export interface StoryTime {
+  /** "marzo de 1977", "Año 5", "Inicio + 5 años"; null when the novel has no times. */
+  now: string | null;
+  estimated: boolean;
+  /** Character id → "26 años (21 en el capítulo 1)". */
+  ages: Map<string, string>;
 }
 
 function formatRelationship(r: Relationship, names: Map<string, string>): string {
@@ -115,6 +144,7 @@ function formatFact(
 }
 
 export interface MemorySections {
+  time: string;
   characters: string;
   relationships: string;
   places: string;
@@ -127,14 +157,18 @@ export function memorySections(
   all: Memory,
   chapters: { id: string; title: string }[],
   currentChapterId: string | null,
+  time?: StoryTime | null,
 ): MemorySections {
   const names = new Map(all.characters.map((c) => [c.id, c.name]));
   const places = new Map(all.places.map((p) => [p.id, p.name]));
   const currentIndex = chapters.findIndex((c) => c.id === currentChapterId);
   const others = all.characters.length - selected.characters.length;
   return {
+    time: time?.now
+      ? `## Tiempo del relato\nEn este punto: ${time.now}${time.estimated ? " (sin fecha propia: el del capítulo anterior)" : ""}.`
+      : "",
     characters: selected.characters.length
-      ? `## Personajes\n\n${selected.characters.map(formatCharacter).join("\n\n")}` +
+      ? `## Personajes\n\n${selected.characters.map((c) => formatCharacter(c, time?.ages.get(c.id))).join("\n\n")}` +
         (others > 0 ? `\n\n(La novela tiene ${others} personajes más que no intervienen aquí.)` : "")
       : "",
     relationships: selected.relationships.length
@@ -158,9 +192,10 @@ export function memoryBlock(
   all: Memory,
   chapters: { id: string; title: string }[],
   currentChapterId: string | null,
+  time?: StoryTime | null,
 ): string {
-  const m = memorySections(selected, all, chapters, currentChapterId);
-  const parts = [m.characters, m.relationships, m.places, m.facts].filter(Boolean);
+  const m = memorySections(selected, all, chapters, currentChapterId, time);
+  const parts = [m.time, m.characters, m.relationships, m.places, m.facts].filter(Boolean);
   return parts.length ? `# Memoria narrativa\n\n${parts.join("\n\n")}` : "";
 }
 
@@ -238,9 +273,15 @@ export function editPrompt(opts: {
   passages: string | null;
   /** How many [IMAGEN n] placeholders the selection carries. */
   images?: number;
+  /** Cronología: warnings about the people involved, computed by Procesador. */
+  timeWarnings?: string[];
 }): string {
   const parts: string[] = [];
   if (opts.passages) parts.push(`Pasajes anteriores relevantes:\n<pasajes>\n${opts.passages}\n</pasajes>`);
+  if (opts.timeWarnings?.length)
+    parts.push(
+      `Advertencias de cronología calculadas por Procesador con las fechas y edades de la Memoria (pueden ser intencionadas; menciónalas si afectan al fragmento):\n<cronologia>\n${opts.timeWarnings.map((w) => `- ${w}`).join("\n")}\n</cronologia>`,
+    );
   parts.push(
     [
       "Fragmento seleccionado con su contexto inmediato (trabaja solo sobre <seleccion>):",
@@ -300,7 +341,7 @@ export function scenePrompt(opts: {
   parts.push(`Estás escribiendo en: ${opts.chapter}.`);
   if (opts.mark) {
     parts.push(
-      `La escena va exactamente donde el manuscrito completo dice ${opts.mark}: continúa con naturalidad el texto que hay antes de esa marca y, si hay texto después, enlaza con él. No repitas ese texto ni incluyas la marca.`,
+      `La escena va exactamente donde la historia hasta aquí termina con ${opts.mark}: continúa con naturalidad el texto que hay antes de esa marca. Es todo lo que ha ocurrido hasta este punto; lo que viene después no lo conoces y no debes anticiparlo. No repitas ese texto ni incluyas la marca.`,
     );
   } else {
     if (opts.earlier?.trim())

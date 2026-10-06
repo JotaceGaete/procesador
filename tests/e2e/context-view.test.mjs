@@ -112,10 +112,11 @@ test("escena: lo que recibe el modelo coincide con el inventario", async () => {
   assert.ok(!system.includes("FINAL-DEL-UNO"), "no whole novel: it wasn't listed");
 });
 
-test("escena con la novela completa: aparece en el inventario y sólo entonces se envía", async () => {
+test("escena con toda la historia hasta aquí: aparece en el inventario y sólo entonces se envía", async () => {
   const dry = (await call("/api/assist", "POST", { ...scene({ includeManuscript: true }), dryRun: true })).data;
   const sec = byId(dry.sections);
-  assert.match(sec.manuscript.items[0].label, /^2 capítulos · ≈\d+ palabras$/);
+  assert.equal(sec.manuscript.label, "La historia hasta aquí");
+  assert.match(sec.manuscript.items[0].label, /^El capítulo 1 y el 2 hasta el cursor · ≈\d+ palabras$/);
   await clearAiLog();
   await call("/api/assist", "POST", scene({ includeManuscript: true }));
   const system = (await aiLog())[0].body.system.map((b) => b.text).join("\n");
@@ -165,8 +166,8 @@ for (const device of [
     await press(panel.getByRole("button", { name: "Escribir escena" }));
 
     // The checkbox says what being off means.
-    await panel.getByText("Desactivada, la IA no lee todo el manuscrito: trabaja sólo con el contexto seleccionado.").waitFor();
-    await panel.getByLabel(/Leer también la novela completa/).waitFor();
+    await panel.getByText("Desactivada, la IA no lee toda la historia: trabaja sólo con el contexto seleccionado.").waitFor();
+    await panel.getByLabel(/Leer toda la historia hasta aquí/).waitFor();
 
     await page.getByPlaceholder(/Qué ocurre en la escena/).fill(ARGUMENT);
     await press(panel.getByRole("checkbox", { name: "Héctor" }));
@@ -180,7 +181,7 @@ for (const device of [
     await view.getByText(/Personajes: Héctor, Pilar, Anaís/).waitFor();
     assert.equal(await view.getByText("Marta").count(), 0);
     await view.getByText("Tu argumento").waitFor();
-    await view.getByText("No lee la novela completa: sólo lo que aparece aquí.").waitFor();
+    await view.getByText("No lee toda la historia hasta aquí: sólo lo que aparece en esta lista.").waitFor();
     assert.equal(await view.getByText(/Eres el escritor/).count(), 0);
 
     // Unfold the facts: the one that goes, not the suggested nor the unrelated one.
@@ -196,12 +197,12 @@ for (const device of [
     await characters.getByText("elegido en «En escena»").waitFor();
     await characters.getByText("nombrado en el argumento").waitFor();
 
-    // Turning on the whole novel: it appears in the list (fresh estimate), and the help changes.
-    await press(panel.getByLabel(/Leer también la novela completa/));
-    await panel.getByText("Lee todo el manuscrito: más coherencia, más coste.").waitFor();
+    // Turning on the story so far: it appears in the list (fresh estimate), and the help changes.
+    await press(panel.getByLabel(/Leer toda la historia hasta aquí/));
+    await panel.getByText("Lee los capítulos anteriores y este hasta el cursor; nunca lo que viene después.").waitFor();
     await settled();
-    await view.getByText(/Novela completa — 2 capítulos/).waitFor();
-    assert.equal(await view.getByText("No lee la novela completa: sólo lo que aparece aquí.").count(), 0);
+    await view.getByText(/La historia hasta aquí — El capítulo 1 y el 2 hasta el cursor/).waitFor();
+    assert.equal(await view.getByText("No lee toda la historia hasta aquí: sólo lo que aparece en esta lista.").count(), 0);
     await ctx.close();
   });
 }

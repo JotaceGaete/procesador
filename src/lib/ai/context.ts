@@ -176,8 +176,13 @@ export function selectMemory(
     chapterOrder: string[];
     /** "focus": only relationships and facts of the chosen characters. */
     focus?: boolean;
+    /**
+     * Temporal ignorance (writing a scene): facts of later chapters are left out, never
+     * sent "marked as later". A fact without a chapter counts as known from the start.
+     */
+    noLaterThan?: string;
   },
-): SelectedMemory {
+): SelectedMemory & { later: number } {
   const characters = relevantCharacters(memory.characters, opts.characterIds, opts.text);
   const charIds = new Set(
     (opts.focus ? characters.filter((c) => opts.characterIds.includes(c.id)) : characters).map((c) => c.id),
@@ -207,6 +212,8 @@ export function selectMemory(
   // Facts that name someone relevant count even without explicit links.
   const named = opts.focus ? characters.filter((c) => charIds.has(c.id)) : [...characters, ...places];
   const matchers = named.map(nameMatcher).filter((m): m is RegExp => Boolean(m));
+  const limit = opts.noLaterThan ? opts.chapterOrder.indexOf(opts.noLaterThan) : -1;
+  const isLater = (f: Fact) => limit >= 0 && Boolean(f.chapter_id) && opts.chapterOrder.indexOf(f.chapter_id!) > limit;
   const scored = memory.facts
     .filter((f) => f.status === "approved")
     .map((f) => {
@@ -219,12 +226,15 @@ export function selectMemory(
       return { f, score };
     })
     .filter((x) => x.score > 0);
-  scored.sort((a, b) => b.score - a.score);
+  // Relevant facts of later chapters: counted (the author is told), never sent.
+  const later = scored.filter((x) => isLater(x.f)).length;
+  const kept = scored.filter((x) => !isLater(x.f));
+  kept.sort((a, b) => b.score - a.score);
   const order = (f: Fact) => (f.chapter_id ? opts.chapterOrder.indexOf(f.chapter_id) : -1);
-  const facts = scored
+  const facts = kept
     .slice(0, MAX_FACTS)
     .map((x) => x.f)
     .sort((a, b) => order(a) - order(b));
 
-  return { characters, relationships, places, facts };
+  return { characters, relationships, places, facts, later };
 }

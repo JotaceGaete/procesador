@@ -57,6 +57,12 @@ const ROUTES = [
   ["DELETE", `/api/manuscript-images/${U}`],
   ["POST", `/api/manuscript-images/${U}/duplicate`],
   ["POST", `/api/manuscript-images/${U}/replace`],
+  ["GET", `/api/chapters/${U}/versions`],
+  ["POST", `/api/chapters/${U}/versions`],
+  ["GET", `/api/versions/${U}`],
+  ["GET", `/api/novels/${U}/trash`],
+  ["POST", `/api/novels/${U}/trash`],
+  ["GET", `/api/novels/${U}/backup`],
 ];
 const hit = (base, method, route, headers = {}) =>
   fetch(base + route, {
@@ -140,6 +146,7 @@ test("the public (anon) key can't read tables or call functions", async () => {
     "advisor_conversations",
     "advisor_messages",
     "advisor_observations",
+    "chapter_versions",
   ]) {
     const res = await fetch(`${STACK}/rest/v1/${table}`, { headers });
     assert.ok([401, 403].includes(res.status), `${table}: ${res.status}`);
@@ -158,6 +165,10 @@ test("the public (anon) key can't read tables or call functions", async () => {
     "replace_asset_uses",
     "sync_chapter_images",
     "finalize_asset",
+    "save_chapter_version",
+    "trash_chapter",
+    "chapter_trash",
+    "restore_chapter",
   ]) {
     const res = await fetch(`${STACK}/rest/v1/rpc/${fn}`, {
       method: "POST",

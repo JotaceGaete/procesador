@@ -1,6 +1,6 @@
 # Cronología · Tratamiento de edades
 
-> Estado: **diseño aprobado como base de la futura Cronología, sin implementar** (Prioridad 3).
+> Estado: **implementados los pasos 1 a 4** del orden sugerido (Fase 3 del plan profesional): marcas de tiempo por capítulo, ancla de edad y cálculo, edad en el contexto de la IA, vista Cronología con advertencias. Pendientes los pasos 5 y 6 (ver «Estado de la implementación», al final).
 > La primera versión fecha cada capítulo; el modelo está preparado para admitir después cambios de tiempo dentro de un capítulo o escena sin rediseñarlo.
 
 ## Problema
@@ -207,3 +207,23 @@ El autor puede **descartar** una advertencia concreta ("es intencionado"). El de
 4. Vista Cronología y advertencias.
 5. Declaraciones de edad en hechos y propuesta de ancla desde la nota libre.
 6. (Posterior) Marcas dentro del capítulo o escena: quitar el índice de una marca por capítulo y añadir *Marcar cambio de tiempo aquí* en el editor.
+
+## Estado de la implementación
+
+**Hecho (pasos 1 a 4):**
+
+- **Esquema** (`supabase/schema.sql`): tabla `time_marks` (una marca de inicio por capítulo, con índice único; `anchor` ya preparado para marcas internas), `novels.calendar` (`real` | `relative`) y `novels.dismissed_warnings`, `characters.age_anchor`, `age_approx` y `death`. `duplicate_novel` copia las marcas y reasigna el capítulo de un ancla «edad en un capítulo». Validación en la API con `src/lib/chronology.ts` (`parseStoryDate`, `parseWhen`, `parseAgeAnchor`); el capítulo de un ancla debe ser de la misma novela.
+- **Cálculo** (`src/lib/chronology.ts`, puro): fechas parciales como rangos de días, calendario real o relativo, marcas «N años/meses/días después», herencia (estimada) y un «inicio de la historia» cuando aún no hay fechas. `ageAt` (rangos) y `ageOf` (ancla en un capítulo).
+- **El tiempo como lo escribe el autor.** Con un ancla «21 en el capítulo 1» y fechas de la misma precisión, la diferencia se lee como la escribe el autor: de «1972» a «1977» son cinco años, y la edad es **26**, no el rango 25–27 que darían los extremos de ambos años. Si el tiempo transcurrido no es un número entero de años (cinco años y medio), la edad es un rango (26–27). Con precisiones distintas («1972» y «marzo de 1977») o sin forma de relacionarlas, se usan los rangos de las fechas, sin inventar.
+- **Interfaz:** en la ficha del personaje, «Edad en el tiempo del relato» (sin definir, nacimiento, edad en un capítulo, edad en una fecha; aproximada; muerte opcional) con «En este capítulo: N años». El ancla sólo existe cuando sus datos están completos: no se inventa un año por defecto. En la lista de capítulos, **Cronología**: calendario, el tiempo de cada capítulo (fecha, tiempo después del anterior, o heredado, en cursiva), retrospectiva y nota, la tabla de edades por capítulo y las advertencias con «Es intencionado» y «Volver a avisar». La tabla se desplaza dentro de la ventana en el teléfono.
+- **Advertencias** (nunca bloquean nada): retroceso sin retrospectiva, aparece antes de nacer, más de 120 años, aparece después de morir fuera de una retrospectiva, padre o madre con menos de 12 años de diferencia o más joven que su hijo. «Aparece» = nombrado (nombre, primer nombre o alias) en el texto del capítulo. Una advertencia descartada vuelve si cambian los datos que la producen.
+- **IA:** la ficha enviada lleva «Edad en este punto de la historia: 26 años (21 en el capítulo 1)» en lugar de la nota libre, y la petición lleva «Tiempo del relato: …» del capítulo (sólo de marcas hasta ese capítulo). *Consistencia* y *Personaje* reciben las advertencias de cronología de los personajes implicados. Todo visible en «Ver contexto». La fecha de muerte nunca se envía a la IA.
+
+**Pendiente:**
+
+- Paso 5: edades declaradas en hechos (`facts.story_date`, `age_claim`) y la propuesta de ancla a partir de la nota libre.
+- Paso 6: marcas dentro de un capítulo o escena.
+- Edad de las imágenes de personaje (`character_images.story_at`).
+- Una marca se borra con su capítulo; recuperar el capítulo de la papelera no la recupera.
+- Las fichas de personaje y las relaciones siguen siendo atemporales para la IA (ver [deuda](deuda.md)).
+

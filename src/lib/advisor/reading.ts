@@ -1,7 +1,7 @@
 import "server-only";
 import { db, getChapter, getMemory, getNovel } from "../supabase";
 import { HttpError } from "../http";
-import { countWords, describeImages } from "../manuscript";
+import { countWords, forModel, separatorsForModel } from "../manuscript";
 import { chapterLabel, estimateTokens } from "../ai/context";
 import { confirmTokens } from "../ai/models";
 import { completeJson, InvalidOutput } from "../ai/structured";
@@ -66,11 +66,11 @@ export async function novelDigestRow(novelId: string): Promise<NovelDigest | nul
 
 /** The chapter as the model reads it: image markers become their description. */
 export async function readableText(novelId: string, text: string): Promise<string> {
-  if (!text.includes("[[imagen:")) return text;
+  if (!text.includes("[[imagen:")) return separatorsForModel(text);
   const { data, error } = await db().from("manuscript_images").select("id, alt, caption, decorative").eq("novel_id", novelId);
   if (error) throw error;
   const d = new Map(data.map((i) => [i.id, i.decorative ? "decorativa" : i.alt || i.caption]));
-  return describeImages(text, (id) => d.get(id) ?? "");
+  return forModel(text, (id) => d.get(id) ?? "");
 }
 
 export const digestEstimate = (content: string) => estimateTokens(DIGEST_INSTRUCTIONS.length + content.length + 1500);

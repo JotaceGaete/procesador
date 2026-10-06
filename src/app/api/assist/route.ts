@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { handler } from "@/lib/auth";
 import { db, getChapterTexts, getMemory, getNovel, getOutline } from "@/lib/supabase";
-import { countWords, describeImages, protectImages } from "@/lib/manuscript";
+import { countWords, forModel, protectImages, separatorsForModel } from "@/lib/manuscript";
 import { HttpError, readJson } from "@/lib/http";
 import { compileGuide } from "@/lib/guide";
 import {
@@ -22,13 +22,16 @@ import {
   SCENE_PROVIDER_NOTES,
   editPrompt,
   memoryBlock,
+  type StoryTime,
   scenePrompt,
   writeInstructions,
 } from "@/lib/ai/prompts";
 import { getProvider, type CompletionRequest } from "@/lib/ai/providers";
 import {
+  draftSection,
   guideSection,
   manuscriptSection,
+  storyManuscriptSection,
   memorySectionsFor,
   passagesSection,
   sceneTextSections,
@@ -36,12 +39,15 @@ import {
 } from "@/lib/ai/inventory";
 import { recordUsage, type UsagePurpose } from "@/lib/ai/usage";
 import { storySoFar } from "@/lib/ai/story";
+import { novelChronology } from "@/lib/chronology-server";
+import { describeAge, formatPoint } from "@/lib/chronology";
 import { chapterRows, digestRows, novelDigestFresh, novelDigestRow, threadRows } from "@/lib/advisor/reading";
 import {
   EDIT_ACTIONS,
   SCENE_LENGTHS,
   type AssistEvent,
   type Character,
+  type ContextInventory,
   type ContextPart,
   type ContextSection,
   type ProviderId,
@@ -74,21 +80,21 @@ export const POST = handler(async (request) => {
 
   const { novelId, purpose, sections, notices, ...completion } = await buildRequest(body, request.signal);
   const parts = contextParts(completion);
+  const total = parts.reduce((n, p) => n + p.tokens, 0);
+  // "Ver contexto": the request, said for the author. The rest of the total are Procesador's
+  // own instructions to the model (how to write, the format). The real request sends the
+  // same inventory first, so what was actually sent can be checked afterwards.
+  const inventory = {
+    total,
+    manuscript: estimateTokens(completion.manuscript?.length ?? 0),
+    parts,
+    sections,
+    notices,
+    instructions: Math.max(0, total - sections.reduce((n, x) => n + x.tokens, 0)),
+  };
 
-  if (body.dryRun) {
-    const total = parts.reduce((n, p) => n + p.tokens, 0);
-    return NextResponse.json({
-      total,
-      manuscript: estimateTokens(completion.manuscript?.length ?? 0),
-      parts,
-      // "Ver contexto": the same request, said for the author. The rest of the total are
-      // Procesador's own instructions to the model (how to write, the format).
-      sections,
-      notices,
-      instructions: Math.max(0, total - sections.reduce((n, x) => n + x.tokens, 0)),
-    });
-  }
-  return streamResponse(provider!, completion, parts, (u) => recordUsage(novelId, purpose, body.provider as ProviderId, u));
+  if (body.dryRun) return NextResponse.json(inventory);
+  return streamResponse(provider!, completion, inventory, (u) => recordUsage(novelId, purpose, body.provider as ProviderId, u));
 });
 
 /** What the request carries, in estimated tokens, so the panel can say what the AI read. */
@@ -124,8 +130,21 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
 
   const memory = await getMemory(novel.id);
   const guide = compileGuide(novel);
+  // Cronología (docs/cronologia-edades.md): the time at this chapter and each character's age,
+  // computed from marks up to here (nothing of later chapters is said).
+  const chron = await novelChronology(novel, { memory, chapters: outline });
+  const point = chron.result.points[chapterIndex];
+  const time: StoryTime = {
+    now: chron.marks.length ? formatPoint(point, novel.calendar) : null,
+    estimated: point.estimated,
+    ages: new Map(
+      memory.characters
+        .map((c) => [c.id, describeAge(c, chron.result.ages.get(c.id)?.[chapterIndex] ?? null, outline, novel.calendar)] as const)
+        .filter((x): x is readonly [string, string] => Boolean(x[1])),
+    ),
+  };
   const project = (selected: SelectedMemory) =>
-    [guide, memoryBlock(selected, memory, outline, chapter.id)].filter(Boolean).join("\n\n");
+    [guide, memoryBlock(selected, memory, outline, chapter.id, time)].filter(Boolean).join("\n\n");
   const guideInventory = guideSection(novel, guide);
   const wholeNovel = async (text: string | null) =>
     text ? [manuscriptSection(text, (await manuscript()).chapters.length)] : [];
@@ -134,17 +153,17 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
   let ms: Manuscript | null = null;
   const manuscript = async () => (ms ??= buildManuscript(await getChapterTexts(novel.id), { id: chapter.id, content }));
 
-  // The assistant never receives images: each marker in the text it reads becomes a
-  // neutral line, applied to each piece as it is cut (offsets stay those of the real text).
+  // The assistant never receives images or markers: each image becomes a neutral line and
+  // each separator `* * *`, applied to each piece as it is cut (offsets stay those of the real text).
   let descriptions: Map<string, string> | null = null;
   const plain = async <T extends string | null>(t: T): Promise<T> => {
-    if (!t || !t.includes("[[imagen:")) return t;
+    if (!t || !t.includes("[[imagen:")) return (t && separatorsForModel(t)) as T;
     if (!descriptions) {
       const { data, error } = await db().from("manuscript_images").select("id, alt, caption, decorative").eq("novel_id", novel.id);
       if (error) throw error;
       descriptions = new Map(data.map((i) => [i.id, i.decorative ? "decorativa" : i.alt || i.caption]));
     }
-    return describeImages(t, (id) => descriptions!.get(id) ?? "") as T;
+    return forModel(t, (id) => descriptions!.get(id) ?? "") as T;
   };
 
   if (body.mode === "scene") {
@@ -177,12 +196,14 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
             .filter((p) => p.kind === "present" && !characterIds.includes(p.character) && memory.characters.some((c) => c.id === p.character))
             .map((p) => p.character)
         : [];
+    // Temporal ignorance: nothing of later chapters (docs/asistente-contexto.md).
     const picked = selectMemory(memory, {
       text: `${argument}\n${before}`,
       characterIds: [...characterIds, ...continuing],
       placeIds,
       chapterId: chapter.id,
       chapterOrder,
+      noLaterThan: chapter.id,
     });
     // Relationships of the people chosen in "En escena" go with anyone (the other one only by name).
     const chosen = new Set(characterIds);
@@ -211,17 +232,20 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       includeManuscript,
     });
 
-    // With the whole novel the text around the cursor is already there: the cursor is marked in it
-    // instead of sending that text twice. Without it, the chapter from its start, and the end of the
-    // previous one when the scene opens a chapter.
+    // «Leer toda la historia hasta aquí»: the previous chapters and this one up to the cursor,
+    // where the mark goes. Never a later chapter, never the text after the cursor: the model
+    // can't give away what the reader will only learn later. Without it, the chapter from its
+    // start, the text around the cursor, and the end of the previous one when the scene opens
+    // a chapter.
     let whole: string | null = null;
     let earlier: string | null = null;
     let earlierOmitted = 0;
     let previousChapterTail: string | null = null;
     if (includeManuscript) {
       const full = await manuscript();
-      const marked = `${content.slice(0, cursor)}\n\n${SCENE_MARK}\n\n${content.slice(cursor)}`;
-      whole = await plain(buildManuscript(full.chapters, { id: chapter.id, content: marked }).text);
+      const story = full.chapters.slice(0, chapterIndex + 1);
+      const marked = `${content.slice(0, cursor).trimEnd()}\n\n${SCENE_MARK}`;
+      whole = await plain(buildManuscript(story, { id: chapter.id, content: marked }).text);
     } else {
       const head = content.slice(0, near.start);
       if (head.trim()) {
@@ -267,12 +291,14 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
         { reason: "nombrado en el texto anterior", text: before },
       ],
       extraReasons: new Map(continuing.map((id) => [id, "en escena en el capítulo anterior"])),
+      time,
     });
     const kind = (id: string) => memorySections.filter((x) => x.id === id);
     const sections: ContextSection[] = [
       ...texts.text,
       ...(story.sections.story ? [story.sections.story] : []),
       guideInventory,
+      ...kind("time"),
       ...kind("characters"),
       ...(story.sections.knowledge ? [story.sections.knowledge] : []),
       ...kind("places"),
@@ -280,11 +306,17 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       ...kind("facts"),
       ...(story.sections.threads ? [story.sections.threads] : []),
       texts.argument,
-      ...(await wholeNovel(whole)),
+      ...(draft ? [draftSection(draft)] : []),
+      ...(whole ? [storyManuscriptSection(whole, chapterIndex)] : []),
     ];
+    const later = picked.later
+      ? [
+          `${picked.later === 1 ? "1 hecho de un capítulo posterior no se envía" : `${picked.later} hechos de capítulos posteriores no se envían`}: la escena no puede saber lo que aún no ha ocurrido.`,
+        ]
+      : [];
     return {
       sections,
-      notices: story.notices,
+      notices: [...story.notices, ...later],
       // The common base, plus the provider's own block (only Grok has one).
       instructions: writeInstructions(body.provider as ProviderId),
       manuscript: whole,
@@ -354,8 +386,10 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
     passages = found.length ? await plain(found.map((f) => f.text).join("\n\n---\n\n")) : null;
   }
 
-  // Images in the selection travel as [IMAGEN n]; the panel puts the real markers back.
-  const protectedSelection = protectImages(selection);
+  // Images in the selection travel as [IMAGEN n] and separators as `* * *`; the panel puts
+  // the real markers back (restoreImages, fromModel).
+  const images = protectImages(selection);
+  const protectedSelection = { ...images, text: separatorsForModel(images.text) };
   const whole = includeManuscript ? await plain((await manuscript()).text) : null;
   const before = await plain(content.slice(near.start, start));
   const after = await plain(content.slice(end, near.end));
@@ -372,9 +406,27 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       chosenCharacters: character ? [character.id] : [],
       chosenCharacterReason: "elegido en «Personaje»",
       sources: [{ reason: "nombrado en el texto", text: nearText }],
+      time,
     }),
     ...(await wholeNovel(whole)),
   ];
+  // Checking a character or the continuity: the time warnings about the people involved
+  // (warnings, never errors: the model is told they may be on purpose).
+  let timeWarnings: string[] = [];
+  if (action.id === "consistencia" || action.id === "personaje") {
+    const involved = new Set(selected.characters.map((c) => c.id));
+    const full = await novelChronology(novel, { memory, chapters: (await manuscript()).chapters });
+    const dismissed = novel.dismissed_warnings ?? {};
+    timeWarnings = full.result.warnings
+      .filter((w) => dismissed[w.key] !== w.fingerprint && w.characterIds.some((id) => involved.has(id)))
+      .map((w) => w.message);
+    if (timeWarnings.length) {
+      const items = timeWarnings.map((label) => ({ label }));
+      const existing = sections.find((s) => s.id === "time");
+      if (existing) existing.items.push(...items);
+      else sections.splice(3, 0, { id: "time", label: "Advertencias de cronología", tokens: estimateTokens(timeWarnings.join("\n").length), items });
+    }
+  }
   return {
     sections,
     notices: [],
@@ -389,6 +441,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       after,
       passages,
       images: protectedSelection.ids.length,
+      timeWarnings,
     }),
     signal,
     // Rewrites are the Asistente's; the analyses belong to the Consejero and use its model.
@@ -401,7 +454,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
 function streamResponse(
   provider: NonNullable<ReturnType<typeof getProvider>>,
   completion: CompletionRequest,
-  parts: ContextPart[],
+  inventory: { parts: ContextPart[] } & ContextInventory,
   onUsage: (u: Extract<AssistEvent, { type: "usage" }>) => Promise<void>,
 ) {
   const encoder = new TextEncoder();
@@ -411,7 +464,8 @@ function streamResponse(
   const generator = provider.stream(completion);
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      send(controller, { type: "context", parts });
+      const { parts, total, sections, notices, instructions } = inventory;
+      send(controller, { type: "context", parts, sent: { total, sections, notices, instructions } });
     },
     async pull(controller) {
       try {

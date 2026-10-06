@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import {
   EDIT_ACTIONS,
@@ -10,6 +10,7 @@ import {
   type AssistEvent,
   type ChapterInfo,
   type Fact,
+  type ContextInventory,
   type ContextPart,
   type ContextSection,
   type EditAction,
@@ -18,10 +19,12 @@ import {
   type SceneLength,
   type Usage,
 } from "@/lib/types";
-import { estimateTokens } from "@/lib/ai/context";
+import { chapterLabel, estimateTokens } from "@/lib/ai/context";
+import { diffStats, diffText } from "@/lib/diff";
+import { anchorAt, resolveAnchor, type Anchor, type InsertTarget, type SceneTarget } from "@/lib/placement";
 import { readPref, writePref } from "@/lib/client";
 import { BUILD, diagEnabled } from "@/lib/diag";
-import { appendImages, countWords, protectImages, restoreImages } from "@/lib/manuscript";
+import { appendImages, countWords, fromModel, protectImages, restoreImages } from "@/lib/manuscript";
 import type { Selection } from "./ChapterEditor";
 import AdvisorOverview from "./AdvisorOverview";
 import AdvisorReading from "./AdvisorReading";
@@ -30,6 +33,7 @@ import AdvisorSaved from "./AdvisorSaved";
 import { formatCount, formatTokens } from "./format";
 import UsageLine from "./UsageLine";
 import ContextView from "./ContextView";
+import DiffView from "./DiffView";
 
 interface Props {
   hidden: boolean;
@@ -54,9 +58,12 @@ interface Props {
   novelChars: number;
   getContent(): string;
   getCursor(): number;
-  /** Both return true when the text reached the manuscript. */
-  onApply(original: Selection, rewrite: string): boolean;
-  onInsert(text: string): boolean;
+  /**
+   * Both keep the current text as a version first, then apply; true when the text reached the
+   * manuscript. They throw (and change nothing) when the version can't be saved.
+   */
+  onApply(original: Selection, rewrite: string): Promise<boolean>;
+  onInsert(text: string, target: InsertTarget): Promise<boolean>;
   onClearSelection(): void;
 }
 
@@ -74,6 +81,12 @@ interface Result {
   lostImages: { text: string; missing: string[] } | null;
   /** What the request read and what it cost, as the server and the provider reported it. */
   readParts: ContextPart[] | null;
+  /** «Ver lo que se envió»: the real request's inventory, as the server built it. */
+  sent: ContextInventory | null;
+  /** Applying failed before touching the manuscript (the copy couldn't be saved): why. */
+  applyFailed: string | null;
+  /** Where a scene will go: the chapter's end, or a fixed position. Only the author changes it. */
+  insertTarget: InsertTarget;
   usage: Usage | null;
 }
 
@@ -84,6 +97,11 @@ interface Request {
   action: EditAction;
   target: Selection | null;
   body: Record<string, unknown>;
+  /**
+   * A scene written for the cursor: the position fixed when it was asked (docs/asistente-
+   * contexto.md §11). "Otra versión", "Ampliar" and "Probar con…" keep it.
+   */
+  anchor?: Anchor | null;
 }
 
 // ---------- output parsing ----------
@@ -127,6 +145,37 @@ function parse(output: string, mode: Mode) {
     complete: main?.complete ?? false,
     warning: warning?.text ?? null,
     untagged: false,
+  };
+}
+
+const wordsLabel = (n: number) => (n === 1 ? "1 palabra" : `${n.toLocaleString("es")} palabras`);
+
+/** Up to `max` characters, cut at a word, with an ellipsis where it was cut. */
+function around(text: string, max: number, side: "start" | "end") {
+  if (text.length <= max) return text;
+  if (side === "end") {
+    const cut = text.slice(-max);
+    return `…${cut.slice(cut.search(/\s/) + 1)}`;
+  }
+  const cut = text.slice(0, max);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), 1))}…`;
+}
+
+/**
+ * A scene before it is inserted: the scene in its place, with enough text around it to
+ * recognise the spot (as ChapterEditor will put it: its own paragraphs). Null when a fixed
+ * position can no longer be found.
+ */
+function insertPreview(content: string, target: InsertTarget, scene: string) {
+  const at = target.kind === "end" ? content.length : resolveAnchor(content, target.anchor);
+  if (at === null) return null;
+  const before = content.slice(0, at).trimEnd();
+  const after = content.slice(at).trimStart();
+  return {
+    atStart: !before,
+    before: before ? `${around(before, 220, "end")}\n\n` : "",
+    scene: scene.trim(),
+    after: after ? `\n\n${around(after, 220, "start")}` : "",
   };
 }
 
@@ -176,6 +225,9 @@ function AssistantPanel(props: Props) {
   const [sceneCharacters, setSceneCharacters] = useState<string[]>([]);
   const [placeId, setPlaceId] = useState("");
   const [length, setLength] = useState<SceneLength>("media");
+  // Where a new scene goes: the end of the chapter unless the author chooses the cursor.
+  const [sceneTarget, setSceneTarget] = useState<SceneTarget>("end");
+  useEffect(() => setSceneTarget(readPref("sceneTarget") === "cursor" ? "cursor" : "end"), []);
 
   // One pending result per tab (Editar selección, Escribir escena, the Consejero's analysis):
   // generating in one never discards an unused proposal in another. Using a proposal
@@ -195,6 +247,14 @@ function AssistantPanel(props: Props) {
   // "Ver contexto" open; opening it asks again (the manuscript may have changed meanwhile).
   const [showContext, setShowContext] = useState(false);
   const [contextAsked, setContextAsked] = useState(0);
+  // A proposal being applied (the copy of the current text is being saved first).
+  const [applying, setApplying] = useState(false);
+  // How a rewrite is shown before accepting it: the changes, the clean proposal, or the author's text.
+  const [compareView, setCompareView] = useState<"changes" | "proposal" | "original">("changes");
+  // «Ver lo que se envió», under an answer.
+  const [showSent, setShowSent] = useState(false);
+  // Where a scene will go follows the cursor while the proposal waits.
+  const [, setCaretTick] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const resultRef = useRef<HTMLElement | null>(null);
   const argumentRef = useRef<HTMLTextAreaElement | null>(null);
@@ -283,7 +343,9 @@ function AssistantPanel(props: Props) {
           length,
           characterIds: sceneCharacters,
           placeIds: placeId ? [placeId] : [],
-          cursor: getCursor(),
+          sceneTarget,
+          // Written to continue the chapter's end, or the text at the cursor (fixed in run()).
+          cursor: sceneTarget === "end" ? getContent().length : getCursor(),
         },
       };
     }
@@ -320,8 +382,8 @@ function AssistantPanel(props: Props) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
-          // The text on screen now, as the real request will send it.
-          body: JSON.stringify({ ...req.body, content: getContent(), dryRun: true }),
+          // The text on screen now and the chosen model, as the real request will send them.
+          body: JSON.stringify({ ...req.body, content: getContent(), provider, dryRun: true }),
         });
         if (res.ok) setEstimate(await res.json());
       } catch {}
@@ -347,6 +409,8 @@ function AssistantPanel(props: Props) {
     length,
     chapterId,
     memory,
+    provider,
+    sceneTarget,
   ]);
 
   async function run(req: Request, using: ProviderId) {
@@ -355,6 +419,24 @@ function AssistantPanel(props: Props) {
     if (size > confirmTokens && !confirm(`Esta consulta enviará unos ${formatTokens(size)} tokens de contexto. ¿Continuar?`))
       return;
 
+    // A scene: written for the chapter's end as it is now, or for the fixed position (fixed now
+    // the first time; a repeat keeps it, wherever the cursor went meanwhile).
+    const content = getContent();
+    if (req.mode === "scene") {
+      if (req.body.sceneTarget === "cursor") {
+        const anchor = req.anchor ?? anchorAt(content, getCursor());
+        const at = resolveAnchor(content, anchor);
+        if (at === null) {
+          const key = `${req.section}:${req.mode}`;
+          update(key, () => ({
+            notice: { kind: "error", message: "El texto alrededor del lugar fijado cambió: vuelve a pedir la escena desde el cursor." },
+          }));
+          return;
+        }
+        req = { ...req, anchor, body: { ...req.body, cursor: at } };
+      } else req = { ...req, anchor: null, body: { ...req.body, cursor: content.length } };
+    }
+
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -362,7 +444,18 @@ function AssistantPanel(props: Props) {
     note(`run → ${key}`);
     setResults((all) => ({
       ...all,
-      [key]: { output: "", notice: null, last: { ...req, provider: using }, applyError: false, lostImages: null, readParts: null, usage: null },
+      [key]: {
+        output: "",
+        notice: null,
+        last: { ...req, provider: using },
+        applyError: false,
+        lostImages: null,
+        readParts: null,
+        sent: null,
+        applyFailed: null,
+        insertTarget: req.anchor ? { kind: "at", anchor: req.anchor } : { kind: "end" },
+        usage: null,
+      },
     }));
     setRunningSlot(key);
 
@@ -372,7 +465,7 @@ function AssistantPanel(props: Props) {
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         // Always the latest text: "Otra versión" after edits uses what is on screen now.
-        body: JSON.stringify({ ...req.body, content: getContent(), provider: using }),
+        body: JSON.stringify({ ...req.body, content, provider: using }),
       });
       if (res.status === 401) {
         window.location.href = "/login";
@@ -398,7 +491,7 @@ function AssistantPanel(props: Props) {
           else if (event.type === "error") update(key, () => ({ notice: { kind: "error", message: event.message } }));
           else if (event.type === "truncated")
             update(key, () => ({ notice: { kind: "truncated", message: "La respuesta se cortó por longitud." } }));
-          else if (event.type === "context") update(key, () => ({ readParts: event.parts }));
+          else if (event.type === "context") update(key, () => ({ readParts: event.parts, sent: event.sent ?? null }));
           else if (event.type === "usage") update(key, () => ({ usage: event }));
         }
       }
@@ -446,12 +539,21 @@ function AssistantPanel(props: Props) {
       writePref(`argument:${novelId}`, "");
     }
   };
-  /** Inserting can fail (the editor is not there, the browser refused the edit): then nothing is lost. */
-  const tryInsert = (text: string) => {
+  /**
+   * Accepting a proposal: the current text is kept as a version, then the manuscript changes.
+   * If the copy can't be saved nothing changes and the proposal stays, with the reason; if the
+   * text can't be applied (the fragment is gone), the proposal stays too (`used(false)`).
+   */
+  const accept = async (apply: () => Promise<boolean>) => {
+    setApplying(true);
+    update(slot, () => ({ applyFailed: null }));
     try {
-      return onInsert(text);
-    } catch {
-      return false;
+      used(await apply());
+    } catch (e) {
+      note(`aplicar falló: ${(e as Error).message}`);
+      update(slot, () => ({ applyFailed: (e as Error).message }));
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -497,6 +599,37 @@ function AssistantPanel(props: Props) {
     sceneWords < asked.words * asked.warnBelow
       ? { words: sceneWords, asked: asked.words }
       : null;
+  const finished = Boolean(parsed?.proposal && (parsed.complete || parsed.untagged) && !runningHere);
+  // A finished rewrite, as it would reach the manuscript (markers restored), and its changes.
+  const rewrite = useMemo(() => {
+    if (!finished || !last || last.mode !== "edit" || !last.target || !parsed?.proposal) return null;
+    const restored = restoreImages(fromModel(parsed.proposal), protectImages(last.target.text).ids);
+    const ops = diffText(last.target.text, restored.text);
+    return { restored, ops, stats: diffStats(ops) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the proposal and its target
+  }, [finished, last, parsed?.proposal]);
+  useEffect(() => setCompareView("changes"), [rewrite]);
+  useEffect(() => setShowSent(false), [last]);
+  // A finished scene: its preview, redrawn while it waits.
+  const sceneReady = finished && last?.mode === "scene";
+  useEffect(() => {
+    if (!sceneReady) return;
+    const tick = () => setCaretTick((n) => n + 1);
+    // Only to redraw the text around the destination as it changes; the destination itself
+    // never follows the cursor (§11).
+    const events = ["selectionchange", "keyup", "pointerup", "input"];
+    for (const e of events) document.addEventListener(e, tick);
+    return () => {
+      for (const e of events) document.removeEventListener(e, tick);
+    };
+  }, [sceneReady]);
+  // The destination shown is the one used: the cursor moving never changes it (§11).
+  const insertTarget = result?.insertTarget ?? ({ kind: "end" } as InsertTarget);
+  const insertion = sceneReady && parsed?.proposal ? insertPreview(getContent(), insertTarget, fromModel(parsed.proposal)) : null;
+  const fixHere = () => update(slot, () => ({ insertTarget: { kind: "at", anchor: anchorAt(getContent(), getCursor()) }, applyFailed: null }));
+  const chapterIndex = chapters.findIndex((c) => c.id === chapterId);
+  const here = chapterIndex >= 0 ? chapterLabel(chapterIndex, chapters[chapterIndex].title) : "este capítulo";
+
   const req = buildRequest();
   const canRun = Boolean(req && provider && !running && (mode === "scene" || current.character !== "required" || character));
   const manuscriptTokens = estimateTokens(novelChars);
@@ -520,23 +653,39 @@ function AssistantPanel(props: Props) {
     </label>
   );
 
+  // A scene reads the story up to the cursor, never beyond (docs/asistente-contexto.md).
+  const storyChars =
+    mode === "scene"
+      ? chapters.slice(0, Math.max(0, chapters.findIndex((c) => c.id === chapterId))).reduce((n, c) => n + c.chars, 0) + getCursor()
+      : 0;
   const contextControls = (
     <>
       <label className="check">
         <input type="checkbox" checked={includeManuscript} onChange={(e) => setIncludeManuscript(e.target.checked)} />
-        <span>
-          Leer también la novela completa
-          {novelChars > 0 && <span className="muted"> · ≈{formatTokens(manuscriptTokens)} tokens más por consulta</span>}
-        </span>
+        {mode === "scene" ? (
+          <span>
+            Leer toda la historia hasta aquí
+            {storyChars > 0 && <span className="muted"> · ≈{formatTokens(estimateTokens(storyChars))} tokens estimados más</span>}
+          </span>
+        ) : (
+          <span>
+            Leer también la novela completa
+            {novelChars > 0 && <span className="muted"> · ≈{formatTokens(manuscriptTokens)} tokens estimados más por consulta</span>}
+          </span>
+        )}
       </label>
       <p className="muted small check-help">
-        {includeManuscript
-          ? "Lee todo el manuscrito: más coherencia, más coste."
-          : "Desactivada, la IA no lee todo el manuscrito: trabaja sólo con el contexto seleccionado."}
+        {mode === "scene"
+          ? includeManuscript
+            ? "Lee los capítulos anteriores y este hasta el cursor; nunca lo que viene después."
+            : "Desactivada, la IA no lee toda la historia: trabaja sólo con el contexto seleccionado."
+          : includeManuscript
+            ? "Lee todo el manuscrito: más coherencia, más coste."
+            : "Desactivada, la IA no lee todo el manuscrito: trabaja sólo con el contexto seleccionado."}
       </p>
       {estimate && (
         <p className={`estimate${estimate.total > confirmTokens ? " large" : ""}`}>
-          Contexto de esta consulta: ≈{formatTokens(estimate.total)} tokens
+          Contexto de esta consulta: ≈{formatTokens(estimate.total)} tokens estimados
           {estimate.sections && (
             <>
               {" · "}
@@ -561,6 +710,7 @@ function AssistantPanel(props: Props) {
           total={estimate.total}
           instructions={estimate.instructions ?? 0}
           includeManuscript={includeManuscript}
+          scene={mode === "scene"}
           updating={Boolean(estimate.stale)}
           notices={estimate.notices}
         />
@@ -786,6 +936,28 @@ function AssistantPanel(props: Props) {
                 </select>
               </label>
             )}
+            <fieldset className="checks inline scene-target">
+              <legend>Dónde va</legend>
+              {(
+                [
+                  ["end", "Al final del capítulo"],
+                  ["cursor", "En el cursor"],
+                ] as const
+              ).map(([id, label]) => (
+                <label key={id} className="check">
+                  <input
+                    type="radio"
+                    name="scene-target"
+                    checked={sceneTarget === id}
+                    onChange={() => {
+                      setSceneTarget(id);
+                      writePref("sceneTarget", id);
+                    }}
+                  />
+                  {label}
+                </label>
+              ))}
+            </fieldset>
             <label>
               <span>Extensión</span>
               <select value={length} onChange={(e) => setLength(e.target.value as SceneLength)}>
@@ -801,8 +973,10 @@ function AssistantPanel(props: Props) {
             {contextControls}
           </div>
           <p className="muted small">
-            Los personajes y lugares nombrados en el argumento se incluyen solos. La escena se escribe para la posición del
-            cursor.
+            Los personajes y lugares nombrados en el argumento se incluyen solos.{" "}
+            {sceneTarget === "end"
+              ? "La escena continúa el final del capítulo, donde se insertará, esté donde esté el cursor."
+              : "La escena se escribe para la posición del cursor, que queda fijada al pedirla."}
           </p>
         </>
       )}
@@ -844,18 +1018,101 @@ function AssistantPanel(props: Props) {
           )}
           {runningHere && !output && <p className="muted">{last.mode === "scene" ? "Escribiendo…" : "Pensando…"}</p>}
 
-          {parsed.proposal !== null && (
-            <div className="compare">
-              {last.mode === "edit" && last.target && (
+          {parsed.proposal !== null && rewrite && last.target ? (
+            // Comparar antes de aplicar: the author's text and the proposal, as prose.
+            <div className="compare" data-origin="comparación (texto actual ↔ propuesta)">
+              <div className="compare-tabs" role="group" aria-label="Cómo ver la propuesta">
+                {(
+                  [
+                    ["changes", "Cambios"],
+                    ["proposal", "Propuesta"],
+                    ["original", "Tu texto"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button key={id} className={compareView === id ? "on" : undefined} aria-pressed={compareView === id} onClick={() => setCompareView(id)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {compareView === "changes" && (
                 <>
-                  <h3>Original</h3>
-                  <p className="prose original">{last.target.text}</p>
+                  <p className="muted small compare-summary">
+                    {rewrite.stats.added || rewrite.stats.removed
+                      ? `La IA propone quitar ${wordsLabel(rewrite.stats.removed)} y añadir ${wordsLabel(rewrite.stats.added)}. Tachado: lo que se quita; resaltado: lo que se añade.`
+                      : "La propuesta deja el fragmento igual."}
+                  </p>
+                  <DiffView ops={rewrite.ops} label="Cambios que propone la IA" />
                 </>
               )}
-              <h3>Propuesta</h3>
-              <p className="prose">{parsed.proposal}</p>
+              {compareView === "proposal" && (
+                <DiffView ops={[{ kind: "same", text: rewrite.restored.text }]} label="Propuesta de la IA" full />
+              )}
+              {compareView === "original" && (
+                <DiffView ops={[{ kind: "same", text: last.target.text }]} label="Tu texto actual" full />
+              )}
               {parsed.warning && <p className="notice">Aviso: {parsed.warning}</p>}
             </div>
+          ) : parsed.proposal !== null && sceneReady ? (
+            // A scene: what goes in, and exactly where.
+            <div className="compare" data-origin="vista previa de la inserción">
+              <p className="insert-where" data-target={insertTarget.kind}>
+                {insertTarget.kind === "end" ? (
+                  <strong>Se insertará al final del capítulo</strong>
+                ) : (
+                  <strong>Se insertará en la posición actual</strong>
+                )}
+                <span className="muted small">
+                  {" "}
+                  · {here}
+                  {insertTarget.kind === "end"
+                    ? ", después de su último párrafo."
+                    : insertion?.atStart
+                      ? ", al principio. Es la posición fijada al elegirla: mover el cursor no la cambia."
+                      : ", entre estos párrafos. Es la posición fijada al elegirla: mover el cursor no la cambia."}
+                </span>
+              </p>
+              {!insertion ? (
+                <p className="notice" role="alert">
+                  El texto alrededor del lugar fijado cambió y ya no se encuentra. Fíjalo de nuevo en el cursor o inserta al final.
+                </p>
+              ) : (
+              <DiffView
+                ops={[
+                  { kind: "same", text: insertion.before },
+                  { kind: "add", text: insertion.scene },
+                  { kind: "same", text: insertion.after },
+                ]}
+                label="La escena en su lugar"
+                full
+              />
+              )}
+              {insertTarget.kind === "at" && (
+                <p className="small insert-options">
+                  <button type="button" className="link small" onClick={fixHere}>
+                    Fijar en la posición actual del cursor
+                  </button>
+                  {" · "}
+                  <button type="button" className="link small" onClick={() => update(slot, () => ({ insertTarget: { kind: "end" }, applyFailed: null }))}>
+                    Insertar al final en su lugar
+                  </button>
+                </p>
+              )}
+              {parsed.warning && <p className="notice">Aviso: {parsed.warning}</p>}
+            </div>
+          ) : (
+            parsed.proposal !== null && (
+              <div className="compare">
+                {last.mode === "edit" && last.target && (
+                  <>
+                    <h3>Original</h3>
+                    <p className="prose original">{last.target.text}</p>
+                  </>
+                )}
+                <h3>Propuesta</h3>
+                <p className="prose">{parsed.proposal}</p>
+                {parsed.warning && <p className="notice">Aviso: {parsed.warning}</p>}
+              </div>
+            )
           )}
 
           {short && (
@@ -872,25 +1129,57 @@ function AssistantPanel(props: Props) {
           )}
           {notice && <p className={`notice ${notice.kind}`}>{notice.message}</p>}
           {!runningHere && (readParts || usage) && <UsageLine parts={readParts} usage={usage} />}
+          {!runningHere && result?.sent && (
+            <p className="muted small">
+              <button type="button" className="link small" aria-expanded={showSent} onClick={() => setShowSent(!showSent)}>
+                {showSent ? "Ocultar lo que se envió" : "Ver lo que se envió"}
+              </button>
+            </p>
+          )}
+          {showSent && result?.sent && (
+            <ContextView
+              sections={result.sent.sections}
+              total={result.sent.total}
+              instructions={result.sent.instructions}
+              includeManuscript={last.body.includeManuscript === true}
+              scene={last.mode === "scene"}
+              notices={result.sent.notices}
+              sent
+            />
+          )}
 
           {!runningHere && (
             <div className="compare-actions">
-              {parsed.proposal && (parsed.complete || parsed.untagged) && last.mode === "edit" && last.target && (
+              {rewrite && last.target && (
                 <button
                   className="btn primary"
+                  disabled={applying}
                   onClick={() => {
-                    // The model saw [IMAGEN n]; put the real markers back before touching the text.
-                    const restored = restoreImages(parsed.proposal!, protectImages(last.target!.text).ids);
-                    if (restored.missing.length) return update(slot, () => ({ lostImages: restored }));
-                    used(onApply(last.target!, restored.text));
+                    // The model saw [IMAGEN n] and `* * *`: the real markers are back in `restored`.
+                    if (rewrite.restored.missing.length) return update(slot, () => ({ lostImages: rewrite.restored }));
+                    accept(() => onApply(last.target!, rewrite.restored.text));
                   }}
                 >
-                  Reemplazar selección
+                  {applying ? "Guardando una copia…" : "Reemplazar selección"}
                 </button>
               )}
-              {parsed.proposal && (parsed.complete || parsed.untagged) && last.mode === "scene" && (
-                <button className="btn primary" onClick={() => used(tryInsert(parsed.proposal!))}>
-                  Insertar en el cursor
+              {sceneReady && parsed.proposal && (
+                <button
+                  className="btn primary"
+                  disabled={applying || !insertion}
+                  onClick={() => accept(() => onInsert(fromModel(parsed.proposal!), insertTarget))}
+                >
+                  {applying ? "Guardando una copia…" : insertTarget.kind === "end" ? "Insertar al final" : "Insertar en el cursor"}
+                </button>
+              )}
+              {sceneReady && parsed.proposal && insertTarget.kind === "end" && (
+                <button
+                  className="btn ghost"
+                  disabled={applying}
+                  onClick={fixHere}
+                  title="Muestra dónde está ahora el cursor y fija allí la escena; después se confirma"
+                >
+                  Insertar en el cursor…
                 </button>
               )}
               <button className="btn ghost" onClick={() => run(last, last.provider)}>
@@ -931,7 +1220,8 @@ function AssistantPanel(props: Props) {
               <div className="compare-actions">
                 <button
                   className="btn"
-                  onClick={() => used(onApply(last.target!, appendImages(lostImages.text, lostImages.missing)))}
+                  disabled={applying}
+                  onClick={() => accept(() => onApply(last.target!, appendImages(lostImages.text, lostImages.missing)))}
                 >
                   Aplicar y colocar la imagen al final
                 </button>
@@ -940,6 +1230,11 @@ function AssistantPanel(props: Props) {
                 </button>
               </div>
             </div>
+          )}
+          {result?.applyFailed && (
+            <p className="error small" role="alert">
+              {result.applyFailed}
+            </p>
           )}
           {result?.applyError && (
             <p className="error small">

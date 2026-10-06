@@ -116,7 +116,7 @@ for (const device of [
     await page.getByPlaceholder(/Qué ocurre en la escena/).fill(argument);
     if (length) await panel.getByLabel("Extensión").selectOption(length);
     await press(panel.getByRole("button", { name: "Desarrollar escena" }));
-    await panel.getByRole("button", { name: "Insertar en el cursor" }).waitFor();
+    await panel.getByRole("button", { name: "Insertar al final" }).waitFor();
   }
 
   test(`${device.name}: escena Media corta → aviso discreto; Ampliar sólo al pulsarlo, y conserva la escena`, async () => {
@@ -132,14 +132,16 @@ for (const device of [
     assert.equal((await aiLog()).length, 1);
 
     await s.press(note.getByRole("button", { name: "Ampliar" }));
-    await s.panel.getByText(/ESCENA-AMPLIADA/).waitFor();
-    await s.panel.getByRole("button", { name: "Insertar en el cursor" }).waitFor();
+    // The new scene, in its place (the preview also shows the text around the cursor).
+    await s.panel.getByRole("insertion").getByText(/ESCENA-AMPLIADA/).waitFor();
+    await s.panel.getByRole("button", { name: "Insertar al final" }).waitFor();
     const log = await aiLog();
     assert.equal(log.length, 2);
     assert.ok(parts(log[1]).user.includes(`<borrador>\n${SHORT}\n</borrador>`), "the scene written is the draft");
     assert.equal(await note.count(), 0, "developed enough: no note");
     // The widened scene is the one inserted; the argument goes with it.
-    await s.press(s.panel.getByRole("button", { name: "Insertar en el cursor" }));
+    await s.press(s.panel.getByRole("button", { name: "Insertar al final" }));
+    await s.page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
     assert.ok((await s.editor.inputValue()).includes("ESCENA-AMPLIADA"));
     await s.ctx.close();
   });

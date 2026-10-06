@@ -1,3 +1,6 @@
+import type { BookMeta } from "./book";
+import type { AgeAnchor, Calendar, StoryDate, TimeMark, TimeWarning } from "./chronology";
+
 export interface NovelSummary {
   id: string;
   title: string;
@@ -14,6 +17,12 @@ export interface Novel {
   guide: Guide;
   /** Re-read a chapter on leaving it after a substantial change (Consejero). */
   auto_digest: boolean;
+  /** Cronología: real dates (1972) or relative years (Año 0, Año 5). */
+  calendar: Calendar;
+  /** Time warnings the author dismissed: key → fingerprint of the data it was about. */
+  dismissed_warnings: Record<string, string>;
+  /** The book's data for publishing: front matter, cover and page (docs/exportacion.md). */
+  book: BookMeta;
   updated_at: string;
 }
 
@@ -55,6 +64,39 @@ export interface Chapter {
   revision: number;
 }
 
+/** Why a version of a chapter was kept (docs/versiones.md). */
+export type VersionReason = "auto" | "ai" | "conflict" | "manual" | "restore" | "delete";
+
+export const VERSION_REASONS: Record<VersionReason, string> = {
+  auto: "Copia automática",
+  ai: "Antes de aplicar la IA",
+  conflict: "Versión de otro dispositivo",
+  manual: "Guardada por ti",
+  restore: "Antes de restaurar",
+  delete: "Al eliminar el capítulo",
+};
+
+/** A saved copy of a chapter's text; `content` only when one version is asked for. */
+export interface ChapterVersion {
+  id: string;
+  reason: VersionReason;
+  label: string;
+  title: string;
+  words: number;
+  created_at: string;
+  content?: string;
+}
+
+/** A deleted chapter in the trash, with its last version. */
+export interface TrashEntry {
+  source_chapter_id: string;
+  title: string;
+  position: number;
+  words: number;
+  deleted_at: string;
+  versions: number;
+}
+
 export interface Character {
   id: string;
   novel_id: string;
@@ -76,6 +118,10 @@ export interface Character {
   unaware: string;
   arc: string;
   notes: string;
+  /** Cronología: what is known of the age (computed per chapter); `age` stays a free note. */
+  age_anchor: AgeAnchor | null;
+  age_approx: boolean;
+  death: StoryDate | null;
 }
 
 export interface Relationship {
@@ -274,6 +320,16 @@ export interface ContextItem {
   reason?: string;
   note?: string;
 }
+/** What a request carries, for the author: the dry run's answer, and the real request's first event. */
+export interface ContextInventory {
+  /** Estimated tokens (characters ÷ 3.5): the provider reports the real ones after answering. */
+  total: number;
+  sections: ContextSection[];
+  notices: string[];
+  /** Procesador's own instructions to the model, only counted. */
+  instructions: number;
+}
+
 export type ContextSectionId =
   | "chapter"
   | "previous"
@@ -288,6 +344,8 @@ export type ContextSectionId =
   | "knowledge"
   | "threads"
   | "argument"
+  | "time"
+  | "draft"
   | "manuscript";
 export interface ContextSection {
   id: ContextSectionId;
@@ -336,7 +394,12 @@ export type AssistEvent =
   | { type: "truncated" }
   | { type: "error"; message: string }
   /** First event: what the request reads. */
-  | { type: "context"; parts: ContextPart[] }
+  | {
+      type: "context";
+      parts: ContextPart[];
+      /** The Asistente's request as sent ("Ver contexto" of the real request, not of a preview). */
+      sent?: ContextInventory;
+    }
   /** Last event before refusal/truncated: tokens and cost. */
   | ({ type: "usage" } & Usage)
   /** Consejero: how a free question was understood, and the verified cards at the end. */
@@ -517,3 +580,13 @@ export interface ConversationSummary {
   title: string;
   updated_at: string;
 }
+
+/** The Cronología view (GET /api/novels/[id]/chronology): computed, said for the author. */
+export interface ChronologyView {
+  calendar: Calendar;
+  chapters: { id: string; title: string; mark: TimeMark | null; time: string; estimated: boolean }[];
+  /** Ages per chapter, in chapter order ("26 años", "20–21 años", "≈ 40 años"; null unknown). */
+  characters: { id: string; name: string; anchored: boolean; ages: (string | null)[] }[];
+  warnings: (TimeWarning & { dismissed: boolean })[];
+}
+
