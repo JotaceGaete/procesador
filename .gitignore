@@ -6,3 +6,6 @@ out/
 .vercel
 *.tsbuildinfo
 next-env.d.ts
+
+# Prototipo Typst (Fase 0): el WASM se copia en local con `node prototipos/typst/build.mjs --vendor`.
+public/prototipo-typst/vendor/

@@ -1,0 +1,17 @@
+{
+  "name": "procesador-prototipo-typst",
+  "private": true,
+  "description": "Fase 0 (descartable): Typst como motor de «Ver libro» y del PDF. No es parte de la app.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs --vendor",
+    "bench": "node bench/browser.mjs",
+    "native": "node bench/native.mjs /tmp"
+  },
+  "dependencies": {
+    "@myriaddreamin/typst-ts-node-compiler": "0.7.0",
+    "@myriaddreamin/typst-ts-renderer": "0.7.0",
+    "@myriaddreamin/typst-ts-web-compiler": "0.7.0",
+    "@myriaddreamin/typst.ts": "0.7.0"
+  }
+}
