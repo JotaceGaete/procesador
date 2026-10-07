@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byChild, novelHandler } from "@/lib/access";
 import { assertId, db } from "@/lib/supabase";
 import { HttpError } from "@/lib/http";
 import { bucket } from "@/lib/assets-server";
@@ -17,7 +17,7 @@ const notFound = () => new HttpError(404, "Imagen no encontrada");
  * a 404. Browsers keep a copy for 10 minutes at most, then revalidate with the
  * ETag (304 without touching Storage while unchanged).
  */
-export const GET = handler<Ctx>(async (request, { params }) => {
+export const GET = novelHandler<Ctx>(byChild("assets"), async (request, { params }) => {
   const { id: rawId, variant } = await params;
   const id = assertId(rawId, "Imagen");
   if (!["thumb", "display", "original"].includes(variant)) throw notFound();

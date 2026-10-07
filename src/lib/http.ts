@@ -4,6 +4,8 @@ export class HttpError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** More fields for the JSON answer (for example `code: "novel_locked"`). */
+    public extra?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -11,7 +13,9 @@ export class HttpError extends Error {
 
 /** Logs only the error message (never request bodies or manuscript text). */
 export function errorResponse(error: unknown) {
-  if (error instanceof HttpError) return NextResponse.json({ error: error.message }, { status: error.status });
+  if (error instanceof HttpError) {
+    return NextResponse.json({ error: error.message, ...error.extra }, { status: error.status, headers: { "Cache-Control": "no-store" } });
+  }
   const pg = error as { code?: string; message?: string };
   // Foreign keys are what keep novels apart: an id from another novel lands here.
   if (pg?.code === "23503")

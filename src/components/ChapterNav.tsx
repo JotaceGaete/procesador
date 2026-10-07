@@ -24,6 +24,9 @@ interface Props {
   /** Editor visual (docs/editor-visual.md): on by default; the switch turns it off (plain editor), per device. */
   visualEditor: boolean;
   onToggleVisualEditor(): void;
+  /** Bloquear (docs/privacidad.md): Procesador, and this novel if it is protected. Absent: nothing to lock with. */
+  onLockApp?(): void;
+  onLockNovel?(): void;
   /** Moves the editor to another chapter before the current one is deleted. */
   beforeDeleteCurrent(neighborId: string): Promise<boolean>;
 }
@@ -44,6 +47,8 @@ export default function ChapterNav({
   onNovel,
   visualEditor,
   onToggleVisualEditor,
+  onLockApp,
+  onLockNovel,
   beforeDeleteCurrent,
 }: Props) {
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -122,6 +127,20 @@ export default function ChapterNav({
           <span className="editor-switch-knob" />
         </span>
       </button>
+      {(onLockApp || onLockNovel) && (
+        <p className="nav-locks">
+          {onLockNovel && (
+            <button className="link" onClick={onLockNovel} title="Vuelve a pedir el PIN de esta novela">
+              Bloquear novela
+            </button>
+          )}
+          {onLockApp && (
+            <button className="link" onClick={onLockApp} title="Ctrl/⌘+Shift+L">
+              Bloquear Procesador
+            </button>
+          )}
+        </p>
+      )}
       <ol>
         {chapters.map((c, i) => (
           <li key={c.id} className={c.id === currentId ? "current" : undefined}>

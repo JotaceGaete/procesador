@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byChild, novelHandler } from "@/lib/access";
 import { assertId, db, getChapter } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import type { ChapterVersion, VersionReason } from "@/lib/types";
@@ -10,7 +10,7 @@ type Ctx = { params: Promise<{ id: string }> };
 const ASKED: VersionReason[] = ["ai", "conflict", "manual", "restore"];
 
 /** The chapter's versions, newest first, without their text. */
-export const GET = handler<Ctx>(async (_request, { params }) => {
+export const GET = novelHandler<Ctx>(byChild("chapters"), async (_request, { params }) => {
   const chapter = await getChapter((await params).id);
   const { data, error } = await db()
     .from("chapter_versions")
@@ -27,7 +27,7 @@ export const GET = handler<Ctx>(async (_request, { params }) => {
  * or, without it, the text saved on the server (the other device's, before «Conservar la mía»).
  * The same text as the last version is not repeated. Answers { id } (null for an empty text).
  */
-export const POST = handler<Ctx>(async (request, { params }) => {
+export const POST = novelHandler<Ctx>(byChild("chapters"), async (request, { params }) => {
   const id = assertId((await params).id, "Capítulo");
   const body = await readJson(request);
   const reason = body.reason as VersionReason;

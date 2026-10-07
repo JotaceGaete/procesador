@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byChild, novelHandler } from "@/lib/access";
 import { assertId, db } from "@/lib/supabase";
 import { HttpError, pickFields, readJson } from "@/lib/http";
 import { isMemoryKind, MEMORY_KINDS } from "@/lib/memory";
@@ -9,6 +9,9 @@ import { deleteUnusedAssets } from "@/lib/assets-server";
 
 type Ctx = { params: Promise<{ kind: string; id: string }> };
 
+/** The item's row says which novel it belongs to (read before anything else). */
+const memoryItem = byChild((p) => (isMemoryKind(p.kind ?? "") ? MEMORY_KINDS[p.kind as keyof typeof MEMORY_KINDS].table : undefined));
+
 async function target(params: Ctx["params"]) {
   const { kind, id } = await params;
   if (!isMemoryKind(kind)) throw new HttpError(404, "Tipo de memoria desconocido");
@@ -16,7 +19,7 @@ async function target(params: Ctx["params"]) {
 }
 
 /** novel_id is never accepted from the client, so an item can't move to another novel. */
-export const PATCH = handler<Ctx>(async (request, { params }) => {
+export const PATCH = novelHandler<Ctx>(memoryItem, async (request, { params }) => {
   const { kind, id, config } = await target(params);
   const body = await readJson(request);
   const fields = pickFields(body, config.fields, config.nullable);
@@ -50,7 +53,7 @@ export const PATCH = handler<Ctx>(async (request, { params }) => {
   return NextResponse.json(data);
 });
 
-export const DELETE = handler<Ctx>(async (request, { params }) => {
+export const DELETE = novelHandler<Ctx>(memoryItem, async (request, { params }) => {
   const { kind, id, config } = await target(params);
   // A character's gallery goes with it (cascade). Its files are deleted afterwards
   // only if nothing else uses them.

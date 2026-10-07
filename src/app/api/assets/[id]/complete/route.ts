@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byChild, novelHandler } from "@/lib/access";
 import { assertId, db } from "@/lib/supabase";
 import { HttpError } from "@/lib/http";
 import {
@@ -35,7 +35,7 @@ async function readDerived(form: FormData, field: string, maxSide: number) {
  * the browser generated and marks the asset ready. Then it applies the use (a new
  * gallery image, or a replacement). If anything fails, nothing is left half-made.
  */
-export const POST = handler<Ctx>(async (request, { params }) => {
+export const POST = novelHandler<Ctx>(byChild("assets"), async (request, { params }) => {
   const id = assertId((await params).id, "Archivo");
   if (Number(request.headers.get("content-length") ?? 0) > MAX_DERIVED_BYTES + 64 * 1024) {
     throw new HttpError(413, "Las versiones reducidas pesan demasiado.");

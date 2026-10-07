@@ -21,7 +21,11 @@ with expected(kind, object) as (
     ('función', 'duplicate_novel'), ('función', 'sync_chapter_images'), ('función', 'replace_asset_uses'),
     ('función', 'finalize_asset'), ('función', 'novel_outline'), ('función', 'library'),
     ('función', 'save_chapter_version'), ('función', 'trash_chapter'), ('función', 'chapter_trash'),
-    ('función', 'restore_chapter'), ('función', 'chapter_version_auto')
+    ('función', 'restore_chapter'), ('función', 'chapter_version_auto'),
+    -- Sesiones y bloqueo de Procesador (docs/privacidad.md)
+    ('tabla', 'app_settings'), ('tabla', 'app_sessions'), ('tabla', 'credential_attempts'),
+    ('función', 'session_touch'), ('función', 'session_set_locked'), ('función', 'session_revoke'),
+    ('función', 'credential_failure'), ('función', 'credential_success'), ('función', 'purge_sessions')
 )
 select e.kind, e.object, 'falta' as estado
 from expected e

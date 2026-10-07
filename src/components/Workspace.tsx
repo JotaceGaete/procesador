@@ -14,7 +14,8 @@ import type {
   Novel,
   ProviderId,
 } from "@/lib/types";
-import { api, readPref, writePref } from "@/lib/client";
+import { api, readPref, trackRequest, writePref } from "@/lib/client";
+import { useLock, useLockGuard } from "./LockProvider";
 import { chapterLabel } from "@/lib/ai/context";
 import type { SaveState } from "./useAutosave";
 import ChapterEditor, { type EditorHandle, type Selection } from "./ChapterEditor";
@@ -172,11 +173,13 @@ export default function Workspace({ novelId }: { novelId: string }) {
     const saved = readPref("provider") as ProviderId | null;
     const provider = saved && loaded.providers.includes(saved) ? saved : loaded.defaultProvider;
     if (!provider) return;
+    // Stops if Procesador or the novel locks meanwhile.
     fetch(`/api/chapters/${id}/digest`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ provider, auto: true }),
       keepalive: true,
+      signal: trackRequest().signal,
     }).catch(() => {});
   }
 
@@ -271,6 +274,9 @@ export default function Workspace({ novelId }: { novelId: string }) {
     [currentId],
   );
   const flush = useCallback(async () => !editorRef.current || (await editorRef.current.flush()), []);
+  // Before Procesador (or this novel) locks: the open chapter is saved first.
+  useLockGuard(flush);
+  const lock = useLock();
   // A fact the Consejero proposed (suggested): Memoria shows it at once.
   const onFactAdded = useCallback((f: Fact) => setMemory((m) => ({ ...m, facts: [...m.facts, f] })), []);
   const onAutoDigest = useCallback((on: boolean) => setNovel((n) => (n ? { ...n, auto_digest: on } : n)), []);
@@ -503,6 +509,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
         }}
         visualEditor={visualEditor}
         onToggleVisualEditor={() => void toggleVisualEditor()}
+        onLockApp={lock.enabled ? () => void lock.lockApp() : undefined}
         onNovel={() => {
           if (narrow()) setNavOpen(false);
           setModal("novel");

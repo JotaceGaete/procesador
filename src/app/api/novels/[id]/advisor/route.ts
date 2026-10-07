@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byParam, novelHandler } from "@/lib/access";
 import { getChapterTexts, getMemory, getNovel } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { echoes, novelMap, phraseRepetitions, presence } from "@/lib/advisor/stats";
@@ -12,7 +12,7 @@ type Ctx = { params: Promise<{ id: string }> };
  * The open chapter travels in the body, so the figures match what the author sees
  * even before it is saved.
  */
-export const POST = handler<Ctx>(async (request, { params }) => {
+export const POST = novelHandler<Ctx>(byParam(), async (request, { params }) => {
   const novel = await getNovel((await params).id);
   const body = await readJson(request);
   const [saved, memory, usage] = await Promise.all([getChapterTexts(novel.id), getMemory(novel.id), monthUsage(novel.id)]);

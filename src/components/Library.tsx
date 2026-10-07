@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { NovelSummary } from "@/lib/types";
 import { api, readPref } from "@/lib/client";
 import BuildStamp from "./BuildStamp";
+import PrivacyModal from "./PrivacyModal";
+import { useLock } from "./LockProvider";
 
 const dateFormat = new Intl.DateTimeFormat("es", { day: "numeric", month: "short", year: "numeric" });
 
@@ -19,6 +21,8 @@ export default function Library() {
   const [draft, setDraft] = useState("");
   const [deleting, setDeleting] = useState<string | null>(null);
   const [lastId, setLastId] = useState<string | null>(null);
+  const [privacy, setPrivacy] = useState(false);
+  const lock = useLock();
 
   const load = useCallback(() => api<NovelSummary[]>("/api/novels").then(setNovels), []);
 
@@ -59,6 +63,16 @@ export default function Library() {
       <header className="library-head">
         <h1>Biblioteca</h1>
         <span className="spacer" />
+        {lock.enabled && (
+          <>
+            <button className="link" onClick={() => setPrivacy(true)}>
+              Privacidad
+            </button>
+            <button className="link" onClick={() => void lock.lockApp()} title="Bloquear Procesador (Ctrl/⌘+Shift+L)">
+              Bloquear
+            </button>
+          </>
+        )}
         <button
           className="link"
           onClick={async () => {
@@ -179,6 +193,7 @@ export default function Library() {
           Nueva novela
         </button>
       )}
+      {privacy && <PrivacyModal onClose={() => setPrivacy(false)} onSaved={lock.ping} />}
       <footer className="library-foot">
         <BuildStamp />
       </footer>

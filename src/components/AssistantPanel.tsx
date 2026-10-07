@@ -22,7 +22,7 @@ import {
 import { chapterLabel, estimateTokens } from "@/lib/ai/context";
 import { diffStats, diffText } from "@/lib/diff";
 import { anchorAt, resolveAnchor, type Anchor, type InsertTarget, type SceneTarget } from "@/lib/placement";
-import { readPref, writePref } from "@/lib/client";
+import { noticeLock, readPref, writePref } from "@/lib/client";
 import { BUILD, diagEnabled } from "@/lib/diag";
 import { appendImages, countWords, fromModel, protectImages, restoreImages } from "@/lib/manuscript";
 import type { Selection } from "./ChapterEditor";
@@ -385,6 +385,7 @@ function AssistantPanel(props: Props) {
           // The text on screen now and the chosen model, as the real request will send them.
           body: JSON.stringify({ ...req.body, content: getContent(), provider, dryRun: true }),
         });
+        await noticeLock(res);
         if (res.ok) setEstimate(await res.json());
       } catch {}
     }, 700);
@@ -471,6 +472,7 @@ function AssistantPanel(props: Props) {
         window.location.href = "/login";
         return;
       }
+      await noticeLock(res);
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `Error ${res.status}`);

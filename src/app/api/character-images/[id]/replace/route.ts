@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byChild, novelHandler } from "@/lib/access";
 import { assertId, db } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { applyUse, readUse } from "@/lib/asset-uses";
@@ -13,7 +13,7 @@ type Ctx = { params: Promise<{ id: string }> };
  * Returns the whole novel's gallery and manuscript images ({ images, manuscriptImages }):
  * with scope "all", images of the book that shared the file change too.
  */
-export const POST = handler<Ctx>(async (request, { params }) => {
+export const POST = novelHandler<Ctx>(byChild("character_images"), async (request, { params }) => {
   const imageId = assertId((await params).id, "Imagen");
   const body = await readJson(request);
   const assetId = assertId(body.asset_id, "Archivo");

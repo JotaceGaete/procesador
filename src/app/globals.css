@@ -955,6 +955,47 @@ details.group > p {
   font-weight: normal;
 }
 
+/* ---------- Locks (docs/privacidad.md) ---------- */
+.lock-screen .login-card {
+  max-width: 320px;
+}
+.lock-screen .login-card p {
+  margin: 0;
+}
+.lock-screen .lock-icon {
+  font-size: 28px;
+  line-height: 1;
+}
+.lock-warning {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + var(--kb, 0px));
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 12px 10px 16px;
+  max-width: calc(100vw - 32px);
+  background: var(--paper);
+  border: 1px solid var(--faint);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.14);
+  font-size: 14px;
+}
+.nav-locks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+.novel-title .lock-mark {
+  margin-right: 6px;
+  font-size: 0.85em;
+}
+
 /* ---------- Narrow screens: the panel becomes a bottom sheet ---------- */
 @media (max-width: 999px) {
   .workspace.with-panel,

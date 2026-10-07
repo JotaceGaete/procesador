@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byChild, novelHandler } from "@/lib/access";
 import { assertId, db } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { applyUse, readUse } from "@/lib/asset-uses";
@@ -13,7 +13,7 @@ type Ctx = { params: Promise<{ id: string }> };
  * the chapter's revision doesn't either. Body: { asset_id, scope: "use" | "all" }.
  * Returns the novel's gallery and manuscript images.
  */
-export const POST = handler<Ctx>(async (request, { params }) => {
+export const POST = novelHandler<Ctx>(byChild("manuscript_images"), async (request, { params }) => {
   const imageId = assertId((await params).id, "Imagen");
   const body = await readJson(request);
   const assetId = assertId(body.asset_id, "Archivo");

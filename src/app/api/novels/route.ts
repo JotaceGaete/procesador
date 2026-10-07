@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { handler } from "@/lib/access";
 import { db } from "@/lib/supabase";
 import { readJson } from "@/lib/http";
 

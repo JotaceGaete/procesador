@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byChild, novelHandler } from "@/lib/access";
 import { db, getChapter } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { parseWhen } from "@/lib/chronology";
@@ -9,7 +9,7 @@ type Ctx = { params: Promise<{ id: string }> };
 const START = { at: "chapter_start" };
 
 /** The story's time at the start of the chapter: a date, or how long after the previous one. */
-export const PUT = handler<Ctx>(async (request, { params }) => {
+export const PUT = novelHandler<Ctx>(byChild("chapters"), async (request, { params }) => {
   const chapter = await getChapter((await params).id);
   const body = await readJson(request);
   let when;
@@ -39,7 +39,7 @@ export const PUT = handler<Ctx>(async (request, { params }) => {
 });
 
 /** No mark: the chapter takes the previous one's time (shown as estimated). */
-export const DELETE = handler<Ctx>(async (_request, { params }) => {
+export const DELETE = novelHandler<Ctx>(byChild("chapters"), async (_request, { params }) => {
   const chapter = await getChapter((await params).id);
   const { error } = await db().from("time_marks").delete().eq("chapter_id", chapter.id).eq("anchor->>at", "chapter_start");
   if (error) throw error;

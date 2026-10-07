@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byChild, novelHandler } from "@/lib/access";
 import { assertId, db } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { getCharacterImages } from "@/lib/assets-server";
@@ -13,7 +13,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * Adds a file the novel already has to this gallery, without uploading or copying
  * it again (new uploads go through /api/novels/{id}/assets). Body: { asset_id, caption?, stage_label? }.
  */
-export const POST = handler<Ctx>(async (request, { params }) => {
+export const POST = novelHandler<Ctx>(byChild("characters"), async (request, { params }) => {
   const characterId = assertId((await params).id, "Personaje");
   const body = await readJson(request);
   const assetId = typeof body.asset_id === "string" && UUID.test(body.asset_id) ? body.asset_id : null;
@@ -26,7 +26,7 @@ export const POST = handler<Ctx>(async (request, { params }) => {
 });
 
 /** New gallery order: the complete list of the character's image ids. */
-export const PUT = handler<Ctx>(async (request, { params }) => {
+export const PUT = novelHandler<Ctx>(byChild("characters"), async (request, { params }) => {
   const characterId = assertId((await params).id, "Personaje");
   const { ids } = await readJson(request);
   if (!Array.isArray(ids) || !ids.every((x) => typeof x === "string" && UUID.test(x))) throw new HttpError(400, "Orden inválido");

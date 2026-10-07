@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byParam, novelHandler } from "@/lib/access";
 import { db, getNovel } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { MAX_ORIGINAL_BYTES, ORIGINAL_TYPES, assetPaths, type OriginalType } from "@/lib/images";
@@ -18,7 +18,7 @@ type Ctx = { params: Promise<{ id: string }> };
  * existing file and its uses, so the caller can reuse it. The hash only finds a
  * candidate: stored hashes are the server's own (complete re-hashes every original).
  */
-export const POST = handler<Ctx>(async (request, { params }) => {
+export const POST = novelHandler<Ctx>(byParam(), async (request, { params }) => {
   const novel = await getNovel((await params).id);
   const body = await readJson(request);
   const type = body.type as OriginalType;
