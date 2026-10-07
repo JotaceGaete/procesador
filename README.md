@@ -17,7 +17,8 @@ Procesador de textos personal para escribir novelas con asistencia de IA. Tú im
   - *Editar selección*: Redacción, Diálogo, Expandir, Acortar. Es conservador: preserva hechos, intención, voz y regionalismos. Las propuestas se muestran como **Original / Propuesta**.
   - *Escribir escena*: escribes el argumento y pulsas **Desarrollar escena**. Puedes marcar quién está en escena, el lugar y la extensión. Tu argumento es la autoridad sobre lo que ocurre; la IA sólo decide cómo contarlo.
   - **Dónde va** ([diseño](docs/asistente-contexto.md#11-dónde-va-una-escena)): por defecto *al final del capítulo* (*Insertar al final*, esté donde esté el cursor); *en el cursor* sólo si lo eliges, con la posición fijada al pedir la escena. Mover el cursor mientras la propuesta espera no cambia el destino que muestra la vista previa.
-  - Nada se escribe en el manuscrito sin tu clic. Cada propuesta ofrece *Otra versión*, *Copiar*, *Limpiar* y *Probar con* otro proveedor.
+  - Nada se escribe en el manuscrito sin tu clic. Cada propuesta ofrece *Otra versión*, *Descartar*, *Copiar* y *Probar con* otro proveedor, y *Abrir propuesta* para leerla en grande con la tipografía del libro y las mismas acciones ([diseño](docs/asistente-contexto.md#12-el-panel-en-escritorio)).
+  - El modelo se elige en *Opciones avanzadas*; las cifras de tokens quedan discretas junto a *Ver contexto*.
   - **Comparar antes de aplicar** ([diseño](docs/asistente-contexto.md#9-comparar-antes-de-aplicar)): una reescritura se ve como cambios sobre tu texto (tachado lo que se quita, resaltado lo que se añade), o limpia, o tu texto; una escena, en su lugar entre los párrafos del cursor. Al aceptar se guarda antes una versión del texto actual; si no se puede guardar, no se aplica nada.
   - **Ignorancia temporal:** al escribir una escena, la IA nunca recibe capítulos posteriores, el texto después del cursor ni hechos de capítulos posteriores. *Leer toda la historia hasta aquí* añade los capítulos anteriores y el actual hasta el cursor.
   - *Ver contexto* antes de enviar, y *Ver lo que se envió* después: lo que la IA tiene en cuenta, con tokens estimados.
@@ -144,6 +145,7 @@ npm run test:all    # todas
 | `tests/unit/prompts.test.ts` | Instrucciones distintas para editar y escribir, prompts de edición y escena, memoria, Guía Maestra |
 | `tests/unit/auth.test.ts` | Sesión firmada y caducidad, cierre por defecto sin `APP_PASSWORD` |
 | `tests/unit/providers.test.ts` | Claude, GPT y Grok: streaming, caché del manuscrito, rechazos, errores, cancelación |
+| `tests/e2e/assistant-desktop.test.mjs` | Asistente en escritorio: una sola navegación Asistente/Consejero, barra superior dentro de su columna a 1000–1920 px con y sin capítulos, orden de *Escribir escena*, el modelo en *Opciones avanzadas*, tokens discretos, respuesta larga arriba del panel con sus acciones a mano, *Abrir propuesta* (insertar, otra versión, descartar, reemplazar) |
 | `tests/e2e/api.test.mjs` | Biblioteca, capítulos, revisiones y conflictos, memoria, aislamiento entre novelas, duplicar, borrar, construcción de contexto y cada proveedor |
 | `tests/e2e/security.test.mjs` | Las 55 rutas sin sesión, cookies falsificadas, 503 sin contraseña, clave pública sin acceso a tablas, funciones ni al bucket, claves fuera del bundle, manuscrito fuera de los logs |
 | `tests/unit/images.test.ts` | Formato y tamaño de imagen leídos de los bytes (JPEG, PNG, WebP, AVIF), rutas y URLs versionadas |

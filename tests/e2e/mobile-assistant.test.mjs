@@ -72,10 +72,11 @@ for (const size of PHONES) {
     assert.ok(sheet.top >= size.height * 0.4 - 1, "at least 40 % of the screen is manuscript");
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "no horizontal scroll");
 
-    // Character and model share a row.
-    const character = await box(panel.getByRole("combobox").nth(0));
-    const model = await box(panel.getByRole("combobox").nth(1));
-    assert.ok(Math.abs(character.top - model.top) < 2 && model.left > character.left, "Personaje y Modelo en una fila");
+    // The model is a technical choice: in «Opciones avanzadas», still at hand.
+    assert.equal(await panel.getByRole("combobox").count(), 1, "only Personaje in the main flow");
+    await panel.locator("details.advanced > summary").tap();
+    assert.ok(await panel.locator('details.advanced label:has(> span:text-is("Modelo")) select').isVisible());
+    await panel.locator("details.advanced > summary").tap();
     // Smaller controls, readable text; fields at 16 px so iOS doesn't zoom on focus.
     assert.equal(await px(panel.locator(".tabs button").first(), "fontSize"), 13);
     assert.equal(await px(panel.locator(".actions button").first(), "fontSize"), 13);
@@ -201,7 +202,7 @@ test("360: Insertar una escena → cursor at the end of the scene, ready to keep
   await ctx.close();
 });
 
-test("430: if Reemplazar fails, the proposal stays (with the reason); Limpiar clears it by hand", async () => {
+test("430: if Reemplazar fails, the proposal stays (with the reason); Descartar clears it by hand", async () => {
   const { ctx, page, editor, panel } = await phone(PHONES[2]);
   await openAssistant(page);
   await select(page, editor, 0, 40);
@@ -217,9 +218,9 @@ test("430: if Reemplazar fails, the proposal stays (with the reason); Limpiar cl
   await panel.getByText("El fragmento original ya no está en el texto").waitFor();
   assert.ok(await panel.locator(".compare").isVisible(), "the proposal is still there to copy");
   assert.equal(await editor.inputValue(), "Otro texto completamente distinto.");
-  await panel.getByRole("button", { name: "Limpiar" }).tap();
+  await panel.getByRole("button", { name: "Descartar" }).tap();
   assert.equal(await panel.locator(".result").count(), 0);
-  assert.ok(await panel.isVisible(), "Limpiar doesn't close the sheet");
+  assert.ok(await panel.isVisible(), "Descartar doesn't close the sheet");
   await ctx.close();
 });
 
@@ -245,12 +246,12 @@ test("390: two pending proposals: using one never clears the other", async () =>
   assert.ok(await panel.getByRole("button", { name: "Reemplazar selección" }).isVisible());
   await panel.getByRole("button", { name: "Escribir escena" }).tap();
   assert.equal(await panel.locator(".result").count(), 0, "the used scene is gone");
-  // Limpiar in one tab leaves the other alone.
+  // Descartar in one tab leaves the other alone.
   await page.getByPlaceholder(/Qué ocurre en la escena/).fill("Otra escena.");
   await panel.getByRole("button", { name: "Desarrollar escena" }).tap();
   await panel.getByRole("button", { name: "Insertar al final" }).waitFor();
   await panel.getByRole("button", { name: "Editar selección" }).tap();
-  await panel.getByRole("button", { name: "Limpiar" }).tap();
+  await panel.getByRole("button", { name: "Descartar" }).tap();
   await panel.getByRole("button", { name: "Escribir escena" }).tap();
   assert.ok(await panel.getByRole("button", { name: "Insertar al final" }).isVisible());
   await ctx.close();

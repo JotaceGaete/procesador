@@ -153,14 +153,23 @@ input:focus,
   min-width: 0;
 }
 
+.editor-col {
+  /* The top bar adapts to the manuscript's column, not to the window: with the chapters and
+     the Asistente open, the column is narrower than the screen suggests. */
+  container: editor-col / inline-size;
+}
 .topbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 18px;
+  gap: 6px 18px;
   padding: 12px 24px;
   font-size: 13px;
   white-space: nowrap;
   transition: opacity 0.25s;
+}
+.topbar > * {
+  flex-shrink: 0;
 }
 .topbar .title {
   font-family: var(--serif);
@@ -169,6 +178,8 @@ input:focus,
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 40%;
+  flex-shrink: 1;
+  min-width: 3em;
 }
 .topbar .format-actions {
   display: inline-flex;
@@ -185,6 +196,18 @@ input:focus,
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 30%;
+  flex-shrink: 1;
+  min-width: 3em;
+}
+/* A narrow column: tighter, without the word count (the chapter list shows it); what still
+   doesn't fit goes to a second line instead of under the panel. */
+@container editor-col (max-width: 860px) {
+  .topbar {
+    gap: 6px 14px;
+  }
+  .topbar .words {
+    display: none;
+  }
 }
 .meta {
   color: var(--muted);
@@ -252,8 +275,21 @@ input:focus,
 }
 .panel-head {
   display: flex;
-  align-items: baseline;
+  align-items: flex-end;
+  gap: 12px;
   font-size: 13px;
+  border-bottom: 1px solid var(--faint);
+}
+.panel-head .tabs {
+  flex: 1;
+  flex-wrap: wrap;
+  column-gap: 16px;
+  border-bottom: none;
+  min-width: 0;
+}
+.panel-head .panel-close {
+  padding-bottom: 8px;
+  flex-shrink: 0;
 }
 .panel-title {
   color: var(--text);
@@ -667,6 +703,42 @@ input:focus,
   margin: -4px 0 0 24px;
   font-size: 12px;
 }
+.faint {
+  opacity: 0.75;
+}
+.estimate.quiet {
+  font-size: 11px;
+  opacity: 0.85;
+}
+.estimate.quiet.large {
+  opacity: 1;
+}
+.field-help {
+  margin: -8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.scene-controls {
+  gap: 10px;
+}
+.scene-target-help {
+  margin-top: -6px;
+}
+/* Asistente: the model and other technical choices, out of the literary flow. */
+.advanced {
+  font-size: 12px;
+  color: var(--muted);
+}
+.advanced > summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.advanced[open] > summary {
+  margin-bottom: 8px;
+}
+.advanced .controls {
+  font-size: 13px;
+}
 /* "Ver contexto": what the AI will take into account, in the author's terms. */
 .context-view {
   border-left: 2px solid var(--faint);
@@ -720,21 +792,6 @@ input:focus,
 }
 
 /* ---------- Asistente | Consejero ---------- */
-.sections {
-  display: flex;
-  gap: 14px;
-}
-.sections button {
-  border: none;
-  background: none;
-  padding: 0;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 13px;
-}
-.sections button.on {
-  color: var(--text);
-}
 .overview {
   display: flex;
   flex-direction: column;
@@ -2623,4 +2680,129 @@ details.group > p {
 }
 .focus .visual-editor {
   padding-top: 12vh;
+}
+
+/* ---------- Asistente: reading a proposal (docs/asistente-contexto.md) ---------- */
+@media (min-width: 1000px) {
+  /* In the side panel the answer reads in the panel's own scroll (no small box inside it),
+     and its actions stay at hand at the bottom while reading. */
+  .panel .result .diff {
+    max-height: none;
+  }
+  /* Tall enough for the panel to bring the answer to its top (the controls stay above, one
+     scroll away). */
+  .panel .result {
+    scroll-margin-top: 8px;
+    min-height: calc(100dvh - 40px);
+  }
+  .panel .result .compare-actions {
+    position: sticky;
+    bottom: -40px;
+    z-index: 1;
+    margin: 12px 0 0;
+    padding: 10px 0 40px;
+    background: var(--paper);
+    border-top: 1px solid var(--faint);
+  }
+}
+/* "Abrir propuesta": the proposal as the book sets it, large, over the manuscript. */
+.reader-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 4vh 16px;
+  background: rgb(0 0 0 / 0.3);
+}
+.proposal-reader {
+  display: flex;
+  flex-direction: column;
+  width: min(820px, 100%);
+  height: 92vh;
+  height: calc(100dvh - 8vh);
+  background: var(--paper);
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+  box-shadow: 0 10px 40px rgb(0 0 0 / 0.12);
+}
+.reader-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 16px 24px 10px;
+  border-bottom: 1px solid var(--faint);
+}
+.reader-head h2 {
+  margin: 0;
+  font-family: var(--serif);
+  font-weight: normal;
+  font-size: 19px;
+}
+.reader-head p {
+  margin: 2px 0 0;
+}
+.reader-tabs {
+  padding: 0 24px;
+}
+.reader-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--faint) transparent;
+}
+.reader-body .reading {
+  overflow: visible;
+  padding: 28px max(24px, calc((100% - 34em) / 2)) 40px;
+}
+.reader-body .diff {
+  max-height: none;
+  margin: 20px 24px;
+  border: none;
+  font-size: 18px;
+  line-height: 1.5;
+}
+.reader-image {
+  text-align: center;
+  text-indent: 0 !important;
+}
+.reader-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--faint);
+}
+.reader-foot .notice {
+  flex-basis: 100%;
+  margin: 0 0 4px;
+}
+@media (max-width: 640px) {
+  .reader-backdrop {
+    padding: 0;
+  }
+  .proposal-reader {
+    width: 100%;
+    height: 100dvh;
+    border: none;
+    border-radius: 0;
+  }
+  .reader-head,
+  .reader-foot {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .reader-body .reading {
+    font-size: 18px;
+    padding: 20px 16px 32px;
+  }
+}
+.reader-head,
+.reader-tabs,
+.reader-foot {
+  flex-shrink: 0;
 }
