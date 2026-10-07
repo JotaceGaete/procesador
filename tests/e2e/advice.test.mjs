@@ -110,13 +110,13 @@ test("observations: verified quotes point at the text; an invented one is an imp
   assert.deepEqual([moved.verified, moved.refs[0].chapterId], [true, ch[2]], "found in chapter 3, not where the model said");
 });
 
-test("¿Cómo seguir?: paths as alternatives, never the continuation itself", async () => {
+test("¿Cómo continúo?: three paths as alternatives, never the continuation itself", async () => {
   await clearAiLog();
   const list = events((await advise({ action: "seguir" })).data);
   const alternatives = cardsOf(list).items.filter((o) => o.kind === "alternative");
   assert.equal(alternatives.length, 3);
   const prompt = (await aiLog())[0].body.messages[0].content;
-  assert.match(prompt, /Propón de 3 a 4 caminos razonables/);
+  assert.match(prompt, /Propón exactamente 3 caminos distintos/);
   assert.match(prompt, /No escribas la escena ni la continuación/);
   assert.match(prompt, /Cabos abiertos y capítulos sin aparecer:\n- «La carta de Marta»: última vez en el 1, hace 2 capítulos/);
 });
@@ -197,15 +197,17 @@ test("panel: a free question shows how it was understood", async () => {
   );
 });
 
-test("panel: an alternative of ¿Cómo seguir? goes to the Asistente as a scene's argument", async () => {
+test("panel: an alternative of ¿Cómo continúo? goes to the Asistente as a scene's argument", async () => {
   const panel = page.locator("aside.panel");
-  await panel.getByRole("button", { name: "¿Cómo seguir?" }).click();
+  await panel.getByRole("button", { name: "¿Cómo continúo?" }).click();
   const alt = panel.locator(".observation.obs-alternative").first();
   await alt.waitFor({ timeout: 15_000 });
   await alt.getByRole("button", { name: "Enviar al Asistente" }).click();
   assert.equal(await panel.getAttribute("aria-label"), "Asistente");
   const argument = await page.getByPlaceholder(/Qué ocurre en la escena/).inputValue();
-  assert.match(argument, /^Seguir el conflicto\. Seguir el conflicto: qué aprovecha/);
+  // What would happen and who: not the reasons, consequences or risks.
+  assert.match(argument, /^Seguir el conflicto\. Seguir el conflicto: qué podría ocurrir\./);
+  assert.doesNotMatch(argument, /Riesgos|Consecuencias/);
   assert.equal(await page.locator("textarea.editor").inputValue(), LIVE, "nothing written in the manuscript");
 });
 

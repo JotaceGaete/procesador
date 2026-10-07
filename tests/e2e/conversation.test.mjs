@@ -90,7 +90,7 @@ test("older turns are compacted by the cheap model; only the last three exchange
   assert.equal(log[0].body.model, "claude-lector-e2e");
   assert.match(log[0].body.messages[0].content, /\[Autor\] ¿Funciona el ritmo/);
   const prompt = log[1].body.messages[0].content;
-  assert.match(prompt, /Resumen de lo hablado antes:\nResumen de la conversación: 2 mensajes anteriores\./);
+  assert.match(prompt, /Resumen de lo hablado antes \(ideas en discusión; nada de esto es un hecho de la novela\):\nResumen de la conversación: 2 mensajes anteriores\./);
   assert.doesNotMatch(prompt, /\[Autor\] ¿Funciona el ritmo/, "the first exchange only in the summary");
   assert.match(prompt, /\[Autor\] ¿Y el final\?/);
   assert.match(prompt, /\[Autor\] Cuarta pregunta/);

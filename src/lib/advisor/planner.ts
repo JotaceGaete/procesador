@@ -9,13 +9,26 @@ import { ADVISOR_ACTIONS, type AdvisorAction } from "../types";
  */
 
 const INTENTS: [AdvisorAction, RegExp][] = [
-  ["seguir", /c[oó]mo (sigo|seguir|contin[uú]o|continuar)|qu[eé] (pasa|viene|hago) (despu[eé]s|ahora)|siguiente (escena|cap[ií]tulo)|continuaci[oó]n|hacia d[oó]nde/i],
+  // Creative (phase 1 of the creative Consejero). First: they are the most specific.
+  ["consecuencias", /qu[eé] (pasa|pasar[ií]a|ocurre|ocurrir[ií]a|sucede|suceder[ií]a|implica|implicar[ií]a|provoca|provocar[ií]a|cambia|cambiar[ií]a) si\b|(^|[¿,.;]\s*)y si\b|consecuencias?|repercusi|qu[eé] efecto tendr/i],
+  ["giro", /\bgiros?\b|vuelta de tuerca|sorprend|sorpresa|inesperad|golpe de efecto|sacudir/i],
+  ["tension", /(subir|aumentar|elevar|m[aá]s|falta|poca|sin|baja)\s+(la\s+)?tensi[oó]n|tensi[oó]n\s+(baja|cae|decae|se pierde)|m[aá]s tens[oa]|suspense|suspenso|aburrid|se hace lent/i],
+  ["caminos", /\b(tres|3|varios|otros|distintos|diferentes|algunos)\s+caminos|caminos posibles|qu[eé] opciones tengo|opciones (para|de) (seguir|continuar)|alternativas para|ideas para (seguir|continuar)/i],
+  ["oportunidades", /oportunidad|(?<!des)aprovech|potencial|qu[eé] (puedo|podr[ií]a) (usar|explotar)|explotar/i],
+  ["seguir", /c[oó]mo (sigo|seguir|contin[uú]o|continuar)|no s[eé] (por d[oó]nde |c[oó]mo )?(seguir|continuar|sigo|contin[uú]o)|bloquead|atascad|y ahora qu[eé]|qu[eé] (pasa|viene|hago) (despu[eé]s|ahora)|siguiente (escena|cap[ií]tulo)|continuaci[oó]n|hacia d[oó]nde/i],
+  // Analytic.
   ["repeticiones", /repit|repeti|reiter|muletilla|redundan/i],
   ["coherencia", /coheren|contradic|incoheren|demasiado pronto|antes de tiempo|revel|continuidad|sab[ií]a|no deber[ií]a saber|error/i],
   ["cabos", /\bcabos?\b|pendiente|sin resolver|hilos?\b|olvid|abandon|cerrar|qued[oó] abierto/i],
   ["personajes", /personaje|desaprovech|evoluci|\barco\b|presencia|protagonista|secundari/i],
   ["analizar", /ritmo|estructura|funciona|analiz|tensi[oó]n|escena|cap[ií]tulo/i],
 ];
+
+/**
+ * Intents that start something new: with them, a message doesn't keep developing the
+ * proposal in course (the others — or none — do: "pero que aparezca Nacho").
+ */
+export const NEW_TOPIC: AdvisorAction[] = ["seguir", "caminos", "oportunidades", "repeticiones", "coherencia", "cabos"];
 
 export interface Plan {
   action: AdvisorAction;
@@ -24,6 +37,8 @@ export interface Plan {
   /** Chapter indexes named in the question ("el capítulo 3", "el 7", or a title). */
   chapterIndexes: number[];
   threadIds: string[];
+  /** The intent the words matched (null: none; the action is then a fallback). */
+  explicit: AdvisorAction | null;
 }
 
 interface Named {
@@ -51,9 +66,10 @@ export function planQuestion(
   });
   const threadIds = ctx.threads.filter((t) => t.title.length >= 4 && lower.includes(t.title.toLocaleLowerCase("es"))).map((t) => t.id);
 
-  let action: AdvisorAction = INTENTS.find(([, re]) => re.test(q))?.[0] ?? (characterIds.length ? "personajes" : "analizar");
+  const explicit = INTENTS.find(([, re]) => re.test(q))?.[0] ?? null;
+  let action: AdvisorAction = explicit ?? (characterIds.length ? "personajes" : "analizar");
   if (threadIds.length && action === "analizar") action = "cabos";
-  return { action, characterIds, placeIds, chapterIndexes: [...chapterIndexes].sort((a, b) => a - b), threadIds };
+  return { action, characterIds, placeIds, chapterIndexes: [...chapterIndexes].sort((a, b) => a - b), threadIds, explicit };
 }
 
 export const actionLabel = (a: AdvisorAction) => ADVISOR_ACTIONS.find((x) => x.id === a)!.label;

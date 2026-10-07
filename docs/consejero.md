@@ -581,3 +581,97 @@ Cada fase es usable por sí misma. La 1 ya responde sin coste "¿hace cuánto qu
     - una novela de 120 capítulos;
     - el panel con la línea de material y las confirmaciones.
 
+
+## Consejero creativo (coautor)
+
+El Asistente escribe contigo; el Consejero piensa contigo. El «coautor» no es una tercera IA: es el
+mismo Consejero, con recetas creativas y una conversación que recuerda sus propuestas. **Procesador
+propone; el autor decide.**
+
+### Fase 1 · Conversación creativa (implementada, sin cambios de base de datos)
+
+- **Recetas nuevas** (`advice.ts`, `prompts.ts`):
+
+  | Acción | Qué hace | Lee además |
+  |---|---|---|
+  | *¿Cómo continúo?* (`seguir`) | Exactamente 3 caminos, A/B/C, para lo que viene | presencia, cabos, secretos |
+  | *3 caminos* (`caminos`) | 3 direcciones para la historia (pueden abarcar varios capítulos) | igual |
+  | *¿Qué pasa si…?* (`consecuencias`) | Consecuencias de una hipótesis: a quién afecta, qué revela, qué contradice, cabos, corto y largo plazo | fichas, relaciones (con quien esté al otro lado) y hechos de los nombrados |
+  | *Necesito un giro* (`giro`) | 3 giros construidos sólo con lo que existe | secretos y «no sabe» de la Memoria, cabos |
+  | *Busca oportunidades* (`oportunidades`) | 3–5 oportunidades que la novela ya ofrece | igual |
+  | *Subir tensión* (`tension`) | Diagnóstico y 2–4 formas de subirla (también sobre la selección) | cabos, secretos |
+  | (sin botón) `explorar` | Desarrollar una propuesta de la conversación, o seguir la conversación | la propuesta en curso |
+
+  - Cada camino: qué podría ocurrir, por qué funciona en esta novela, qué aprovecha, consecuencias,
+    riesgos y personajes. Vienen como campos del JSON y el servidor los guarda dentro del cuerpo
+    de la tarjeta, una línea por sección (`observations.ts`), sin columnas nuevas. Las citas se
+    verifican como siempre.
+  - Las respuestas creativas tienen más espacio (hasta 6.000 tokens de salida y de 100 a 450
+    palabras de texto, según la receta); las analíticas siguen igual. Nunca una escena: describe,
+    no escribe.
+  - El planificador reconoce «no sé cómo continuar», «dame 3 caminos», «¿qué pasa si…?», «y si…»,
+    «necesito un giro», «busca oportunidades», «quiero subir la tensión». *Personajes
+    desaprovechados* como receta creativa (potencial sin usar, reintroducción) es de la fase 3;
+    hasta entonces sigue *Personajes*, en *Revisar*.
+
+- **Cronología en el contexto:** el tiempo del relato en el capítulo abierto (el «ahora») y la
+  edad de cada personaje en ese punto, en sus fichas, como en el Asistente; además, un bloque
+  `<cronologia>` con el tiempo de cada capítulo (marcando el abierto, los posteriores y las
+  retrospectivas) y los avisos de cronología.
+
+- **Tarjetas con etiqueta** (`cards.ts`, funciones puras compartidas por servidor y panel):
+  - cada tarjeta de una conversación tiene una etiqueta estable: A, B, C… en el orden en que se
+    propusieron, nunca reutilizadas. Lo que desarrolla una propuesta es una versión: B2, B3… B
+    queda como estaba. Se guardan en `advisor_messages.context.cards` (las conversaciones
+    anteriores reciben letras en orden al leerse);
+  - **referencias sin IA:** «la B», «camino b», «B» (la letra); «el segundo», «la tercera opción»,
+    «camino 2» (el orden en la respuesta más reciente que tenga esas tarjetas); «el último»,
+    «el penúltimo». Un ordinal que nombra otra cosa («el segundo capítulo», «la primera vez») no
+    cuenta. Lo que no se resuelve lo ve el modelo con todas las tarjetas y su etiqueta, con la
+    regla de preguntar si no está claro;
+  - **Seguir con esta** (botón en caminos y oportunidades): el mensaje va anclado a esa tarjeta
+    por su id; el botón manda sobre las palabras. Una tarjeta de otra conversación se rechaza;
+  - **la propuesta en curso:** un mensaje sin referencia («pero que aparezca Nacho», «no, mejor
+    sin Nacho») sigue con la última propuesta anclada, en su versión más reciente (B → B2 → B3).
+    No la hereda si nombra otra tarjeta, pide algo nuevo (caminos, oportunidades, cabos,
+    repeticiones, coherencia), dice «otra cosa» o «cambiemos de tema», o si el autor pulsa
+    *Soltar*. El panel lo muestra encima del campo («Desarrollando B2 · Soltar») y en el plan
+    («sobre B2 … (la que estamos desarrollando)»);
+  - el turno del autor guarda su ancla en `advisor_messages.context.anchor` (id, etiqueta, título
+    y cómo se entendió).
+
+- **Estados**, calculados de lo que hizo el autor, nunca de un resumen: **PROPUESTO**, **ELEGIDO
+  PARA EXPLORAR** (un mensaje anclado a ella), **MODIFICADO** (tiene versiones: «→ B2»),
+  **DESCARTADO** (su estado `dismissed`: con *Descartar*, o diciendo «descarta la C»; elegirla
+  otra vez por su nombre la recupera). Guardar una tarjeta no la decide: sigue siendo una idea.
+
+- **Protección del canon:**
+  - las instrucciones del Consejero dicen que la conversación no es una fuente de hechos: lo
+    propuesto, elegido o modificado no ha ocurrido; lo descartado no se vuelve a proponer ni se
+    trata como verdad; algo sólo entra en la novela si el autor lo escribe o aprueba un hecho;
+  - en cada consulta, después del resumen y de los últimos mensajes, va el **estado actual de
+    las tarjetas**, recalculado («manda sobre el resumen»), con la frase «Ninguna es un hecho de
+    la novela». De las descartadas va sólo el título, marcado «no es verdad en la novela»;
+  - la **compactación** recibe los mensajes con sus etiquetas y los estados correctos, y tiene la
+    orden de conservarlos con esas cuatro palabras y de no escribir nunca que algo ocurre en la
+    novela por haberse hablado. El resumen se presenta al Consejero como «ideas en discusión;
+    nada de esto es un hecho de la novela», dentro de `<conversacion>`, nunca junto a la Memoria;
+  - la propuesta en curso va en `<propuesta-en-curso>`, marcada como posibilidad;
+  - ninguna acción del Consejero escribe en el manuscrito, la Memoria, los hechos ni los cabos.
+    Lo único que cambia una frase del autor es el estado de una tarjeta (descartar o recuperar).
+    En las propuestas no hay *Proponer hecho*: convertir una idea en hecho es de la fase 2.
+
+- **Interfaz** (*Consultar*): dos líneas de enlaces discretos, *Pensar juntos* y *Revisar*, en vez
+  de la fila de botones; *¿Qué pasa si…?* sólo empieza la pregunta. Las tarjetas muestran su
+  etiqueta («Camino B», «B2 · versión de B») y las secciones de cada camino; el turno del autor,
+  sobre qué tarjeta era. *Enviar al Asistente* manda qué ocurriría y quiénes, no las razones ni
+  los riesgos.
+
+- **Modelos y coste:** sin cambios. El Consejero usa su modelo (`*_MODEL_ADVISE`) y la
+  compactación el económico (`*_MODEL_DIGEST`); todo se registra en `ai_usage`.
+
+- **Límites hasta la fase 2:** las ideas viven dentro de su conversación (las guardadas se ven en
+  *Guardadas*, pero no vuelven al contexto de otras conversaciones); no hay planes («decidido,
+  aún no escrito»), ni *Hacer plan*, *Hacer hecho* desde una idea, *Ya está escrito*, ni vista
+  *Ideas*; descartar «una parte» («sin Nacho») se refleja como una versión nueva, no como un
+  estado de la parte.

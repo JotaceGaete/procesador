@@ -26,9 +26,16 @@ Procesador de textos personal para escribir novelas con asistencia de IA. Tú im
   - En el teléfono el panel es una hoja inferior compacta, de hasta el 58 % de la pantalla, que se mantiene por encima del teclado. Al aplicar una propuesta se cierra para dejar el manuscrito a la vista.
   - Bajo cada respuesta, una línea discreta indica qué se leyó, los tokens usados y, si hay precios en `AI_PRICES`, el coste aproximado. Sólo se pide confirmación por encima de `AI_CONFIRM_TOKENS`.
 - **Consejero** (mismo panel; [diseño](docs/consejero.md)): piensa contigo sobre la novela, nunca escribe en el manuscrito.
-  - *Consultar*: *Analizar capítulo*, *¿Cómo seguir?*, *Repeticiones*, *Cabos pendientes*, *Coherencia*, *Personajes*, o una pregunta libre.
+  - *Consultar*: una conversación, con accesos rápidos discretos en dos líneas.
+    - *Pensar juntos*: *¿Cómo continúo?*, *3 caminos*, *Busca oportunidades*, *Cabos pendientes*, *Necesito un giro*, *Subir tensión* y *¿Qué pasa si…?* (empieza la pregunta y tú la terminas).
+    - *Revisar*: *Analizar capítulo*, *Repeticiones*, *Coherencia* y *Personajes*.
+    - O una pregunta libre: el planificador reconoce también «no sé cómo continuar», «¿qué pasa si…?», «necesito un giro», «quiero subir la tensión»…
     - La respuesta trae observaciones con tipo, confianza y citas comprobadas en el texto, cada una con *Ir*. Lo que no se puede verificar se presenta como impresión.
-    - *¿Cómo seguir?* propone caminos, no escribe la continuación; uno se puede *Enviar al Asistente*.
+    - *Consejero creativo*:
+      - los caminos llegan como *Camino A, B y C*, cada uno con qué podría ocurrir, por qué funciona en esta novela, qué aprovecha, consecuencias, riesgos y personajes;
+      - «me gusta el segundo», «la B», «el último» o el botón *Seguir con esta* fijan sin ambigüedad de qué propuesta se habla, y la conversación la sigue desarrollando (B2, B3…, sin borrar las anteriores) hasta que pidas otra cosa o pulses *Soltar*;
+      - nada de lo propuesto es canon: no toca el manuscrito, la Memoria, los hechos ni los cabos. Una idea sólo entra en la novela si la escribes, o si apruebas un hecho;
+      - un camino se puede *Enviar al Asistente* como argumento de una escena.
     - Antes de responder lee los capítulos que no tengan ficha.
     - Las consultas forman conversaciones que se pueden continuar; lo más antiguo se resume solo.
     - Cada observación se puede guardar, descartar, marcar resuelta, volver a comprobar tras editar o convertir en un hecho sugerido para la Memoria.
@@ -169,6 +176,8 @@ npm run test:all    # todas
 | `tests/unit/visual-document.test.ts` | Editor visual: conversión `content ⇄ documento` idéntica byte a byte (casos difíciles y 5.000 textos aleatorios), lo mismo que Lectura, un párrafo editado cambia sólo su línea, posiciones ⇄ desplazamientos, cursivas enteras en una selección |
 | `tests/unit/visual-report.test.ts` | El informe de conversión: ida y vuelta, rarezas del formato contadas, muestra incluida |
 | `tests/e2e/visual-editor.test.mjs` | Editor visual en Chromium: el fragmento central sin nada técnico a la vista, escribir alrededor de bloques, seleccionar, borrar, deshacer y rehacer, cursiva, abrir sin cambiar nada, Asistente, Consejero «Ir», versiones, palabras e imágenes, pegar, predeterminado en un dispositivo nuevo, el interruptor (visible sin desplazarse en 375×627 con 14 capítulos; volver a texto se mantiene al recargar, cambiar de capítulo y volver a entrar), teléfono, capítulo de 1 MB, informe sobre una copia de seguridad real |
+| `tests/unit/creative.test.ts` | Consejero creativo sin IA: etiquetas A/B/C y versiones B2, «el segundo», «la B», «el último» (y lo que no es una tarjeta: «el segundo capítulo»), descartar por su nombre, estados que no destruyen la propuesta anterior, foco que sigue las versiones, descartadas sólo por su título y marcadas como no verdaderas, conversación de 60 tarjetas, intenciones nuevas del planificador, propuestas por secciones |
+| `tests/e2e/creative.test.mjs` | Consejero creativo: «No sé cómo continuar» → A, B, C; «Me gusta el segundo» → B (desarrollada como B2); «Pero quiero que aparezca Nacho» → B3, con la ficha, relación, hecho y pasajes reales de Nacho; «No, mejor sin Nacho» → B4; «la B», «el último», *Seguir con esta* (y la tarjeta de otra conversación, rechazada), *Soltar*; descartar y recuperar; compactación con estados y sin canonizar; cronología, consecuencias, giro, oportunidades y tensión; más espacio para lo creativo; manuscrito, Memoria, hechos y cabos intactos; conversación larga; el panel |
 | `tests/e2e/ui.test.mjs` | Flujo completo en el navegador: autoguardado, memoria, guía, capítulos, retomar posición, Desarrollar escena e insertar con deshacer, Original/Propuesta, cambio de proveedor, conflicto, concentración, móvil, capítulo de 1 MB |
 
 Requisitos de la E2E:
