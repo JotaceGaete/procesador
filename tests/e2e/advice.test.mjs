@@ -223,6 +223,8 @@ test("panel: chapters without a digest are read first, then it answers", async (
   await page.locator(".topbar .link", { hasText: "Consejero" }).click();
   const panel = page.locator("aside.panel");
   await panel.getByRole("button", { name: "Consultar" }).click();
+  // The conversation reloads when Consultar mounts: count its turns once it is there.
+  await panel.locator(".turn.advisor").first().waitFor();
   const turns = await panel.locator(".turn.advisor").count();
   await panel.getByRole("button", { name: "Personajes" }).click();
   await page.waitForFunction((n) => document.querySelectorAll(".turn.advisor").length > n, turns, { timeout: 15_000 });
