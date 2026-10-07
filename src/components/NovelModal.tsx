@@ -9,8 +9,9 @@ import BuildStamp from "./BuildStamp";
 import BackupButton from "./BackupButton";
 import BookExport from "./BookExport";
 import { cleanBook, type BookMeta } from "@/lib/book";
+import ProtectionPanel from "./ProtectionPanel";
 
-type Tab = "novela" | "guia" | "libro";
+type Tab = "novela" | "guia" | "libro" | "proteccion";
 
 /** Title, synopsis and notes, the Guía Maestra (all optional, in plain writer's terms), and the book: its data and the exports. */
 export default function NovelModal({ novel, onClose, onSaved }: { novel: Novel; onClose(): void; onSaved(n: Novel): void }) {
@@ -57,8 +58,13 @@ export default function NovelModal({ novel, onClose, onSaved }: { novel: Novel; 
         <button className={tab === "libro" ? "on" : undefined} onClick={() => setTab("libro")}>
           Libro
         </button>
+        <button className={tab === "proteccion" ? "on" : undefined} onClick={() => setTab("proteccion")}>
+          Protección
+        </button>
       </nav>
-      <form onSubmit={submit} className="form">
+      {/* Its own forms and buttons: protecting doesn't wait for (or save) the other tabs. */}
+      {tab === "proteccion" && <ProtectionPanel novelId={novel.id} />}
+      <form onSubmit={submit} className="form" hidden={tab === "proteccion"}>
         {tab === "novela" ? (
           <>
             <label className="short">

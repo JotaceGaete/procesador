@@ -10,3 +10,6 @@ export const PING_EVERY_MS = 60_000;
 export const WARN_BEFORE_MS = 60_000;
 
 export type LockScope = "app" | "novel";
+
+/** A protected novel's own idle time, in minutes (15 by default). */
+export const NOVEL_IDLE_OPTIONS = [5, 15, 30, 60] as const;

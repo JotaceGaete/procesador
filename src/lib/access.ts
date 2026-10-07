@@ -153,31 +153,67 @@ export const byBody =
 
 export interface NovelLockState {
   state: "open" | "unlocked" | "locked";
+  kind?: "pin" | "password";
+  hide_title?: boolean;
+  /** Only while locked, and only if not hidden: what the unlock screen shows. */
+  title?: string | null;
+  idle_minutes?: number;
+  lock_on_hide?: boolean;
+  remaining_ms?: number;
+}
+
+/** The novel's state in this session, as the browser sees it (no title, no secret). */
+export function novelStatus(id: string, lock: NovelLockState) {
+  return {
+    id,
+    protected: lock.state !== "open",
+    locked: lock.state === "locked",
+    kind: lock.kind ?? null,
+    hideTitle: lock.hide_title ?? false,
+    title: lock.state === "locked" ? (lock.title ?? null) : undefined,
+    idleMinutes: lock.idle_minutes ?? null,
+    lockOnHide: lock.lock_on_hide ?? false,
+    remainingMs: lock.state === "unlocked" ? (lock.remaining_ms ?? null) : null,
+  };
+}
+
+/** 423 for a locked novel: only what its unlock screen shows. */
+export function novelLocked(id: string, lock: NovelLockState) {
+  return new HttpError(423, "Esta novela está protegida y bloqueada.", {
+    code: "novel_locked",
+    novel: { id, title: lock.hide_title ? null : (lock.title ?? null), kind: lock.kind ?? "pin" },
+  });
 }
 
 /**
- * The one authorization check for a novel's data (docs/privacidad.md). Phase 0: every novel
- * is open to the session; protected novels (phase 1) are checked here. With Supabase Auth,
- * ownership is checked here first (404 for someone else's novel).
+ * The one authorization check for a novel's data (docs/privacidad.md). Today: the session
+ * may use it unless the novel is protected and not unlocked in this session. With Supabase
+ * Auth, ownership is checked here first (404 for someone else's novel).
  */
-export async function authorizeNovel(principal: Principal, novelId: string, _opts: { touch: boolean }): Promise<NovelLockState> {
-  void principal;
-  void novelId;
-  return { state: "open" };
+export async function authorizeNovel(principal: Principal, novelId: string, opts: { touch: boolean }): Promise<NovelLockState> {
+  const { data, error } = await db().rpc("novel_access", { p_session: principal.sessionId, p_novel: novelId, p_touch: opts.touch });
+  if (error) throw error;
+  return data as NovelLockState;
 }
 
 /**
  * Every novel route: session (Procesador not locked), the novel the request touches, and
- * `authorizeNovel` before the route runs.
+ * `authorizeNovel` before the route runs: a locked novel answers 423 and the route never
+ * runs. `allowLocked` only for the routes that unlock, lock or recover the novel itself.
  */
 export function novelHandler<C>(
   resolve: NovelResolver,
   fn: (request: Request, ctx: C, access: NovelAccess) => Promise<Response>,
+  opts: { allowLocked?: boolean } = {},
 ): Handler<C> {
   return handler<C>(async (request, ctx, principal) => {
     const params = ((await (ctx as Ctx)?.params) ?? {}) as Params;
     const novelId = await resolve(request, params);
-    const lock: NovelLockState = novelId ? await authorizeNovel(principal, novelId, { touch: true }) : { state: "open" };
+    let lock: NovelLockState = { state: "open" };
+    if (novelId) {
+      lock = await authorizeNovel(principal, novelId, { touch: true });
+      if (lock.state === "locked" && !opts.allowLocked) throw novelLocked(novelId, lock);
+    }
     return fn(request, ctx, { principal, novelId, protected: lock.state !== "open", lock });
   });
 }

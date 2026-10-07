@@ -140,7 +140,7 @@ export default function LockProvider({ children }: { children: React.ReactNode }
     if (!enabledRef.current || lockedRef.current) return;
     await runGuards(guards.current);
     abortTrackedRequests();
-    await fetch("/api/session/lock", { method: "POST" }).catch(() => {});
+    await fetch("/api/session/lock", { method: "POST", keepalive: true }).catch(() => {});
     enterLocked();
     channel.current?.postMessage({ type: "app-locked" });
   }, [enterLocked]);

@@ -41,6 +41,12 @@ export const ROUTES = [
   r("POST", "novels/[id]/threads", "novel"),
   r("GET", "novels/[id]/trash", "novel"),
   r("POST", "novels/[id]/trash", "novel"),
+  r("POST", "novels/[id]/unlock", "novel"),
+  r("POST", "novels/[id]/lock", "novel"),
+  r("PUT", "novels/[id]/protection", "novel"),
+  r("PATCH", "novels/[id]/protection", "novel"),
+  r("DELETE", "novels/[id]/protection", "novel"),
+  r("POST", "novels/[id]/protection/recover", "novel"),
 
   r("GET", "chapters/[id]", "chapter"),
   r("PATCH", "chapters/[id]", "chapter"),
@@ -102,5 +108,8 @@ export function routeBody({ route, scope }, ids) {
   if (route === "novels/[id]/memory/[kind]") return { text: "SOBRESCRITO" };
   if (route === "novels/[id]/chapters") return { title: "SOBRESCRITO" };
   if (route === "chapters/[id]/versions") return { reason: "manual" };
+  // Trying to take the protection off (or put another PIN) without knowing the current one.
+  if (route === "novels/[id]/protection") return { kind: "pin", secret: "999999", idleMinutes: 60, hideTitle: false };
+  if (route === "novels/[id]/protection/recover") return { appPassword: "no", action: "remove" };
   return {};
 }

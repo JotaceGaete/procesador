@@ -984,6 +984,29 @@ details.group > p {
   box-shadow: 0 6px 24px rgb(0 0 0 / 0.14);
   font-size: 14px;
 }
+/* Protección (NovelModal): checkbox rows stay horizontal, like the other forms' checks. */
+.form.protection label.check {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  cursor: pointer;
+}
+.form.protection .group > .btn {
+  align-self: flex-start;
+}
+.form.protection > .link {
+  align-self: flex-start;
+}
+.lock-screen .choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+.confirm-delete .delete-secret {
+  max-width: 220px;
+}
 .nav-locks {
   display: flex;
   flex-wrap: wrap;

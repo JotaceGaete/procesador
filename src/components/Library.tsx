@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { NovelSummary } from "@/lib/types";
-import { api, readPref } from "@/lib/client";
+import { api, markProtected, readPref } from "@/lib/client";
 import BuildStamp from "./BuildStamp";
 import PrivacyModal from "./PrivacyModal";
 import { useLock } from "./LockProvider";
@@ -24,7 +24,16 @@ export default function Library() {
   const [privacy, setPrivacy] = useState(false);
   const lock = useLock();
 
-  const load = useCallback(() => api<NovelSummary[]>("/api/novels").then(setNovels), []);
+  const [deleteSecret, setDeleteSecret] = useState("");
+  const load = useCallback(
+    () =>
+      api<NovelSummary[]>("/api/novels").then((list) => {
+        // What this browser kept of a protected novel (a scene argument) is forgotten.
+        for (const n of list) markProtected(n.id, n.protected);
+        setNovels(list);
+      }),
+    [],
+  );
 
   useEffect(() => {
     setLastId(readPref("lastNovel"));
@@ -116,40 +125,71 @@ export default function Library() {
               ) : (
                 <>
                   <Link href={`/novela/${n.id}`} className="novel-title">
-                    {n.title}
+                    {n.protected && (
+                      <span className="lock-mark" aria-label={n.locked ? "Protegida y bloqueada" : "Protegida, desbloqueada"}>
+                        {n.locked ? "🔒" : "🔓"}
+                      </span>
+                    )}
+                    {n.title ?? "Novela protegida"}
                   </Link>
                   <span className="muted small">
                     {n.id === lastId && "Última abierta · "}
-                    {n.chapters} {n.chapters === 1 ? "capítulo" : "capítulos"} · {n.words.toLocaleString("es")} palabras ·{" "}
+                    {n.chapters === null || n.words === null
+                      ? "Protegida · "
+                      : `${n.chapters} ${n.chapters === 1 ? "capítulo" : "capítulos"} · ${n.words.toLocaleString("es")} palabras · `}
                     {dateFormat.format(new Date(n.updated_at))}
                   </span>
-                  {deleting === n.id ? (
+                  {n.locked ? null : deleting === n.id ? (
                     <span className="confirm-delete">
-                      ¿Eliminar «{n.title}» con todos sus capítulos y su memoria? No se puede deshacer.{" "}
+                      ¿Eliminar «{n.title ?? "Novela protegida"}» con todos sus capítulos y su memoria? No se puede deshacer.{" "}
+                      {n.protected && (
+                        <input
+                          type="password"
+                          className="delete-secret"
+                          autoComplete="off"
+                          placeholder="PIN o contraseña de la novela"
+                          aria-label="PIN o contraseña de la novela"
+                          value={deleteSecret}
+                          onChange={(e) => setDeleteSecret(e.target.value)}
+                        />
+                      )}{" "}
                       <button
                         className="btn danger"
-                        disabled={busy === n.id}
+                        disabled={busy === n.id || (n.protected && !deleteSecret)}
                         onClick={() =>
-                          act(n.id, () => api(`/api/novels/${n.id}`, { method: "DELETE" })).then(() => setDeleting(null))
+                          act(n.id, () =>
+                            api(`/api/novels/${n.id}`, { method: "DELETE", json: n.protected ? { secret: deleteSecret } : undefined }),
+                          ).then(() => {
+                            setDeleting(null);
+                            setDeleteSecret("");
+                          })
                         }
                       >
                         Eliminar definitivamente
                       </button>{" "}
-                      <button className="btn ghost" onClick={() => setDeleting(null)}>
+                      <button
+                        className="btn ghost"
+                        onClick={() => {
+                          setDeleting(null);
+                          setDeleteSecret("");
+                        }}
+                      >
                         Cancelar
                       </button>
                     </span>
                   ) : (
                     <span className="row-actions">
-                      <button
-                        className="link"
-                        onClick={() => {
-                          setDraft(n.title);
-                          setRenaming(n.id);
-                        }}
-                      >
-                        Renombrar
-                      </button>
+                      {n.title !== null && (
+                        <button
+                          className="link"
+                          onClick={() => {
+                            setDraft(n.title ?? "");
+                            setRenaming(n.id);
+                          }}
+                        >
+                          Renombrar
+                        </button>
+                      )}
                       <button
                         className="link"
                         disabled={busy === n.id}

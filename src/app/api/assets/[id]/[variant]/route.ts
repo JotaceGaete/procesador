@@ -17,7 +17,7 @@ const notFound = () => new HttpError(404, "Imagen no encontrada");
  * a 404. Browsers keep a copy for 10 minutes at most, then revalidate with the
  * ETag (304 without touching Storage while unchanged).
  */
-export const GET = novelHandler<Ctx>(byChild("assets"), async (request, { params }) => {
+export const GET = novelHandler<Ctx>(byChild("assets"), async (request, { params }, access) => {
   const { id: rawId, variant } = await params;
   const id = assertId(rawId, "Imagen");
   if (!["thumb", "display", "original"].includes(variant)) throw notFound();
@@ -39,7 +39,8 @@ export const GET = novelHandler<Ctx>(byChild("assets"), async (request, { params
   }
 
   const etag = `"${id}-v${data.version}-${variant}"`;
-  const headers = { "Cache-Control": "private, max-age=600, must-revalidate", ETag: etag };
+  // A protected novel's images are never kept by the browser: after locking, none can show from the cache.
+  const headers = { "Cache-Control": access.protected ? "private, no-store" : "private, max-age=600, must-revalidate", ETag: etag };
   if (request.headers.get("if-none-match") === etag) return new NextResponse(null, { status: 304, headers });
 
   const { data: file, error: fileError } = await bucket().download(variant === "display" ? data.display_path : data.thumb_path);

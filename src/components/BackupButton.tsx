@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api } from "@/lib/client";
 import { backupName, backupTexts, imagePath, type BackupData } from "@/lib/backup";
 import { zip, type ZipEntry } from "@/lib/zip";
+import { useNovelLock } from "./NovelGate";
 
 /**
  * Copia de seguridad (docs/versiones.md): the novel's data from the server, and each
@@ -12,6 +13,7 @@ import { zip, type ZipEntry } from "@/lib/zip";
 export default function BackupButton({ novelId }: { novelId: string }) {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const isProtected = useNovelLock()?.status.protected ?? false;
 
   async function download() {
     setBusy(true);
@@ -62,6 +64,9 @@ export default function BackupButton({ novelId }: { novelId: string }) {
         {status ||
           "Un archivo .zip con la novela completa para leer, cada capítulo tal como está, la Memoria y los demás datos, y las imágenes originales."}
       </p>
+      {isProtected && (
+        <p className="muted small">El archivo descargado no queda protegido con el PIN: guárdalo donde nadie más pueda abrirlo.</p>
+      )}
     </div>
   );
 }

@@ -13,7 +13,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * Adds a file the novel already has to this gallery, without uploading or copying
  * it again (new uploads go through /api/novels/{id}/assets). Body: { asset_id, caption?, stage_label? }.
  */
-export const POST = novelHandler<Ctx>(byChild("characters"), async (request, { params }) => {
+export const POST = novelHandler<Ctx>(byChild("characters"), async (request, { params }, { novelId }) => {
   const characterId = assertId((await params).id, "Personaje");
   const body = await readJson(request);
   const assetId = typeof body.asset_id === "string" && UUID.test(body.asset_id) ? body.asset_id : null;
@@ -21,6 +21,9 @@ export const POST = novelHandler<Ctx>(byChild("characters"), async (request, { p
   const { data: asset, error } = await db().from("assets").select("status, novel_id").eq("id", assetId).maybeSingle();
   if (error) throw error;
   if (!asset || asset.status !== "ready") throw new HttpError(404, "Archivo no encontrado");
+  // Only a file of the novel that was authorized, never one of another (perhaps locked) novel:
+  // the same answer as the database's composite foreign keys.
+  if (novelId && asset.novel_id !== novelId) throw new HttpError(400, "Referencia a un elemento que no pertenece a esta novela.");
   const use = readUse({ ...body, kind: "character", character_id: characterId });
   return NextResponse.json((await applyUse(use, assetId, asset.novel_id)).images, { status: 201 });
 });

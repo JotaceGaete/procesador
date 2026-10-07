@@ -90,7 +90,7 @@ Sólo lo relevante. El manuscrito completo nunca se envía por defecto.
      - Sólo borra las tablas de la primera etapa (MVP), reconociéndolas por sus columnas.
      - Al actualizar la app, vuelve a ejecutarlo.
      - [`supabase/verificar.sql`](supabase/verificar.sql) (sólo lectura) lista lo que le falta a una base existente; vacío = al día.
-     - Para una base existente basta la parte nueva: [`supabase/actualizar-sesiones.sql`](supabase/actualizar-sesiones.sql) (sesiones y bloqueo de Procesador, [docs/privacidad.md](docs/privacidad.md)).
+     - Para una base existente basta la parte nueva, en este orden: [`supabase/actualizar-sesiones.sql`](supabase/actualizar-sesiones.sql) (sesiones y bloqueo de Procesador) y [`supabase/actualizar-protegidas.sql`](supabase/actualizar-protegidas.sql) (novelas protegidas). Ver [docs/privacidad.md](docs/privacidad.md).
    - Copia la *Project URL* y la clave **secret / service_role**. La clave *publishable* no sirve: el esquema le niega todo acceso.
 2. **Variables** (`cp .env.example .env.local`):
 
@@ -98,6 +98,7 @@ Sólo lo relevante. El manuscrito completo nunca se envía por defecto.
 |---|---|---|
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | sí | Sólo servidor |
 | `APP_PASSWORD` | en producción | Si falta en producción: 503 |
+| `NOVEL_LOCK_PEPPER` | para proteger novelas en producción | Secreto que se mezcla con cada PIN; sin él, proteger responde 503 |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY` | al menos una | Con varias aparece un selector |
 | `ANTHROPIC_MODEL` | no | `claude-opus-5-5` |
 | `ANTHROPIC_EFFORT` | no | `medium` |
@@ -124,7 +125,7 @@ npm run test:e2e    # de punta a punta (~2–3 min): API, seguridad e interfaz e
 npm run test:all    # todas
 ```
 
-`npm run test:schema` levanta un Postgres temporal y comprueba que `supabase/schema.sql`, `supabase/actualizar-consejero.sql` y `supabase/actualizar-sesiones.sql` se pueden ejecutar completos, dos veces, sin errores y sin alterar los datos.
+`npm run test:schema` levanta un Postgres temporal y comprueba que `supabase/schema.sql`, `supabase/actualizar-consejero.sql`, `supabase/actualizar-sesiones.sql` y `supabase/actualizar-protegidas.sql` se pueden ejecutar completos, dos veces, sin errores y sin alterar los datos.
 - **Estados de partida:** base vacía; base anterior al Consejero (2b); base de la fase 1; base actualizada a medias a mano; y base con las fases 2–4 (versiones guardadas en `tests/schema/fixtures`).
 - **Modos de ejecución:** el archivo entero como una sola consulta (como el SQL Editor de Supabase) y sentencia a sentencia (como `psql`).
 - **Regresión:** una ejecución que llega al bloque de triggers sin `story_threads` ya no da `relation "public.story_threads" does not exist`.
@@ -144,11 +145,12 @@ npm run test:all    # todas
 | `tests/unit/context.test.ts` | Nombres y apodos, contexto cercano, manuscrito por capítulos, pasajes, selección de memoria |
 | `tests/unit/prompts.test.ts` | Instrucciones distintas para editar y escribir, prompts de edición y escena, memoria, Guía Maestra |
 | `tests/unit/auth.test.ts` | Sesión firmada con su id y caducidad, cierre por defecto sin `APP_PASSWORD` |
+| `tests/unit/secret.test.ts` | PIN sólo como hash scrypt con sal y pepper; sin pepper en producción, 503; reglas de PIN y contraseña |
 | `tests/unit/routes.test.ts` | Cada método de cada ruta pasa por `handler` o `novelHandler` y está en `tests/e2e/routes.mjs` |
 | `tests/unit/providers.test.ts` | Claude, GPT y Grok: streaming, caché del manuscrito, rechazos, errores, cancelación |
 | `tests/e2e/api.test.mjs` | Biblioteca, capítulos, revisiones y conflictos, memoria, aislamiento entre novelas, duplicar, borrar, construcción de contexto y cada proveedor |
 | `tests/e2e/security.test.mjs` | Todas las rutas (`tests/e2e/routes.mjs`) sin sesión, cookies falsificadas o de una sesión inexistente, 503 sin contraseña, clave pública sin acceso a tablas, funciones ni al bucket, claves fuera del bundle, manuscrito fuera de los logs |
-| `tests/e2e/privacy.test.mjs` | Procesador bloqueado: todas las rutas 423 sin cambios en la base; inactividad, ajuste, cerrar sesión que revoca, intentos; en el navegador: bloquear guarda y desmonta, URL directa, otra pestaña, móvil al volver |
+| `tests/e2e/privacy.test.mjs` | Procesador bloqueado y novela protegida bloqueada: todas las rutas 423 sin cambios en la base ni llamadas a la IA; PIN sólo como hash; desbloqueo por sesión y revocación real; inactividad; título oculto; cambiar, quitar y recuperar el PIN; intentos; duplicar; imágenes sin caché; en el navegador: URL directa, PIN, *Bloquear novela*, nada en localStorage, móvil, proteger desde la app |
 | `tests/unit/images.test.ts` | Formato y tamaño de imagen leídos de los bytes (JPEG, PNG, WebP, AVIF), rutas y URLs versionadas |
 | `tests/e2e/assets-reuse.test.mjs` | Archivos repetidos (antes de subir y al terminar, sólo dentro de la novela) y reemplazar: sólo esta imagen o todos los usos, conservando pie, etiqueta, orden y principal, sin tocar otros usos |
 | `tests/e2e/assets.test.mjs` | Archivos: subida firmada de un solo uso, original conservado, derivados, caché versionada, galería (principal única, orden, límite), archivos compartidos sin duplicar, borrado seguro, aislamiento entre novelas, limpieza, duplicar novela, nada llega a la IA |
@@ -193,6 +195,7 @@ Opciones: `E2E_SKIP_BUILD=1` reutiliza el build; `E2E_ONLY=reading` ejecuta sól
   - Sesión `HttpOnly` y `SameSite=Strict`, firmada con HMAC y con caducidad de 30 días.
   - Procesador se bloquea tras 15 minutos sin actividad (configurable) y pide `APP_PASSWORD`; también con *Bloquear* o `Ctrl/⌘+Shift+L`. Bloqueado, el API responde 423.
   - Cada fallo de contraseña tarda 1 s; desde el quinto, espera creciente (30 s a 15 min).
+  - **Novelas protegidas**: una novela puede pedir su propio PIN o contraseña (sólo se guarda su hash scrypt con pepper). Bloqueada, toda ruta que la nombre a ella o a uno de sus elementos (capítulos, Memoria, imágenes, versiones, Consejero, IA, copia de seguridad, duplicar) responde 423. Se vuelve a bloquear tras 15 min sin actividad (5, 15, 30 o 60), con *Bloquear novela*, al bloquear Procesador o al cerrar sesión; opcionalmente al cambiar de pestaña o de app.
 - **Logs**: sólo mensajes de error. Nunca el manuscrito ni los cuerpos de las peticiones.
 - **Proveedores**: el texto se envía al proveedor elegido sin transformaciones. Si uno rechaza, se informa y puedes probar otro.
 
@@ -220,6 +223,7 @@ src/
     ai/prompts.ts       instrucciones de los dos modos y tareas
     ai/providers.ts     interfaz común: Claude (SDK oficial), GPT (SDK oficial, Responses API), Grok (REST)
     auth.ts (token de sesión), access.ts (handler, novelHandler, authorizeNovel), attempts.ts, privacy.ts
+    secret.ts (hash del PIN), protection.ts (proteger, cambiar, quitar)
     supabase.ts, memory.ts, client.ts, http.ts, types.ts
   proxy.ts
 supabase/schema.sql

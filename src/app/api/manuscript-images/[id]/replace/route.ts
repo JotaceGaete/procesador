@@ -13,13 +13,16 @@ type Ctx = { params: Promise<{ id: string }> };
  * the chapter's revision doesn't either. Body: { asset_id, scope: "use" | "all" }.
  * Returns the novel's gallery and manuscript images.
  */
-export const POST = novelHandler<Ctx>(byChild("manuscript_images"), async (request, { params }) => {
+export const POST = novelHandler<Ctx>(byChild("manuscript_images"), async (request, { params }, { novelId }) => {
   const imageId = assertId((await params).id, "Imagen");
   const body = await readJson(request);
   const assetId = assertId(body.asset_id, "Archivo");
   const { data: asset, error } = await db().from("assets").select("status, novel_id").eq("id", assetId).maybeSingle();
   if (error) throw error;
   if (!asset || asset.status !== "ready") throw new HttpError(404, "Archivo no encontrado");
+  // Only a file of the novel that was authorized, never one of another (perhaps locked) novel:
+  // the same answer as the database's composite foreign keys.
+  if (novelId && asset.novel_id !== novelId) throw new HttpError(400, "Referencia a un elemento que no pertenece a esta novela.");
   const use = readUse({ kind: "replace", manuscript_image_id: imageId, scope: body.scope });
   return NextResponse.json(await applyUse(use, assetId, asset.novel_id));
 });

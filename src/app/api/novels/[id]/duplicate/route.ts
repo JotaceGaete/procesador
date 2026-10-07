@@ -13,7 +13,8 @@ type Ctx = { params: Promise<{ id: string }> };
  */
 export const POST = novelHandler<Ctx>(byParam(), async (_request, { params }) => {
   const source = await getNovel((await params).id);
-  const { data, error } = await db().rpc("duplicate_novel", { p_novel: source.id, p_title: `${source.title} (copia)` });
+  // A protected novel's copy is born protected, with the same PIN, in the same transaction.
+  const { data, error } = await db().rpc("duplicate_novel_with_protection", { p_novel: source.id, p_title: `${source.title} (copia)` });
   if (error) throw error;
   const { id, copies } = data as { id: string; copies: [string, string][] };
 
