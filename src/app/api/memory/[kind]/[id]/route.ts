@@ -3,7 +3,7 @@ import { handler } from "@/lib/auth";
 import { assertId, db } from "@/lib/supabase";
 import { HttpError, pickFields, readJson } from "@/lib/http";
 import { isMemoryKind, MEMORY_KINDS } from "@/lib/memory";
-import { readCharacterIds, setFactCharacters } from "@/lib/memory-server";
+import { readCharacterIds, relationKind, setFactCharacters } from "@/lib/memory-server";
 import { readCharacterTime } from "@/lib/chronology-server";
 import { deleteUnusedAssets } from "@/lib/assets-server";
 
@@ -30,6 +30,13 @@ export const PATCH = handler<Ctx>(async (request, { params }) => {
     if (ownerError) throw ownerError;
     if (!owner) throw new HttpError(404, "Elemento no encontrado");
     time = await readCharacterTime(body, owner.novel_id);
+  }
+  // Relaciones personalizadas: the form already used in the novel, never a trivial duplicate.
+  if (kind === "relationships" && "kind" in fields) {
+    const { data: owner, error: ownerError } = await db().from("relationships").select("novel_id").eq("id", id).maybeSingle();
+    if (ownerError) throw ownerError;
+    if (!owner) throw new HttpError(404, "Elemento no encontrado");
+    fields.kind = await relationKind(owner.novel_id, String(fields.kind), id);
   }
   const changes = { ...fields, ...time };
   if (!Object.keys(changes).length && !characterIds) throw new HttpError(400, "Nada que guardar");
