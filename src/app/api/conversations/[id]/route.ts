@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { handler } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
-import { conversationWithMessages, getConversation } from "@/lib/advisor/conversations";
+import { conversationWithMessages, editPlan, getConversation } from "@/lib/advisor/conversations";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -11,9 +11,17 @@ export const GET = handler<Ctx>(async (_request, { params }) =>
   NextResponse.json(await conversationWithMessages((await params).id), { headers: { "Cache-Control": "no-store" } }),
 );
 
+/**
+ * Renames the conversation, or edits its plan (Conversar): `plan: { messageId?, decisions?,
+ * discarded?, add? }` changes the author's decisions and discards; nothing of the novel.
+ */
 export const PATCH = handler<Ctx>(async (request, { params }) => {
   const c = await getConversation((await params).id);
   const body = await readJson(request);
+  if (body.plan && typeof body.plan === "object") {
+    await editPlan(c.id, body.plan as Record<string, unknown>);
+    return new NextResponse(null, { status: 204 });
+  }
   if (typeof body.title !== "string" || !body.title.trim()) throw new HttpError(400, "La conversación necesita un título.");
   const { error } = await db().from("advisor_conversations").update({ title: body.title.trim().slice(0, 200) }).eq("id", c.id);
   if (error) throw error;

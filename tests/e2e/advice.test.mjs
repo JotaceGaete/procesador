@@ -57,7 +57,7 @@ test("dry run: the context by levels, and the chapters it would like read first;
   assert.equal(labels.at(-1), "1 capítulo sin ficha al día");
   assert.deepEqual(data.unread.map((u) => u.id), [ch[1]], "chapter 2, before the open one, was never read");
   assert.ok(data.unread[0].estimate > 0);
-  assert.deepEqual(data.plan, { type: "plan", action: "analizar", label: "Analizar capítulo", detail: "" });
+  assert.deepEqual(data.plan, { type: "plan", action: "analizar", label: "Analizar capítulo", detail: "", mode: "analizar" });
   assert.equal((await aiLog()).length, 0);
 });
 
@@ -136,7 +136,7 @@ test("Repeticiones and Cabos: computed data and anchor passages go with the requ
 test("free question: the planner's reading is shown; named chapters go complete; the selection is the focus", async () => {
   await clearAiLog();
   const list = events((await advise({ question: "¿Es coherente lo que sabe Elena del mar en el capítulo 1?" })).data);
-  assert.deepEqual(list[1], { type: "plan", action: "coherencia", label: "Coherencia", detail: "personajes: Elena · capítulos: 1" });
+  assert.deepEqual(list[1], { type: "plan", action: "coherencia", label: "Coherencia", detail: "personajes: Elena · capítulos: 1", mode: "analizar" });
   let prompt = (await aiLog())[0].body.messages[0].content;
   assert.ok(prompt.includes(`<capitulo numero="1" titulo="Capítulo 1">\n${T1}\n</capitulo>`), prompt.slice(0, 600));
   assert.match(prompt, /Pregunta del autor: ¿Es coherente lo que sabe Elena/);
@@ -167,6 +167,8 @@ test("panel: Consultar runs an action; cards show their references; Ir selects t
   page = await ctx.newPage();
   page.on("pageerror", (e) => assert.fail(`page error: ${e.message}`));
   await page.addInitScript(([n, c]) => localStorage.setItem(`chapter:${n}`, c), [novel, ch[2]]);
+  // These are Analizar's cards and actions: the panel opens in Analizar (Conversar is the default).
+  await page.addInitScript((n) => localStorage.setItem(`advisorMode:${n}`, "analizar"), novel);
   await page.goto(`${BASE}/novela/${novel}`);
   const editor = page.locator("textarea.editor");
   await editor.waitFor();

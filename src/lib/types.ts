@@ -403,7 +403,7 @@ export type AssistEvent =
   /** Last event before refusal/truncated: tokens and cost. */
   | ({ type: "usage" } & Usage)
   /** Consejero: how a free question was understood, and the verified cards at the end. */
-  | { type: "plan"; action: string; label: string; detail: string }
+  | { type: "plan"; action: string; label: string; detail: string; mode?: "conversar" | "analizar" }
   | { type: "observations"; items: Observation[]; invalid?: boolean; labels?: { label: string; from: string | null }[] }
   /** Consejero: the exchange is stored; ids to act on the cards. */
   | { type: "saved"; conversationId: string; messageId: string; observationIds: string[] }
@@ -514,7 +514,9 @@ export type AdvisorAction =
   | "giro"
   | "oportunidades"
   | "tension"
-  | "explorar";
+  | "explorar"
+  // Conversar (the default mode): an answer in the flow of the conversation.
+  | "conversar";
 
 /**
  * group "crear": the creative quick actions (Pensar juntos); "revisar": the analytic ones;
@@ -534,10 +536,11 @@ export const ADVISOR_ACTIONS: { id: AdvisorAction; label: string; hint: string; 
   { id: "coherencia", label: "Coherencia", hint: "Contradicciones y revelaciones a destiempo", group: "revisar" },
   { id: "personajes", label: "Personajes", hint: "Presencia, evolución y personajes ausentes demasiado tiempo", group: "revisar" },
   { id: "explorar", label: "Desarrollar propuesta", hint: "Seguir con una propuesta de la conversación", group: "conversacion" },
+  { id: "conversar", label: "Conversar", hint: "Una respuesta breve en la conversación", group: "conversacion" },
 ];
 
 /** Actions that propose (ideas, never findings): more room in the answer, cards labelled A/B/C. */
-export const CREATIVE_ACTIONS: AdvisorAction[] = ["seguir", "caminos", "consecuencias", "giro", "oportunidades", "tension", "explorar"];
+export const CREATIVE_ACTIONS: AdvisorAction[] = ["seguir", "caminos", "consecuencias", "giro", "oportunidades", "tension", "explorar", "conversar"];
 
 export type ObservationKind = "problem" | "repetition" | "contradiction" | "thread" | "opportunity" | "alternative" | "pacing";
 
@@ -600,7 +603,12 @@ export interface AdvisorMessage {
     material?: { label: string; tokens: number }[];
     rounds?: number;
     /** Author turn: the card it was about ("el segundo", "Seguir con esta"…). */
-    anchor?: { id: string; label: string; title: string; how: "boton" | "etiqueta" | "ordinal" | "ultimo" | "heredado" } | null;
+    anchor?: { id: string; label: string; title: string; how: "boton" | "etiqueta" | "ordinal" | "ultimo" | "heredado" | "esa" } | null;
+    /** The mode the turn was asked in (Conversar or Analizar). */
+    mode?: "conversar" | "analizar";
+    /** Author turn: decisions and discards in their own words (the conversation's plan). */
+    decisions?: string[];
+    discarded?: string[];
     /** Advisor turn: the label of each card, in order (B2 is a version of B). */
     cards?: { label: string; from: string | null }[];
   } | null;

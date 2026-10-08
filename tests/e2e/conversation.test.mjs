@@ -193,6 +193,8 @@ test("panel: a conversation in the Consejero; Guardar, Descartar, and a follow-u
   page = await ctx.newPage();
   page.on("pageerror", (e) => assert.fail(`page error: ${e.message}`));
   await page.addInitScript(([n, c]) => localStorage.setItem(`chapter:${n}`, c), [novel, ch[1]]);
+  // These are Analizar's cards and actions: the panel opens in Analizar (Conversar is the default).
+  await page.addInitScript((n) => localStorage.setItem(`advisorMode:${n}`, "analizar"), novel);
   await page.goto(`${BASE}/novela/${novel}`);
   await page.locator("textarea.editor").waitFor();
   await page.locator(".topbar .link", { hasText: "Consejero" }).click();

@@ -41,6 +41,26 @@ function readingReply(system, user) {
     const n = (user.match(/^\[(Autor|Consejero)\]/gm) ?? []).length;
     return JSON.stringify({ summary: `Resumen de la conversación: ${n} mensajes anteriores.` });
   }
+  // «Enviar al Asistente»: the brief, from the chosen proposal and the author's plan.
+  // "ENCARGO-ROTO" in the proposal: never valid JSON (the server falls back to the proposal).
+  if (system.includes("<encargo-escena>")) {
+    const chosen = (user.match(/<propuesta-elegida etiqueta="[^"]*">\n([^\n]*)\n([^\n]*)/) ?? []).slice(1);
+    if (user.includes("ENCARGO-ROTO")) return "Esto no es JSON.";
+    const block = (title) => {
+      const m = user.match(new RegExp(`${title}[^\\n]*:\\n((?:- [^\\n]*\\n?)+)`));
+      return m ? m[1].trim().split("\n").map((l) => l.slice(2)) : [];
+    };
+    const people = [...(user.match(/<personajes>\n([\s\S]*?)\n<\/personajes>/)?.[1] ?? "").matchAll(/^- ([^(\n]+)/gm)].map((m) => m[1].trim());
+    const text = chosen.join(" ");
+    return JSON.stringify({
+      argument: `Escena: ${chosen[0] ?? "?"}. ${chosen[1] ?? ""}`.trim(),
+      decisions: block("Decisiones del autor"),
+      constraints: ["No revelar todavía el misterio."],
+      discarded: block("Descartado por el autor"),
+      characters: people.filter((n) => text.includes(n)),
+      place: "",
+    });
+  }
   if (system.includes("<resumen-global>")) {
     const n = (user.match(/<ficha /g) ?? []).length;
     return JSON.stringify({ summary: `Resumen global a partir de ${n} fichas de capítulo, con sus cabos.` });
@@ -141,6 +161,17 @@ function adviceReply(system, user) {
     refs: [{ chapter: n, quote }],
     ...extra,
   });
+  // Conversar: a short answer and, at most, one proposal (three when the author asked for options).
+  if (system.includes("Modo: conversar.")) {
+    const anchored = task.match(/(?:seguir con la propuesta|hablando de la propuesta) (\S+) \(«([^»]*)»/);
+    const say = (title, body) => ({ kind: "alternative", title, body, personajes: people, confidence: "medium", refs: [{ chapter: n, quote }] });
+    let ideas = [];
+    if (task.includes("Propón 2 o 3 direcciones")) ideas = ["Una cena en casa", "Una llamada", "Un viaje"].map((t) => say(t, `${t}: qué ocurriría.`));
+    else if (anchored) ideas = [say(`${anchored[2]} — ${question.slice(0, 60)}`, `Desarrollo de ${anchored[1]}: ${question}`)];
+    else if (/Propón UNA? |Señala UNA/.test(task)) ideas = [say("Una escena cotidiana", "Yo continuaría con una escena cotidiana en casa, sin resolver todavía el misterio.")];
+    const reply = `Yo lo haría así: ${task.split(".")[0]}.`;
+    return ideas.length ? `${reply}\n\n<observaciones>\n${JSON.stringify(ideas)}\n</observaciones>` : reply;
+  }
   const anchorTask = task.match(/sigue con la propuesta (\S+) \(«([^»]*)»\)/);
   let creative = null;
   if (/Propón exactamente 3 (caminos|direcciones)/.test(task)) creative = ["Seguir el conflicto", "Recuperar un cabo", "Cambiar de personaje"].map((t) => proposal(t));

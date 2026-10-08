@@ -675,3 +675,53 @@ propone; el autor decide.**
   aún no escrito»), ni *Hacer plan*, *Hacer hecho* desde una idea, *Ya está escrito*, ni vista
   *Ideas*; descartar «una parte» («sin Nacho») se refleja como una versión nueva, no como un
   estado de la parte.
+
+### Conversar: el Consejero como compañero (implementado, sin cambios de base de datos)
+
+Probado con una novela real, el Consejero creativo respondía como un informe: tres caminos con seis
+secciones, observaciones, riesgos y preguntas, incluso cuando el autor ya había decidido. Ahora
+*Consultar* tiene dos modos, **Conversar** (predeterminado) y **Analizar** (todo lo anterior,
+intacto). Es el mismo Consejero: mismas conversaciones, etiquetas, referencias, foco y protección
+del canon.
+
+- **Conversar** (`CONVERSE_INSTRUCTIONS`, `CONVERSE_TASKS`, en `prompts.ts`):
+  - un amigo escritor: natural, cálido y concreto; normalmente breve, sin límite rígido cuando se
+    pide desarrollar;
+  - una propuesta principal, como mucho, en el bloque `<observaciones>` de siempre (así funcionan las
+    etiquetas, «Seguir con esta», guardar y la verificación de citas); varias sólo con «dame
+    opciones»;
+  - las decisiones del autor son su plan: no se discuten; sólo si contradicen el canon (manuscrito o
+    hecho aprobado) se avisa en una frase con la referencia y una solución;
+  - no analiza el capítulo ni hace listas de riesgos salvo que se pida;
+  - contexto ligero: el final del capítulo, la Memoria pertinente, la cronología, el marco y la
+    conversación; sin tablas de presencia ni repeticiones; una ronda de lectura profunda; hasta
+    3.000 tokens de salida.
+- **Intenciones sin IA** (`converse.ts`, compartido por servidor y panel):
+  - «me gusta», «esa quiero», «desarróllala»: la propuesta en curso o la última propuesta (se ve
+    «sobre A (la que acabo de proponer)»);
+  - «dame opciones»: varias;
+  - «analiza…», «revisa la coherencia…»: ese turno en Analizar, sin heredar la propuesta en curso;
+  - «envíala al Asistente» y «guárdala»: actúan sobre la propuesta en la mesa sin preguntar al modelo.
+- **El plan de la conversación:** las decisiones («quiero que…», «he decidido que…») y lo descartado
+  («sin Nacho», «no quiero que…») se guardan con las palabras del autor en el contexto de su mensaje
+  (`advisor_messages.context.decisions/discarded`). Un descarte que nombra a alguien retira la
+  decisión anterior sobre él. El plan va siempre al modelo como «PLAN: decidido por el autor, aún no
+  escrito ni canon», recalculado (no del resumen), y la compactación lo conserva. En el panel,
+  *Decidido en esta conversación* permite quitar o añadir decisiones (`PATCH
+  /api/conversations/[id]` con `plan`) y llevar una a Memoria como **hecho sugerido**.
+- **Enviar al Asistente** (`brief.ts`, `POST /api/advisor` con `brief: true`):
+  - el modelo económico prepara el encargo a partir de la propuesta elegida, el plan y la
+    conversación: qué ocurre, decisiones, restricciones, descartado, personajes, lugar; destino al
+    final del capítulo por defecto. Las decisiones y lo descartado del plan van con las palabras del
+    autor. Si su respuesta no sirve, el encargo se hace con la propuesta;
+  - el autor lo revisa y edita (`SceneBriefEditor`); *Llevar al Asistente* rellena «Escribir escena»
+    (argumento, personajes, lugar, destino) y muestra «Del Consejero» (se puede quitar);
+  - la escena lleva el encargo en `<encargo_del_consejero>`, con la autoridad del argumento: cumplir
+    decisiones y restricciones, que no ocurra lo descartado. Validado en el servidor (`parseBrief`);
+  - nada se escribe: el Asistente prepara la propuesta, el autor la lee y la aplica (con la copia
+    previa y *Deshacer* de siempre).
+- **Interfaz:** selector *Conversar | Analizar* (recordado por novela); en Conversar, turnos de chat
+  con propuestas compactas (sin tipo, confianza ni listas; una cita verificada como una línea con
+  *Ir*), accesos rápidos *¿Cómo continúo?* · *Dame opciones* · *Necesito un giro* · *¿Qué pasa si…?*,
+  y sin opciones técnicas. En el teléfono, lo mismo dentro de la hoja.
+- **API:** sin `mode`, el Consejero responde en Analizar, como antes; el panel envía `conversar`.

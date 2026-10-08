@@ -33,8 +33,11 @@ export async function* adviseRounds(opts: {
   preload: DeepRequest[];
   approvedTokens: number;
   onUsage(u: Usage): Promise<void>;
+  /** Fewer rounds than the configured limit (Conversar: one). */
+  rounds?: number | null;
 }): AsyncGenerator<AssistEvent, LoopResult> {
   const state = newState();
+  if (opts.rounds != null) state.limits = { ...state.limits, rounds: Math.min(state.limits.rounds, opts.rounds) };
   const material: string[] = [];
   const items: MaterialItem[] = [];
   const asked: DeepRequest[] = [];
