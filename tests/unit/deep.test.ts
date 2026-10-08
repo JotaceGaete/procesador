@@ -135,3 +135,12 @@ test("names that don't exist, chapters out of range", () => {
   assert.match(text, /sin pasajes para «zzzz»/);
   assert.equal(items.length, 0);
 });
+
+test("relaciones personalizadas reach the Consejero exactly like a common one", () => {
+  const custom: ToolContext = {
+    ...ctx,
+    memory: { ...memory, relationships: [...memory.relationships, { id: "r2", from_id: "m", to_id: "e", kind: "Ex amante de", note: "en Valparaíso" } as never] },
+  };
+  const { text } = serve(custom, newState(limits), [{ tipo: "relaciones", personaje: "Elena" }]);
+  assert.match(text, /- Elena → hermana de → Marta\n- Marta → Ex amante de → Elena \(en Valparaíso\)/);
+});

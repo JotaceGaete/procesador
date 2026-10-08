@@ -41,6 +41,26 @@ function readingReply(system, user) {
     const n = (user.match(/^\[(Autor|Consejero)\]/gm) ?? []).length;
     return JSON.stringify({ summary: `Resumen de la conversación: ${n} mensajes anteriores.` });
   }
+  // «Enviar al Asistente»: the brief, from the chosen proposal and the author's plan.
+  // "ENCARGO-ROTO" in the proposal: never valid JSON (the server falls back to the proposal).
+  if (system.includes("<encargo-escena>")) {
+    const chosen = (user.match(/<propuesta-elegida etiqueta="[^"]*">\n([^\n]*)\n([^\n]*)/) ?? []).slice(1);
+    if (user.includes("ENCARGO-ROTO")) return "Esto no es JSON.";
+    const block = (title) => {
+      const m = user.match(new RegExp(`${title}[^\\n]*:\\n((?:- [^\\n]*\\n?)+)`));
+      return m ? m[1].trim().split("\n").map((l) => l.slice(2)) : [];
+    };
+    const people = [...(user.match(/<personajes>\n([\s\S]*?)\n<\/personajes>/)?.[1] ?? "").matchAll(/^- ([^(\n]+)/gm)].map((m) => m[1].trim());
+    const text = chosen.join(" ");
+    return JSON.stringify({
+      argument: `Escena: ${chosen[0] ?? "?"}. ${chosen[1] ?? ""}`.trim(),
+      decisions: block("Decisiones del autor"),
+      constraints: ["No revelar todavía el misterio."],
+      discarded: block("Descartado por el autor"),
+      characters: people.filter((n) => text.includes(n)),
+      place: "",
+    });
+  }
   if (system.includes("<resumen-global>")) {
     const n = (user.match(/<ficha /g) ?? []).length;
     return JSON.stringify({ summary: `Resumen global a partir de ${n} fichas de capítulo, con sus cabos.` });
@@ -123,10 +143,50 @@ function adviceReply(system, user) {
     cards.push({ kind: "thread", title: "La carta de Marta sigue abierta", body: "No aparece desde hace tiempo.", confidence: "medium", refs: [] });
     cards.push({ kind: "thread", title: "El viaje a Cartagena", body: "Se insinúa y no se retoma.", confidence: "low", refs: [] });
   }
-  if (task.includes("caminos razonables")) {
-    for (const t of ["Seguir el conflicto", "Recuperar un cabo", "Cambiar de personaje"])
-      cards.push({ kind: "alternative", title: t, body: `${t}: qué aprovecha de lo escrito.`, confidence: "medium", refs: [{ chapter: n, quote }] });
+  // Consejero creativo: only proposals, in sections, built from what the request carries
+  // (the people of the memory block, the secrets of the data, the proposal in course).
+  const people = [...user.matchAll(/^### ([^\n(]+)/gm)].map((m) => m[1].trim());
+  const secret = (user.match(/^- ([^:\n]+): secretos: ([^.\n]+)/m) ?? []).slice(1);
+  const proposal = (title, extra = {}) => ({
+    kind: "alternative",
+    title,
+    body: "",
+    ocurre: `${title}: qué podría ocurrir.`,
+    porque: "Porque continúa lo que ya está en juego.",
+    aprovecha: secret.length ? `El secreto de ${secret[0]}: ${secret[1]}` : "El final del capítulo.",
+    consecuencias: "Cambia lo que sabe cada uno.",
+    riesgos: "Puede adelantar demasiado.",
+    personajes: people.join(", "),
+    confidence: "medium",
+    refs: [{ chapter: n, quote }],
+    ...extra,
+  });
+  // Conversar: a short answer and, at most, one proposal (three when the author asked for options).
+  if (system.includes("Modo: conversar.")) {
+    const anchored = task.match(/(?:seguir con la propuesta|hablando de la propuesta) (\S+) \(«([^»]*)»/);
+    const say = (title, body) => ({ kind: "alternative", title, body, personajes: people, confidence: "medium", refs: [{ chapter: n, quote }] });
+    let ideas = [];
+    if (task.includes("Propón 2 o 3 direcciones")) ideas = ["Una cena en casa", "Una llamada", "Un viaje"].map((t) => say(t, `${t}: qué ocurriría.`));
+    else if (anchored) ideas = [say(`${anchored[2]} — ${question.slice(0, 60)}`, `Desarrollo de ${anchored[1]}: ${question}`)];
+    else if (/Propón UNA? |Señala UNA/.test(task)) ideas = [say("Una escena cotidiana", "Yo continuaría con una escena cotidiana en casa, sin resolver todavía el misterio.")];
+    const reply = `Yo lo haría así: ${task.split(".")[0]}.`;
+    return ideas.length ? `${reply}\n\n<observaciones>\n${JSON.stringify(ideas)}\n</observaciones>` : reply;
   }
+  const anchorTask = task.match(/sigue con la propuesta (\S+) \(«([^»]*)»\)/);
+  let creative = null;
+  if (/Propón exactamente 3 (caminos|direcciones)/.test(task)) creative = ["Seguir el conflicto", "Recuperar un cabo", "Cambiar de personaje"].map((t) => proposal(t));
+  else if (task.includes("necesita un giro")) creative = ["Giro: el secreto sale", "Giro: un testigo", "Giro: la carta"].map((t) => proposal(t));
+  else if (task.includes("subir la tensión")) creative = ["Un plazo", "Alguien sabe"].map((t) => proposal(t));
+  else if (task.includes("Busca oportunidades")) creative = ["Un secreto sin usar", "Una relación sin escenas", "Un cabo olvidado"].map((t) => proposal(t, { kind: "opportunity" }));
+  else if (task.includes("qué pasaría si")) {
+    creative = [
+      { kind: "contradiction", title: "Choca con lo escrito", body: "Contradice un pasaje.", confidence: "medium", refs: [{ chapter: n, quote }] },
+      proposal("Lo que abre", { kind: "opportunity" }),
+      { kind: "problem", title: "Riesgo", body: `Afecta a ${people.join(", ") || "nadie"}.`, confidence: "low", refs: [] },
+    ];
+  } else if (anchorTask) creative = [proposal(`${anchorTask[2]} — ${question.slice(0, 60)}`)];
+  else if (task.startsWith("Responde al último mensaje")) creative = [];
+  if (creative) cards.splice(0, cards.length, ...creative);
   const json = user.includes("OBS-ROTAS") ? "[{ roto" : JSON.stringify(cards, null, 1);
   return `## Lectura del Consejero\n\n${task.split(":")[0]}.\n\n<observaciones>\n${json}\n</observaciones>`;
 }

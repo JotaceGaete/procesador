@@ -3,7 +3,7 @@ import { byParam, novelHandler } from "@/lib/access";
 import { db, getNovel } from "@/lib/supabase";
 import { HttpError, pickFields, readJson } from "@/lib/http";
 import { isMemoryKind, MAX_CHARACTERS, MEMORY_KINDS } from "@/lib/memory";
-import { readCharacterIds, setFactCharacters } from "@/lib/memory-server";
+import { readCharacterIds, relationKind, setFactCharacters } from "@/lib/memory-server";
 import { readCharacterTime } from "@/lib/chronology-server";
 
 type Ctx = { params: Promise<{ id: string; kind: string }> };
@@ -24,6 +24,7 @@ export const POST = novelHandler<Ctx>(byParam(), async (request, { params }) => 
     if (error) throw error;
     if ((count ?? 0) >= MAX_CHARACTERS) throw new HttpError(400, `Máximo ${MAX_CHARACTERS} personajes por novela.`);
   }
+  if (kind === "relationships") fields.kind = await relationKind(novel.id, String(fields.kind));
   const characterIds = kind === "facts" ? (readCharacterIds(body.character_ids) ?? []) : undefined;
   // Cronología: the age anchor, approximate age and death (docs/cronologia-edades.md).
   const time = kind === "characters" ? await readCharacterTime(body, novel.id) : {};

@@ -11,13 +11,14 @@ Procesador de textos personal para escribir novelas con asistencia de IA. Tú im
 - **Guía Maestra** (clic en el título de la novela): género, época, narrador, persona, tiempo verbal, tono, estilo, diálogos, regionalismos, temas, cosas que evitar…
   - Todo es opcional.
   - La app la convierte en las instrucciones que recibe cualquier modelo. *Ver instrucciones maestras* muestra el resultado.
-- **Memoria**: Personajes, Relaciones (Juan → hermano de → Pedro), Lugares y Hechos de continuidad, estos últimos ligados opcionalmente a personajes, capítulo, lugar y fecha. Cada novela tiene la suya.
+- **Memoria**: Personajes, Relaciones (Juan → hermano de → Pedro; las comunes, las ya usadas en la novela o cualquier otra que cree el autor, sin duplicados por mayúsculas, espacios o tildes: [relaciones personalizadas](docs/relaciones.md)), Lugares y Hechos de continuidad, estos últimos ligados opcionalmente a personajes, capítulo, lugar y fecha. Cada novela tiene la suya.
   - **Memoria visual de Personajes**: tarjetas con la imagen principal (o las iniciales), y en la ficha la imagen principal y una *Galería* de referencias. Se suben con el selector o arrastrando, y se ven ampliadas con su pie y su etapa. Subir, eliminar, elegir la principal y ordenar se guardan al momento. Se conserva el original; la app sólo carga miniaturas y versiones reducidas. Reemplazar un archivo pregunta, si está compartido, si es sólo en esa imagen o en todos sus usos. Un archivo repetido nunca se guarda dos veces: se reutiliza. Las imágenes no se envían al asistente.
 - **Asistente** (panel derecho; en móvil, hoja inferior). Tiene dos modos:
   - *Editar selección*: Redacción, Diálogo, Expandir, Acortar. Es conservador: preserva hechos, intención, voz y regionalismos. Las propuestas se muestran como **Original / Propuesta**.
   - *Escribir escena*: escribes el argumento y pulsas **Desarrollar escena**. Puedes marcar quién está en escena, el lugar y la extensión. Tu argumento es la autoridad sobre lo que ocurre; la IA sólo decide cómo contarlo.
   - **Dónde va** ([diseño](docs/asistente-contexto.md#11-dónde-va-una-escena)): por defecto *al final del capítulo* (*Insertar al final*, esté donde esté el cursor); *en el cursor* sólo si lo eliges, con la posición fijada al pedir la escena. Mover el cursor mientras la propuesta espera no cambia el destino que muestra la vista previa.
-  - Nada se escribe en el manuscrito sin tu clic. Cada propuesta ofrece *Otra versión*, *Copiar*, *Limpiar* y *Probar con* otro proveedor.
+  - Nada se escribe en el manuscrito sin tu clic. Cada propuesta ofrece *Otra versión*, *Descartar*, *Copiar* y *Probar con* otro proveedor, y *Abrir propuesta* para leerla en grande con la tipografía del libro y las mismas acciones ([diseño](docs/asistente-contexto.md#12-el-panel-en-escritorio)).
+  - El modelo se elige en *Opciones avanzadas*; las cifras de tokens quedan discretas junto a *Ver contexto*.
   - **Comparar antes de aplicar** ([diseño](docs/asistente-contexto.md#9-comparar-antes-de-aplicar)): una reescritura se ve como cambios sobre tu texto (tachado lo que se quita, resaltado lo que se añade), o limpia, o tu texto; una escena, en su lugar entre los párrafos del cursor. Al aceptar se guarda antes una versión del texto actual; si no se puede guardar, no se aplica nada.
   - **Ignorancia temporal:** al escribir una escena, la IA nunca recibe capítulos posteriores, el texto después del cursor ni hechos de capítulos posteriores. *Leer toda la historia hasta aquí* añade los capítulos anteriores y el actual hasta el cursor.
   - *Ver contexto* antes de enviar, y *Ver lo que se envió* después: lo que la IA tiene en cuenta, con tokens estimados.
@@ -26,9 +27,22 @@ Procesador de textos personal para escribir novelas con asistencia de IA. Tú im
   - En el teléfono el panel es una hoja inferior compacta, de hasta el 58 % de la pantalla, que se mantiene por encima del teclado. Al aplicar una propuesta se cierra para dejar el manuscrito a la vista.
   - Bajo cada respuesta, una línea discreta indica qué se leyó, los tokens usados y, si hay precios en `AI_PRICES`, el coste aproximado. Sólo se pide confirmación por encima de `AI_CONFIRM_TOKENS`.
 - **Consejero** (mismo panel; [diseño](docs/consejero.md)): piensa contigo sobre la novela, nunca escribe en el manuscrito.
-  - *Consultar*: *Analizar capítulo*, *¿Cómo seguir?*, *Repeticiones*, *Cabos pendientes*, *Coherencia*, *Personajes*, o una pregunta libre.
+  - *Consultar* tiene dos modos:
+    - **Conversar** (predeterminado): un compañero de escritura. Responde breve y con naturalidad, con una sola propuesta concreta (varias sólo si pides opciones).
+      - Tus decisiones («quiero que Waldo haya sido novio de Pola») son la dirección: las guarda como plan de la conversación, editable, y te ayuda a desarrollarlas. Sólo avisa, en una frase, si contradicen el canon.
+      - «Me gusta», «esa quiero» o «desarróllala» continúan la propuesta sin volver a analizar el capítulo. Cada propuesta tiene *Desarrollar idea*, *Enviar al Asistente* y *Guardar idea*.
+      - *Enviar al Asistente* (o escribir «envíala al Asistente») prepara un encargo editable: qué ocurre, decisiones, restricciones, descartado, personajes, lugar y destino. Al llevarlo, el Asistente rellena la escena; nada se escribe hasta que lo pides y lo aplicas.
+      - Pedir un análisis («analiza el capítulo», «revisa la coherencia») hace ese turno en Analizar.
+    - **Analizar**: la evaluación completa, como hasta ahora, con accesos rápidos discretos en dos líneas.
+    - *Pensar juntos*: *¿Cómo continúo?*, *3 caminos*, *Busca oportunidades*, *Cabos pendientes*, *Necesito un giro*, *Subir tensión* y *¿Qué pasa si…?* (empieza la pregunta y tú la terminas).
+    - *Revisar*: *Analizar capítulo*, *Repeticiones*, *Coherencia* y *Personajes*.
+    - O una pregunta libre: el planificador reconoce también «no sé cómo continuar», «¿qué pasa si…?», «necesito un giro», «quiero subir la tensión»…
     - La respuesta trae observaciones con tipo, confianza y citas comprobadas en el texto, cada una con *Ir*. Lo que no se puede verificar se presenta como impresión.
-    - *¿Cómo seguir?* propone caminos, no escribe la continuación; uno se puede *Enviar al Asistente*.
+    - *Consejero creativo*:
+      - los caminos llegan como *Camino A, B y C*, cada uno con qué podría ocurrir, por qué funciona en esta novela, qué aprovecha, consecuencias, riesgos y personajes;
+      - «me gusta el segundo», «la B», «el último» o el botón *Seguir con esta* fijan sin ambigüedad de qué propuesta se habla, y la conversación la sigue desarrollando (B2, B3…, sin borrar las anteriores) hasta que pidas otra cosa o pulses *Soltar*;
+      - nada de lo propuesto es canon: no toca el manuscrito, la Memoria, los hechos ni los cabos. Una idea sólo entra en la novela si la escribes, o si apruebas un hecho;
+      - un camino se puede *Enviar al Asistente* como argumento de una escena.
     - Antes de responder lee los capítulos que no tengan ficha.
     - Las consultas forman conversaciones que se pueden continuar; lo más antiguo se resume solo.
     - Cada observación se puede guardar, descartar, marcar resuelta, volver a comprobar tras editar o convertir en un hecho sugerido para la Memoria.
@@ -148,6 +162,7 @@ npm run test:all    # todas
 | `tests/unit/secret.test.ts` | PIN sólo como hash scrypt con sal y pepper; sin pepper en producción, 503; reglas de PIN y contraseña |
 | `tests/unit/routes.test.ts` | Cada método de cada ruta pasa por `handler` o `novelHandler` y está en `tests/e2e/routes.mjs` |
 | `tests/unit/providers.test.ts` | Claude, GPT y Grok: streaming, caché del manuscrito, rechazos, errores, cancelación |
+| `tests/e2e/assistant-desktop.test.mjs` | Asistente en escritorio: una sola navegación Asistente/Consejero, barra superior dentro de su columna a 1000–1920 px con y sin capítulos, orden de *Escribir escena*, el modelo en *Opciones avanzadas*, tokens discretos, respuesta larga arriba del panel con sus acciones a mano, *Abrir propuesta* (insertar, otra versión, descartar, reemplazar) |
 | `tests/e2e/api.test.mjs` | Biblioteca, capítulos, revisiones y conflictos, memoria, aislamiento entre novelas, duplicar, borrar, construcción de contexto y cada proveedor |
 | `tests/e2e/security.test.mjs` | Todas las rutas (`tests/e2e/routes.mjs`) sin sesión, cookies falsificadas o de una sesión inexistente, 503 sin contraseña, clave pública sin acceso a tablas, funciones ni al bucket, claves fuera del bundle, manuscrito fuera de los logs |
 | `tests/e2e/privacy.test.mjs` | Procesador bloqueado y novela protegida bloqueada: todas las rutas 423 sin cambios en la base ni llamadas a la IA; PIN sólo como hash; desbloqueo por sesión y revocación real; inactividad; título oculto; cambiar, quitar y recuperar el PIN; intentos; duplicar; imágenes sin caché; en el navegador: URL directa, PIN, *Bloquear novela*, nada en localStorage, móvil, proteger desde la app |
@@ -173,7 +188,13 @@ npm run test:all    # todas
 | `tests/e2e/icon.test.mjs` | Icono: favicon, SVG, Apple y manifiesto públicos y con su tipo, iconos del manifiesto con su tamaño, etiquetas en la página de entrada, y el resto de la app sigue cerrado |
 | `tests/unit/visual-document.test.ts` | Editor visual: conversión `content ⇄ documento` idéntica byte a byte (casos difíciles y 5.000 textos aleatorios), lo mismo que Lectura, un párrafo editado cambia sólo su línea, posiciones ⇄ desplazamientos, cursivas enteras en una selección |
 | `tests/unit/visual-report.test.ts` | El informe de conversión: ida y vuelta, rarezas del formato contadas, muestra incluida |
+| `tests/unit/relations.test.ts` | Relaciones personalizadas: mayúsculas, espacios y tildes no cuentan (la ñ sí), la forma ya usada en la novela, las usadas en la novela sin repetir las comunes |
+| `tests/e2e/relations.test.mjs` | Relaciones personalizadas: crear, reutilizar sin escribir, sin duplicados triviales, en las fichas, editar, la misma regla en la API, contexto del Asistente, copia de seguridad, duplicar, iPhone |
 | `tests/e2e/visual-editor.test.mjs` | Editor visual en Chromium: el fragmento central sin nada técnico a la vista, escribir alrededor de bloques, seleccionar, borrar, deshacer y rehacer, cursiva, abrir sin cambiar nada, Asistente, Consejero «Ir», versiones, palabras e imágenes, pegar, predeterminado en un dispositivo nuevo, el interruptor (visible sin desplazarse en 375×627 con 14 capítulos; volver a texto se mantiene al recargar, cambiar de capítulo y volver a entrar), teléfono, capítulo de 1 MB, informe sobre una copia de seguridad real |
+| `tests/unit/creative.test.ts` | Consejero creativo sin IA: etiquetas A/B/C y versiones B2, «el segundo», «la B», «el último» (y lo que no es una tarjeta: «el segundo capítulo»), descartar por su nombre, estados que no destruyen la propuesta anterior, foco que sigue las versiones, descartadas sólo por su título y marcadas como no verdaderas, conversación de 60 tarjetas, intenciones nuevas del planificador, propuestas por secciones |
+| `tests/unit/converse.test.ts` | Conversar sin IA: una propuesta o varias, análisis sólo si se pide, «me gusta / desarróllala / envíala al Asistente / guárdala», decisiones en palabras del autor, «sin Nacho» (y no «sin embargo»), un descarte que retira la decisión anterior, el encargo validado |
+| `tests/e2e/conversar.test.mjs` | Conversar: «¿Cómo puedo continuar?» → una propuesta; «Me gusta, desarróllala» → esa; una decisión como plan (con el hecho que contradice en el contexto); opciones; un análisis pedido; Analizar intacto; plan editable; encargo (con respaldo sin IA); el Asistente lo recibe y no escribe nada; escritorio y teléfono |
+| `tests/e2e/creative.test.mjs` | Consejero creativo: «No sé cómo continuar» → A, B, C; «Me gusta el segundo» → B (desarrollada como B2); «Pero quiero que aparezca Nacho» → B3, con la ficha, relación, hecho y pasajes reales de Nacho; «No, mejor sin Nacho» → B4; «la B», «el último», *Seguir con esta* (y la tarjeta de otra conversación, rechazada), *Soltar*; descartar y recuperar; compactación con estados y sin canonizar; cronología, consecuencias, giro, oportunidades y tensión; más espacio para lo creativo; manuscrito, Memoria, hechos y cabos intactos; conversación larga; el panel |
 | `tests/e2e/ui.test.mjs` | Flujo completo en el navegador: autoguardado, memoria, guía, capítulos, retomar posición, Desarrollar escena e insertar con deshacer, Original/Propuesta, cambio de proveedor, conflicto, concentración, móvil, capítulo de 1 MB |
 
 Requisitos de la E2E:

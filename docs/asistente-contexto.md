@@ -284,3 +284,32 @@ El cursor podía quedar por accidente en mitad del capítulo, y la escena se esc
 Si el texto alrededor de una posición fijada cambia tanto que ya no se encuentra, la vista previa lo dice, *Insertar en el cursor* queda desactivado y no se adivina otro lugar; el final siempre está disponible.
 
 El orden al aceptar es el de la Fase 0: guardar una versión → comprobar que se guardó → resolver el destino sobre el texto de ese momento → insertar → autoguardado. Si falla la copia, el destino ya no existe o el navegador rechaza la edición, no cambia nada y la propuesta se queda.
+
+## 12. El panel en escritorio
+
+Disposición: **Capítulos | Manuscrito | Asistente**. El manuscrito es el protagonista; el panel lo
+acompaña.
+
+- **Una sola navegación.** *Asistente* y *Consejero* se eligen en la barra superior (abren,
+  cambian o cierran el panel). La cabecera del panel lleva sólo lo de dentro de la sección (*Editar
+  selección · Escribir escena*, o las vistas del Consejero) y *Ocultar*.
+- **La barra superior nunca pasa por debajo del panel.** Se adapta al ancho de la columna del
+  manuscrito, no al de la ventana: con columna estrecha oculta el recuento de palabras (está en la
+  lista de capítulos) y lo que no cabe pasa a una segunda línea. Antes, con los capítulos y el
+  panel abiertos, no podía encogerse: los títulos quedaban a cero y *Consejero · Concentración* se
+  dibujaban bajo la cabecera del panel, mezclados con su *Asistente · Consejero*.
+- **Escribir escena**, en el orden en que se decide: *Argumento* (con una ayuda: se puede escribir
+  como salga, sin fórmulas) → *Dónde va* → *Extensión* → *En escena* y *Lugar* → *Leer toda la
+  historia hasta aquí* (visible, con su explicación) → **Desarrollar escena**. El *Modelo* va en
+  *Opciones avanzadas*. Las cifras de tokens siguen ahí, en texto pequeño junto a *Ver contexto*
+  (en rojo si la consulta es grande).
+- **Editar selección**: primero el fragmento seleccionado, después las decisiones.
+- **La respuesta**: al llegar, el panel se desplaza a ella. Se lee en el desplazamiento del propio
+  panel (sin caja pequeña con su propio scroll) y sus acciones (*Insertar* / *Reemplazar*,
+  *Otra versión*, *Descartar*) quedan fijas al pie mientras se lee.
+- **Abrir propuesta**: la propuesta en grande, con la tipografía del manuscrito (párrafos, cursivas,
+  separadores); una reescritura, además, con *Cambios* y *Tu texto*. Las mismas acciones;
+  *Volver al manuscrito* o `Esc` la cierran sin perder nada (la propuesta vive en el panel).
+
+El Consejero conserva su disposición. El Asistente en el teléfono (selección + hoja propia) queda
+para su propio diseño.

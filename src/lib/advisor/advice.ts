@@ -3,16 +3,20 @@ import { db, getMemory, getNovel, getOutline } from "../supabase";
 import { HttpError } from "../http";
 import { compileGuide } from "../guide";
 import { countWords, forModel, separatorsForModel } from "../manuscript";
-import { buildManuscript, chapterLabel, estimateTokens, excerpts, manuscriptRange, nearbyRange, selectMemory } from "../ai/context";
+import { buildManuscript, chapterLabel, estimateTokens, excerpts, manuscriptRange, nameMatcher, nearbyRange, selectMemory } from "../ai/context";
 import { memoryBlock } from "../ai/prompts";
 import type { CompletionRequest } from "../ai/providers";
 import type { AdvisorAction, ChapterDigest, ContextPart, StoryThread } from "../types";
-import { ADVISOR_ACTIONS, THREAD_KINDS, THREAD_STATUS_LABELS } from "../types";
+import { ADVISOR_ACTIONS, CREATIVE_ACTIONS, THREAD_KINDS, THREAD_STATUS_LABELS } from "../types";
+import { novelChronology } from "../chronology-server";
+import { describeAge, formatPoint } from "../chronology";
+import { assignLabels, isDiscard, leavesFocus, resolveReference, type Anchor, type CardRef, type CardWithState } from "./cards";
 import { chapterRows, digestEstimate, digestRows, novelDigestRow, threadRows } from "./reading";
 import { freshness } from "./freshness";
 import { echoes, phraseRepetitions, presence } from "./stats";
-import { planQuestion, type Plan } from "./planner";
-import { ADVISE_INSTRUCTIONS, ADVISE_TASKS } from "./prompts";
+import { NEW_TOPIC, planQuestion, type Plan } from "./planner";
+import { ADVISE_INSTRUCTIONS, ADVISE_TASKS, CONVERSE_INSTRUCTIONS, CONVERSE_TASKS } from "./prompts";
+import { lastProposal, likesProposal, wantsAnalysis, wantsOptions, type AdvisorMode } from "./converse";
 import { deepInstructions, deepLimits, type ToolContext } from "./deep";
 
 /**
@@ -33,12 +37,27 @@ import { deepInstructions, deepLimits, type ToolContext } from "./deep";
  */
 
 const MAX_OUTPUT_TOKENS = 4000;
+/** Creative answers have more room (three paths with their sections), never a scene. */
+const CREATIVE_OUTPUT_TOKENS = 6000;
+/** Conversar: usually a few sentences, but room to develop an idea when asked (no word limit). */
+const CONVERSE_OUTPUT_TOKENS = 3000;
+/** Analytic actions: in Conversar, asking for one of them makes that turn an Analizar turn. */
+const ANALYTIC: AdvisorAction[] = ["analizar", "repeticiones", "coherencia", "cabos", "personajes"];
 const chars = (tokens: number) => Math.round(tokens * 3.5);
 
 /** Input budgets in tokens, per level (orientative, docs §4). */
-const RECIPES: Record<AdvisorAction, { focus: "chapter" | "tail" | "none"; digests: number; passages: number; data: ("presence" | "repetitions" | "threads")[] }> = {
+type Data = "presence" | "repetitions" | "threads" | "secrets";
+const RECIPES: Record<AdvisorAction, { focus: "chapter" | "tail" | "none"; digests: number; passages: number; data: Data[] }> = {
   analizar: { focus: "chapter", digests: 3000, passages: 2500, data: ["presence"] },
-  seguir: { focus: "tail", digests: 3500, passages: 1500, data: ["presence", "threads"] },
+  seguir: { focus: "tail", digests: 4000, passages: 2000, data: ["presence", "threads", "secrets"] },
+  // Consejero creativo (phase 1).
+  caminos: { focus: "tail", digests: 5000, passages: 2000, data: ["presence", "threads", "secrets"] },
+  explorar: { focus: "tail", digests: 3500, passages: 2500, data: ["threads"] },
+  consecuencias: { focus: "tail", digests: 4500, passages: 3000, data: ["presence", "threads"] },
+  giro: { focus: "tail", digests: 5000, passages: 2500, data: ["presence", "threads", "secrets"] },
+  oportunidades: { focus: "chapter", digests: 5000, passages: 2500, data: ["presence", "threads", "secrets"] },
+  tension: { focus: "chapter", digests: 3000, passages: 1500, data: ["threads", "secrets"] },
+  conversar: { focus: "tail", digests: 2500, passages: 1500, data: [] },
   repeticiones: { focus: "chapter", digests: 3000, passages: 0, data: ["repetitions"] },
   cabos: { focus: "tail", digests: 5000, passages: 2500, data: ["threads"] },
   coherencia: { focus: "chapter", digests: 3500, passages: 4000, data: [] },
@@ -60,6 +79,15 @@ export interface AdviceInput {
   conversation?: string;
   /** Lectura profunda: the model may ask for more material in rounds (default on). */
   deep?: boolean;
+  /** The conversation's cards (labelled, with states) and the proposal being developed. */
+  cards?: CardWithState[];
+  focus?: CardRef | null;
+  /** "Seguir con esta": the card the author chose with the button. */
+  anchorId?: string | null;
+  /** The author let the proposal in course go: this message doesn't inherit it. */
+  release?: boolean;
+  /** Conversar (a companion: brief, one proposal) or Analizar (the full evaluation). Default: analizar. */
+  mode?: AdvisorMode;
 }
 
 export interface Advice {
@@ -77,6 +105,14 @@ export interface Advice {
   tools: ToolContext;
   /** Chapters the recipe reads through their digest that have none, or a stale one. */
   unread: { id: string; title: string; estimate: number }[];
+  /** The card the author's message is about (resolved without AI), if any. */
+  anchor: Anchor | null;
+  /** A card the author discarded by name ("descarta la C"). */
+  discard: CardRef | null;
+  /** The mode this turn was answered in (an explicit analysis in Conversar switches it). */
+  mode: AdvisorMode;
+  /** Rounds of lectura profunda this turn may use (Conversar: one). */
+  deepRounds: number | null;
 }
 
 function clip(text: string, max: number) {
@@ -108,7 +144,61 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
   const plan = planQuestion(question, { characters: memory.characters, places: memory.places, chapters, threads });
   if (input.action) plan.action = input.action;
   for (const id of input.characterIds ?? []) if (memory.characters.some((c) => c.id === id) && !plan.characterIds.includes(id)) plan.characterIds.push(id);
-  const recipe = RECIPES[plan.action];
+
+  // The card the message is about (docs/consejero.md, Consejero creativo): the button,
+  // the author's words ("el segundo", "la B", "el último"), or the proposal in course,
+  // which a message inherits unless it names another card, asks for something new, or
+  // the author let it go. Resolved here, without AI; the panel shows how it was understood.
+  // Conversar is the default of the panel; asking for an analysis makes this one turn Analizar
+  // (and it is about the chapter, not about the proposal in course).
+  let mode: AdvisorMode = input.mode === "conversar" ? "conversar" : "analizar";
+  const asksAnalysis = mode === "conversar" && ((input.action && ANALYTIC.includes(input.action)) || (!input.action && !!question && wantsAnalysis(question)));
+  if (asksAnalysis) mode = "analizar";
+  const cards = input.cards ?? [];
+  let anchor: Anchor | null = null;
+  let discard: CardRef | null = null;
+  if (input.anchorId) {
+    const c = cards.find((x) => x.id === input.anchorId);
+    if (!c) throw new HttpError(400, "Esa propuesta no es de esta conversación.");
+    anchor = { id: c.id, label: c.label, title: c.title, how: "boton" };
+  } else if (question && !input.action) {
+    const ref = resolveReference(question, cards);
+    if (ref && isDiscard(question)) discard = ref.card;
+    else if (ref) anchor = { id: ref.card.id, label: ref.card.label, title: ref.card.title, how: ref.how };
+    else if (input.focus && !input.release && !asksAnalysis && !leavesFocus(question) && !(plan.explicit && NEW_TOPIC.includes(plan.explicit)))
+      anchor = { id: input.focus.id, label: input.focus.label, title: input.focus.title, how: "heredado" };
+  }
+  // «Me gusta», «esa», «desarróllala» with nothing named and nothing in course: the proposal
+  // just made.
+  if (!anchor && !discard && !asksAnalysis && !input.anchorId && !input.action && !input.release && question && likesProposal(question)) {
+    const last = lastProposal(cards);
+    if (last) anchor = { id: last.id, label: last.label, title: last.title, how: "esa" };
+  }
+  const anchored = anchor ? cards.find((c) => c.id === anchor!.id) ?? null : null;
+  if (!input.action && mode === "analizar") {
+    // About a card: develop it, unless the words ask for its consequences, a twist or tension.
+    if (anchored) plan.action = plan.explicit && ["consecuencias", "giro", "tension", "caminos"].includes(plan.explicit) ? plan.explicit : "explorar";
+    // A message without an intent in a creative conversation follows the conversation.
+    else if (!plan.explicit && cards.some((c) => c.kind === "alternative")) plan.action = "explorar";
+  } else if (!input.action) {
+    // Conversar: one proposal by default; several only when asked; the rest, a conversation.
+    const keep: AdvisorAction[] = ["seguir", "caminos", "consecuencias", "giro", "tension", "oportunidades"];
+    if (question && wantsOptions(question)) plan.action = "caminos";
+    else if (anchored) plan.action = plan.explicit && ["consecuencias", "giro", "tension"].includes(plan.explicit) ? plan.explicit : "explorar";
+    else plan.action = plan.explicit && keep.includes(plan.explicit) ? plan.explicit : "conversar";
+  }
+  // The people of the card it's about are involved too ("mete a Nacho": Nacho comes by name).
+  if (anchored) {
+    for (const c of memory.characters)
+      if (!plan.characterIds.includes(c.id) && nameMatcher(c)?.test(`${anchored.title}\n${anchored.body}`)) plan.characterIds.push(c.id);
+  }
+  const creative = CREATIVE_ACTIONS.includes(plan.action);
+  // Conversar reads less: the end of the chapter, the people involved, the conversation; no
+  // tables of presence or repetitions to comment on (twists and opportunities keep the secrets).
+  const recipe =
+    mode === "conversar"
+      ? { ...RECIPES.conversar, data: (["giro", "oportunidades"].includes(plan.action) ? ["secrets"] : []) as Data[] }
+      : RECIPES[plan.action];
 
   // Images become their description and separators `* * *`; the model never sees a marker.
   const { data: imgs, error } = await db().from("manuscript_images").select("id, alt, caption, decorative").eq("novel_id", novel.id);
@@ -148,7 +238,7 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
   const blocks: string[] = [];
   const sel = input.selection && input.selection.end > input.selection.start ? input.selection : null;
   let focusRange = { start: 0, end: current.content.length };
-  if (sel && (plan.action === "coherencia" || plan.action === "analizar")) {
+  if (sel && (plan.action === "coherencia" || plan.action === "analizar" || plan.action === "tension")) {
     const s = { start: Math.max(0, sel.start), end: Math.min(current.content.length, sel.end) };
     focusRange = nearbyRange(current.content, s);
     blocks.push(
@@ -190,15 +280,48 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
 
   // ---------- 2 · structure ----------
   const focusText = current.content.slice(focusRange.start, focusRange.end);
+  // Cronología (docs/cronologia-edades.md): the story's time at the open chapter and the
+  // ages of the characters in the memory block, plus each chapter's time.
+  const chron = await novelChronology(novel, { memory, chapters: rows.map((r) => ({ id: r.id, title: r.title })) });
+  const point = chron.result.points[index];
+  const time = chron.marks.length
+    ? {
+        now: formatPoint(point, novel.calendar),
+        estimated: point.estimated,
+        ages: new Map(
+          memory.characters
+            .map((c) => [c.id, describeAge(c, chron.result.ages.get(c.id)?.[index] ?? null, rows, novel.calendar)] as const)
+            .filter((x): x is readonly [string, string] => Boolean(x[1])),
+        ),
+      }
+    : null;
+
   const selected = selectMemory(memory, {
-    text: `${question}\n${focusText}`,
+    text: `${question}\n${anchored ? `${anchored.title}\n${anchored.body}\n` : ""}${focusText}`,
     characterIds: plan.characterIds,
     placeIds: plan.placeIds,
+    // "¿Qué pasa si…?" about someone: their relationships (with whoever is at the other
+    // end) and their facts, which is where consequences come from.
+    focus: plan.action === "consecuencias" && plan.characterIds.length > 0,
     chapterId: current.id,
     chapterOrder: chapters.map((c) => c.id),
   });
-  const mem = memoryBlock(selected, memory, outline, current.id);
+  const mem = memoryBlock(selected, memory, outline, current.id, time);
   if (mem) blocks.push(part(`Memoria de ${selected.characters.length} personaje${selected.characters.length === 1 ? "" : "s"}`, mem));
+  if (chron.marks.length) {
+    const lines = chapters.map((c, i) => {
+      const p = chron.result.points[i];
+      const where = i === index ? " (capítulo abierto: el «ahora» del relato)" : i > index ? " (posterior al capítulo abierto)" : "";
+      return `- ${label(i)}: ${formatPoint(p, novel.calendar)}${p.estimated ? " (estimado)" : ""}${chron.marks.find((m) => m.chapter_id === c.id)?.flashback ? " · retrospectiva" : ""}${where}`;
+    });
+    const warnings = chron.result.warnings.map((w) => `- ${w.message}`);
+    blocks.push(
+      part(
+        "Cronología",
+        `<cronologia>\nTiempo del relato por capítulo:\n${lines.join("\n")}${warnings.length ? `\n\nAvisos de cronología:\n${warnings.join("\n")}` : ""}\n(Las edades de los personajes en este punto están en sus fichas. Lo que propongas debe ser posible en este tiempo.)\n</cronologia>`,
+      ),
+    );
+  }
 
   const involved = new Set(plan.characterIds.length ? plan.characterIds : selected.characters.map((c) => c.id));
   const wanted: number[] = [];
@@ -298,6 +421,14 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
           .join("\n"),
     );
   }
+  if (recipe.data.includes("secrets")) {
+    // What a twist or an opportunity can be built from: secrets and what each one ignores.
+    const lines = memory.characters
+      .filter((c) => c.secrets.trim() || c.unaware.trim())
+      .slice(0, 15)
+      .map((c) => `- ${c.name}:${c.secrets.trim() ? ` secretos: ${clip(c.secrets.trim(), 300)}.` : ""}${c.unaware.trim() ? ` no sabe: ${clip(c.unaware.trim(), 300)}.` : ""}`);
+    if (lines.length) data.push(`Secretos y lo que cada personaje no sabe (de la Memoria):\n${lines.join("\n")}`);
+  }
   if (data.length) blocks.push(part("Datos calculados", `<datos>\n${data.join("\n\n")}\n</datos>`));
 
   // ---------- the conversation so far ----------
@@ -305,8 +436,22 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
     blocks.push(part("Conversación", `<conversacion>\n${input.conversation}\n</conversacion>`));
   }
 
+  // ---------- the proposal being developed ----------
+  if (anchored) {
+    blocks.push(
+      part(
+        `Propuesta en curso: ${anchored.label}`,
+        `<propuesta-en-curso etiqueta="${anchored.label}"${anchored.from ? ` version-de="${anchored.from}"` : ""}>\n${anchored.title}\n${anchored.body}\n</propuesta-en-curso>\n(Es una posibilidad que el autor está pensando, no un hecho de la novela.)`,
+      ),
+    );
+  }
+
   // ---------- task ----------
-  const task = ADVISE_TASKS[plan.action](label(index));
+  const next = anchored ? assignLabels(cards.map((c) => c.label), ["alternative"], anchored)[0].label : "";
+  const task = (mode === "conversar" ? (CONVERSE_TASKS[plan.action] ?? CONVERSE_TASKS.conversar) : ADVISE_TASKS[plan.action])(label(index), {
+    anchor: anchored ? { label: anchored.label, title: anchored.title, next } : null,
+    conversation: cards.some((c) => c.kind === "alternative"),
+  });
   const ask = question ? `${task}\n\nPregunta del autor: ${question}` : task;
   blocks.push(part("Tarea", `<tarea>\n${ask}\n</tarea>`));
 
@@ -322,7 +467,11 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
     .map((i) => ({ id: rows[i].id, title: label(i), estimate: digestEstimate(rows[i].content) }));
   if (unread.length) parts.push({ label: `${unread.length} capítulo${unread.length === 1 ? "" : "s"} sin ficha al día`, tokens: 0 });
 
+  const how = { boton: "con «Seguir con esta»", etiqueta: "por su letra", ordinal: "por su orden", ultimo: "la última", heredado: "la que estamos desarrollando", esa: "la que acabo de proponer" };
   const detail = [
+    input.mode === "conversar" && mode === "analizar" && "en modo Analizar, porque lo pediste",
+    anchor && `sobre ${anchor.label} «${clip(anchor.title, 60)}» (${how[anchor.how]})`,
+    discard && `descartar ${discard.label} «${clip(discard.title, 60)}»`,
     plan.characterIds.length && `personajes: ${plan.characterIds.map((id) => names.get(id)).join(", ")}`,
     plan.chapterIndexes.length && `capítulos: ${plan.chapterIndexes.map((i) => i + 1).join(", ")}`,
     plan.threadIds.length && `cabos: ${plan.threadIds.map((id) => threads.find((t) => t.id === id)?.title).join(", ")}`,
@@ -333,13 +482,16 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
   return {
     novelId: novel.id,
     request: {
-      instructions: input.deep === false ? ADVISE_INSTRUCTIONS : `${ADVISE_INSTRUCTIONS}\n\n${deepInstructions(deepLimits())}`,
+      instructions: (() => {
+        const base = mode === "conversar" ? CONVERSE_INSTRUCTIONS : ADVISE_INSTRUCTIONS;
+        return input.deep === false ? base : `${base}\n\n${deepInstructions({ ...deepLimits(), ...(mode === "conversar" ? { rounds: 1 } : {}) })}`;
+      })(),
       manuscript: null,
       project: frame,
       prompt: blocks.join("\n\n"),
       signal,
       role: "advise",
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      maxOutputTokens: mode === "conversar" ? CONVERSE_OUTPUT_TOKENS : creative ? CREATIVE_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS,
       cacheProject: true,
     },
     parts,
@@ -356,6 +508,10 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
       plain,
     },
     unread,
+    anchor,
+    discard,
+    mode,
+    deepRounds: mode === "conversar" ? 1 : null,
   };
 }
 

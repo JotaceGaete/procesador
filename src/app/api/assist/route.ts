@@ -3,6 +3,7 @@ import { byBody, novelHandler } from "@/lib/access";
 import { db, getChapterTexts, getMemory, getNovel, getOutline } from "@/lib/supabase";
 import { countWords, forModel, protectImages, separatorsForModel } from "@/lib/manuscript";
 import { HttpError, readJson } from "@/lib/http";
+import { briefBlock, parseBrief } from "@/lib/advisor/converse";
 import { compileGuide } from "@/lib/guide";
 import {
   buildManuscript,
@@ -177,6 +178,19 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
     const length = (SCENE_LENGTHS.some((l) => l.id === body.length) ? body.length : "media") as SceneLength;
     // "Ampliar": the scene the model already wrote, to develop with the same context.
     const draft = typeof body.expand === "string" && body.expand.trim() ? body.expand : null;
+    // «Enviar al Asistente»: the brief the author reviewed in the Consejero (optional).
+    let brief: string | null = null;
+    if (body.brief != null) {
+      try {
+        const b = parseBrief({ ...(body.brief as object), argument }, {
+          characters: memory.characters.map((c) => c.id),
+          places: memory.places.map((p) => p.id),
+        });
+        brief = briefBlock(b) || null;
+      } catch (e) {
+        throw new HttpError(400, (e as Error).message);
+      }
+    }
     if (draft && draft.length > MAX_SELECTION_CHARS) throw new HttpError(400, "La escena es demasiado larga para ampliarla.");
 
     // The Consejero's reading of the novel, as far as this point (docs/asistente-contexto.md).
@@ -305,7 +319,13 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       ...kind("relationships"),
       ...kind("facts"),
       ...(story.sections.threads ? [story.sections.threads] : []),
-      texts.argument,
+      brief
+        ? {
+            ...texts.argument,
+            tokens: texts.argument.tokens + estimateTokens(brief.length),
+            items: [...texts.argument.items, { label: "Encargo del Consejero", detail: brief.slice(0, 400) }],
+          }
+        : texts.argument,
       ...(draft ? [draftSection(draft)] : []),
       ...(whole ? [storyManuscriptSection(whole, chapterIndex)] : []),
     ];
@@ -336,6 +356,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
         threads: story.threads,
         providerNote: SCENE_PROVIDER_NOTES[body.provider as ProviderId] ?? null,
         draft,
+        brief,
       }),
       signal,
       role: "write",

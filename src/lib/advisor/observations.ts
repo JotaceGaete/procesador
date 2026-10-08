@@ -26,6 +26,30 @@ export function splitAnswer(text: string): { markdown: string; json: string | nu
 
 const str = (x: unknown, max: number) => (typeof x === "string" ? x.trim().slice(0, max) : "");
 
+/**
+ * The sections of a proposal (Consejero creativo), in the order the author reads them.
+ * They are stored inside the card's body, one per line, so no column is needed; the
+ * panel shows each label in bold.
+ */
+export const PROPOSAL_SECTIONS: [string, string][] = [
+  ["ocurre", "Qué podría ocurrir"],
+  ["porque", "Por qué funciona aquí"],
+  ["aprovecha", "Qué aprovecha"],
+  ["consecuencias", "Consecuencias"],
+  ["riesgos", "Riesgos"],
+  ["personajes", "Personajes"],
+];
+
+function sections(r: Record<string, unknown>): string {
+  return PROPOSAL_SECTIONS.map(([key, label]) => {
+    const v = r[key];
+    const text = Array.isArray(v) ? v.filter((x) => typeof x === "string").join(", ") : str(v, 900);
+    return text ? `${label}: ${text.replace(/\s*\n+\s*/g, " ")}` : "";
+  })
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function verifyObservations(
   raw: unknown,
   chapters: { id: string; content: string }[],
@@ -38,7 +62,8 @@ export function verifyObservations(
     if (!o || typeof o !== "object") continue;
     const r = o as Record<string, unknown>;
     const title = str(r.title ?? r.titulo, 200);
-    const body = str(r.body ?? r.explicacion, 3000);
+    // A proposal may come in sections; they go after whatever body it has.
+    const body = [str(r.body ?? r.explicacion, 3000), sections(r)].filter(Boolean).join("\n").slice(0, 3000);
     if (!title && !body) continue;
     const kind = (KINDS.includes(r.kind as ObservationKind) ? r.kind : "problem") as ObservationKind;
     let level = LEVELS.indexOf((r.confidence ?? r.confianza) as (typeof LEVELS)[number]);

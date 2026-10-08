@@ -1,6 +1,7 @@
 import "server-only";
 import { db } from "./supabase";
 import { HttpError } from "./http";
+import { resolveRelation } from "./relations";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -24,4 +25,14 @@ export async function setFactCharacters(factId: string, novelId: string, ids: st
     .from("fact_characters")
     .insert(ids.map((character_id) => ({ fact_id: factId, character_id, novel_id: novelId })));
   if (ins.error) throw ins.error;
+}
+
+/**
+ * Relaciones personalizadas (docs/relaciones.md): the kind to store, as the form does it, so no
+ * path writes a trivial duplicate («Amante  de» when the novel already says «amante de»).
+ */
+export async function relationKind(novelId: string, typed: string, except?: string): Promise<string> {
+  const { data, error } = await db().from("relationships").select("id, kind").eq("novel_id", novelId).order("created_at");
+  if (error) throw error;
+  return resolveRelation(typed, data, except).kind;
 }
