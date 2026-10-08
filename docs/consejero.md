@@ -784,3 +784,28 @@ sin IA.
 - **Base de datos:** `supabase/actualizar-argumento.sql`, una sola instrucción aditiva e idempotente
   (`alter table public.novels add column if not exists plot text not null default ''`); también en
   `schema.sql` y `verificar.sql`. Las pruebas de esquema la ejecutan dos veces sobre bases antiguas.
+
+## Criterio literario: novelista con oficio y editor exigente
+
+Un solo bloque compartido por Analizar y Conversar (`CRAFT` en `src/lib/advisor/prompts.ts`):
+
+- Si el autor pide consejo, el Consejero **recomienda una opción** y la defiende con razones
+  narrativas (estructura, ritmo, personajes, tensión, originalidad, verosimilitud, efecto en el
+  lector). Varias opciones, solo si las pide.
+- **Ni complaciente ni contrario por sistema:** reconoce lo que funciona de una idea del autor y
+  ayuda a desarrollarla; si ve una solución mejor, la plantea una vez, con su razón. Si el autor
+  insiste, trabaja con su decisión y no la reabre.
+- **Jerarquía de la novela:** protagonismo, tono, cuándo presentar a cada personaje y qué
+  revelaciones reservar; lo más dramático del plan no es por eso el mejor comienzo.
+- Distingue lo escrito, lo previsto en el plan y lo que él propone ahora; no cierra con certezas
+  las motivaciones que el plan deja abiertas.
+- Prosa natural, sin plantillas ni tono académico; la decisión final es del autor.
+
+Se sustituyeron las reglas que pedían lo contrario («no las discutes ni las vuelves a evaluar»,
+«preguntas y posibilidades, no veredictos»). En Analizar, *Cómo continuar* y *Giro* recomiendan
+uno (A) y añaden B o C solo si de verdad son distintos; *Direcciones* y, en Conversar, *Dame
+opciones* siguen dando varias, diciendo cuál recomienda.
+
+Coste: ≈300 tokens más de instrucciones por consulta (Analizar 1.384 → 1.684; Conversar
+1.292 → 1.598), en el prefijo que se reutiliza de la caché; un turno medio de Conversar en la
+medición pasa de ≈14.100 a ≈14.400 tokens de entrada. Ninguna llamada nueva.

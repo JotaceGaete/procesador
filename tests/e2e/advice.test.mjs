@@ -116,7 +116,7 @@ test("¿Cómo continúo?: three paths as alternatives, never the continuation it
   const alternatives = cardsOf(list).items.filter((o) => o.kind === "alternative");
   assert.equal(alternatives.length, 3);
   const prompt = (await aiLog())[0].body.messages[0].content;
-  assert.match(prompt, /Propón exactamente 3 caminos distintos/);
+  assert.match(prompt, /Recomienda el camino que tú seguirías[\s\S]*defiende tu recomendación con razones narrativas/);
   assert.match(prompt, /No escribas la escena ni la continuación/);
   assert.match(prompt, /Cabos abiertos y capítulos sin aparecer:\n- «La carta de Marta»: última vez en el 1, hace 2 capítulos/);
 });

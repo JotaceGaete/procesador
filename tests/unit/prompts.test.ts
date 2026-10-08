@@ -105,3 +105,23 @@ test("relaciones personalizadas: in the Asistente's memory block like any other 
   const block = memoryBlock(selected as never, { characters: [naty, emily], relationships: selected.relationships, places: [], facts: [] } as never, [], null);
   assert.ok(block.includes("Naty → Ex amante de → Emily"), block);
 });
+
+test("the Consejero, in both modes, is a demanding novelist and editor: recommends, argues, questions, neither agrees nor contradicts by default", async () => {
+  const { ADVISE_INSTRUCTIONS, CONVERSE_INSTRUCTIONS, ADVISE_TASKS, CONVERSE_TASKS } = await import("@/lib/advisor/prompts");
+  for (const text of [ADVISE_INSTRUCTIONS, CONVERSE_INSTRUCTIONS]) {
+    assert.match(text, /novelista experimentado y (un )?editor (literario )?exigente/);
+    assert.match(text, /recomienda UNA opción y defiéndela con razones narrativas concretas: estructura, ritmo, personajes, tensión, originalidad, verosimilitud, efecto en el lector\. Varias opciones, sólo si las pide\./);
+    assert.match(text, /No le des la razón por defecto ni le lleves la contraria por sistema\. Si su idea es buena, di qué la hace buena/);
+    assert.match(text, /Lo más dramático del plan no es por eso el mejor comienzo ni el siguiente paso/);
+    assert.match(text, /distingue lo escrito, lo previsto en el plan y lo que tú propones ahora/);
+    assert.match(text, /no las cierres con certezas/);
+    assert.match(text, /sin plantillas ni tono académico\. La decisión final es siempre del autor/);
+    assert.doesNotMatch(text, /no las discutes ni las vuelves a evaluar|preguntas y posibilidades, no de veredictos|amigo escritor/, "nothing that asks it to agree");
+  }
+  assert.equal(CONVERSE_INSTRUCTIONS.match(/Criterio, como novelista/g)?.length, 1, "the criteria once");
+  // Several options only when asked: «¿cómo sigo?» gets one, defended; «dame opciones» gets several, with a recommendation.
+  assert.match(CONVERSE_TASKS.seguir("el capítulo 3"), /Propón UNA dirección concreta/);
+  assert.match(CONVERSE_TASKS.caminos("el capítulo 3"), /cuál recomiendas y por qué/);
+  assert.match(ADVISE_TASKS.seguir("el capítulo 3"), /Recomienda el camino que tú seguirías[\s\S]*sólo si son de verdad distintos/);
+  assert.doesNotMatch(ADVISE_TASKS.seguir("el capítulo 3"), /exactamente 3/);
+});

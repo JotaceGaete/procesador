@@ -73,9 +73,9 @@ test("«¿Cómo puedo continuar?» in Conversar: one proposal, brief, no analysi
   assert.equal(cardsOf(list).items.length, 1, "one proposal, not three");
   const req = await lastCall();
   assert.match(req.system[0].text, /^<consejero>\nModo: conversar\./);
-  assert.match(req.system[0].text, /Una propuesta principal/);
+  assert.match(req.system[0].text, /recomienda UNA opción y defiéndela con razones narrativas concretas[\s\S]*Varias opciones, sólo si las pide/);
   assert.doesNotMatch(req.system[0].text, /De 0 a 8 observaciones/, "not the Analizar format");
-  assert.match(req.messages[0].content, /Propón UNA dirección concreta/);
+  assert.match(req.messages[0].content, /Propón UNA dirección concreta[\s\S]*por qué es la mejor ahora para esta novela \(no necesariamente la más dramática\)/);
   assert.doesNotMatch(req.messages[0].content, /<datos>/, "no presence or repetition tables to comment on");
   assert.equal(req.max_tokens, 3000);
   s.conversation = list.find((e) => e.type === "saved").conversationId;
@@ -110,8 +110,9 @@ test("2. a decision of the author is kept as the plan, developed (not audited), 
   await say("¿Cómo lo introduzco?");
   const req = await lastCall();
   assert.match(req.messages[0].content, new RegExp(`Decisiones del autor en esta conversación \\(PLAN[^\\n]*\\n- ${decision.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-  assert.match(req.system[0].text, /Las decisiones que el autor toma en la conversación son su plan: no las discutes ni las vuelves a evaluar/);
-  assert.match(req.system[0].text, /Sólo si esa decisión contradice el canon[^\n]*lo dices en una frase/);
+  assert.match(req.system[0].text, /Las decisiones que el autor toma en la conversación son su plan: le ayudas a que funcionen y, si ves algo mejor, lo dices una vez/);
+  assert.match(req.system[0].text, /No le des la razón por defecto ni le lleves la contraria por sistema/);
+  assert.match(req.system[0].text, /Si esa decisión contradice el canon[^\n]*lo dices en una frase/);
   assert.match(req.messages[0].content, /Waldo nunca conoció a Casandra\./, "the approved fact it contradicts is in the context");
   assert.equal(await canon(), snapshot, "nothing written in the manuscript, Memoria, facts or threads");
 });
