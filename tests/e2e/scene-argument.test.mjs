@@ -1,7 +1,7 @@
 // The argument of "Escribir escena" lives exactly as long as the scene it asks for:
 // kept while generating and while the proposal is pending (to edit it or ask again),
 // emptied only once the scene is inserted in the manuscript, kept if inserting fails or
-// the proposal is discarded with «Limpiar». Same on a desktop and on a phone.
+// the proposal is discarded with «Descartar». Same on a desktop and on a phone.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
@@ -122,10 +122,10 @@ for (const device of DEVICES) {
     await s.ctx.close();
   });
 
-  test(`${device.name}: «Limpiar» quita la propuesta y conserva el argumento para reformularlo`, async () => {
+  test(`${device.name}: «Descartar» quita la propuesta y conserva el argumento para reformularlo`, async () => {
     const s = await open(device);
     await generate(s);
-    await s.press(s.panel.getByRole("button", { name: "Limpiar" }));
+    await s.press(s.panel.getByRole("button", { name: "Descartar" }));
     assert.equal(await s.panel.locator(".result").count(), 0);
     assert.equal(await s.argument.inputValue(), A);
     await s.ctx.close();
