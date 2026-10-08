@@ -19,6 +19,12 @@ export const POST = handler<Ctx>(async (_request, { params }) => {
 
   const copied: string[] = [];
   try {
+    // The Argumento general is copied here, not in duplicate_novel: a column added without
+    // touching the function (supabase/actualizar-argumento.sql).
+    if (source.plot) {
+      const { error: plotError } = await db().from("novels").update({ plot: source.plot }).eq("id", id);
+      if (plotError) throw plotError;
+    }
     for (const [from, to] of copies) {
       const { error: copyError } = await bucket().copy(from, to);
       if (copyError) throw copyError;

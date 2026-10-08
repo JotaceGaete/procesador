@@ -765,3 +765,47 @@ Coste efectivo: la petición a precio normal, el prefijo a 1,25× cuando se escr
 cuando se reutiliza. La salida no cambia (tope de 3.000 tokens en Conversar, 4.000–6.000 en
 Analizar). Ninguna llamada de IA nueva: la visión general, los detalles y la continuidad se calculan
 sin IA.
+
+## Argumento general · Fase 2: su propia sección (`novels.plot`)
+
+- **Dónde:** *Argumento general*, en la lista de capítulos, abre la ventana de la novela en su pestaña
+  (también se llega desde *Novela*). Un texto largo (hasta 100.000 caracteres) para toda la trama,
+  los secretos y el desenlace previsto. Si está vacío y hay sinopsis, *Empezar desde la sinopsis* la
+  copia para desarrollarla (la sinopsis no cambia).
+- **Quién lo lee:** solo el Consejero, como parte del *plan del autor*, con el mayor peso (argumento
+  6, sinopsis 3, notas 1). La visión general sube a ≈3.000 tokens cuando hay argumento (va en el
+  marco cacheado: después del primer turno cuesta una décima parte) y los pasajes pertinentes a
+  ≈2.000 en Conversar y ≈3.500 en Analizar, cada uno con su título («Argumento general:»). Un
+  argumento de 100.000 caracteres nunca va entero.
+- **El Asistente nunca lo recibe** (no está en la Guía Maestra ni en «Ver contexto»); probado en
+  escenas, reescrituras y análisis.
+- **Se copia** al duplicar la novela (desde la app, sin cambiar `duplicate_novel`) y va en la copia de
+  seguridad (`procesador.json`).
+- **Base de datos:** `supabase/actualizar-argumento.sql`, una sola instrucción aditiva e idempotente
+  (`alter table public.novels add column if not exists plot text not null default ''`); también en
+  `schema.sql` y `verificar.sql`. Las pruebas de esquema la ejecutan dos veces sobre bases antiguas.
+
+## Criterio literario: novelista con oficio y editor exigente
+
+Un solo bloque compartido por Analizar y Conversar (`CRAFT` en `src/lib/advisor/prompts.ts`):
+
+- Si el autor pide consejo, el Consejero **recomienda una opción** y la defiende con razones
+  narrativas (estructura, ritmo, personajes, tensión, originalidad, verosimilitud, efecto en el
+  lector). Varias opciones, solo si las pide.
+- **Ni complaciente ni contrario por sistema:** reconoce lo que funciona de una idea del autor y
+  ayuda a desarrollarla; si ve una solución mejor, la plantea una vez, con su razón. Si el autor
+  insiste, trabaja con su decisión y no la reabre.
+- **Jerarquía de la novela:** protagonismo, tono, cuándo presentar a cada personaje y qué
+  revelaciones reservar; lo más dramático del plan no es por eso el mejor comienzo.
+- Distingue lo escrito, lo previsto en el plan y lo que él propone ahora; no cierra con certezas
+  las motivaciones que el plan deja abiertas.
+- Prosa natural, sin plantillas ni tono académico; la decisión final es del autor.
+
+Se sustituyeron las reglas que pedían lo contrario («no las discutes ni las vuelves a evaluar»,
+«preguntas y posibilidades, no veredictos»). En Analizar, *Cómo continuar* y *Giro* recomiendan
+uno (A) y añaden B o C solo si de verdad son distintos; *Direcciones* y, en Conversar, *Dame
+opciones* siguen dando varias, diciendo cuál recomienda.
+
+Coste: ≈300 tokens más de instrucciones por consulta (Analizar 1.384 → 1.684; Conversar
+1.292 → 1.598), en el prefijo que se reutiliza de la caché; un turno medio de Conversar en la
+medición pasa de ≈14.100 a ≈14.400 tokens de entrada. Ninguna llamada nueva.

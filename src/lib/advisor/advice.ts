@@ -15,7 +15,7 @@ import { chapterRows, digestEstimate, digestRows, novelDigestRow, threadRows } f
 import { freshness } from "./freshness";
 import { echoes, phraseRepetitions, presence } from "./stats";
 import { NEW_TOPIC, planQuestion, type Plan } from "./planner";
-import { planDetails, planOverview, questionWords } from "./plan-text";
+import { planCast, planDetails, planOverview, questionNames, questionWords } from "./plan-text";
 import { ADVISE_INSTRUCTIONS, ADVISE_TASKS, CONVERSE_INSTRUCTIONS, CONVERSE_TASKS } from "./prompts";
 import { lastProposal, likesProposal, wantsAnalysis, wantsOptions, type AdvisorMode } from "./converse";
 import { deepInstructions, deepLimits, type ToolContext } from "./deep";
@@ -68,10 +68,12 @@ const RECIPES: Record<AdvisorAction, { focus: "chapter" | "tail" | "none"; diges
   personajes: { focus: "chapter", digests: 4000, passages: 2500, data: ["presence"] },
 };
 const FOCUS_TOKENS = 18_000;
-/** The author's plan (synopsis and notes): its global view, in the cached frame, and the
- *  paragraphs that matter for this turn, in the prompt (docs/consejero.md, «Argumento general»). */
-const PLAN_OVERVIEW_TOKENS = 2000;
-const PLAN_DETAIL_TOKENS = { conversar: 1500, analizar: 2500 };
+/** The author's plan (Argumento general, synopsis and notes): its global view, in the cached
+ *  frame (larger with an Argumento general: it is cached, so cheap after the first turn), and
+ *  the paragraphs that matter for this turn, in the prompt (docs/consejero.md, «Argumento general»). */
+const PLAN_OVERVIEW_TOKENS = { base: 2000, withPlot: 3000 };
+const PLAN_CAST_TOKENS = 600;
+const PLAN_DETAIL_TOKENS = { base: { conversar: 1500, analizar: 2500 }, withPlot: { conversar: 2000, analizar: 3500 } };
 const TAIL_CHARS = 8000;
 const NAMED_CHAPTERS_TOKENS = 14_000;
 
@@ -234,18 +236,33 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
     return `- ${label(i)} · ${roundedWords(countWords(c.content))}${who ? ` · aparecen: ${who}` : ""} · ${clip(line, 220)}${stale}`;
   });
   const threadLines = threads.map((t) => threadLine(t, chapters, label));
-  // The author's plan: the synopsis and the notes (never sent to the Asistente). Its global
-  // view goes in the frame, once; the details that matter, in the prompt.
-  // Each text keeps its own premise and ending (the synopsis' last paragraph is its ending).
-  const planTexts = [
-    { title: "Sinopsis", text: novel.synopsis.trim(), share: novel.notes.trim() ? 0.75 : 1 },
-    { title: "Notas del autor", text: novel.notes.trim(), share: novel.synopsis.trim() ? 0.25 : 1 },
-  ]
-    .filter((x) => x.text)
-    .map((x) => ({ ...x, overview: planOverview(x.text, Math.floor(chars(PLAN_OVERVIEW_TOKENS) * x.share)) }));
+  // The author's plan: the Argumento general, the synopsis and the notes (never sent to the
+  // Asistente). Its global view goes in the frame, once; the details that matter, in the prompt.
+  // Each text keeps its own premise and ending, with a share of the budget by its weight.
+  const planSources = [
+    { title: "Argumento general", text: (novel.plot ?? "").trim(), weight: 6 },
+    { title: "Sinopsis", text: novel.synopsis.trim(), weight: 3 },
+    { title: "Notas del autor", text: novel.notes.trim(), weight: 1 },
+  ].filter((x) => x.text);
+  const totalWeight = planSources.reduce((n, x) => n + x.weight, 0);
+  const overviewBudget = chars(novel.plot?.trim() ? PLAN_OVERVIEW_TOKENS.withPlot : PLAN_OVERVIEW_TOKENS.base);
+  const planTexts = planSources
+    .map((x) => ({ ...x, share: x.weight / totalWeight }))
+    .map((x) => ({ ...x, overview: planOverview(x.text, Math.floor(overviewBudget * x.share)) }));
+  const cast = planCast(
+    planTexts.map((x) => x.text).join("\n\n"),
+    memory.characters.flatMap((c) => [c.name, ...c.aliases.split(",")]).filter((n) => n.trim()),
+    chars(PLAN_CAST_TOKENS),
+    planTexts.map((x) => x.overview.text).join("\n"),
+  );
   const overview = {
     whole: planTexts.every((x) => x.overview.whole),
-    text: planTexts.map((x) => `${x.title}:\n${x.overview.text}`).join("\n\n"),
+    text: [
+      planTexts.map((x) => `${x.title}:\n${x.overview.text}`).join("\n\n"),
+      cast && `Personajes del plan que aún no están en la Memoria (primera mención):\n${cast}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
   };
   const frame = [
     `## Guía Maestra (estilo)\n${compileGuide(novel)}`,
@@ -333,6 +350,15 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
   });
   const mem = memoryBlock(selected, memory, outline, current.id, time);
   if (mem) blocks.push(part(`Memoria de ${selected.characters.length} personaje${selected.characters.length === 1 ? "" : "s"}`, mem));
+  // Where the author is: what the plan puts later has not happened (not in the cached frame:
+  // it changes with the chapter).
+  if (overview.text)
+    blocks.push(
+      part(
+        "Posición en la novela",
+        `<posicion>El autor tiene abierto el capítulo ${index + 1} de ${chapters.length}. Del plan del autor, lo que no está en el manuscrito ni en las fichas hasta aquí todavía no ha ocurrido: trátalo como intención, sin adelantar sus revelaciones.</posicion>`,
+      ),
+    );
   // The plan's paragraphs about the people and places in play, or the question's words.
   if (!overview.whole) {
     const matchers = [
@@ -340,13 +366,17 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
       ...memory.places.filter((p) => plan.placeIds.includes(p.id) || selected.places.some((x) => x.id === p.id)),
     ]
       .map(nameMatcher)
-      .filter((m): m is RegExp => Boolean(m));
-    const budget = chars(mode === "conversar" ? PLAN_DETAIL_TOKENS.conversar : PLAN_DETAIL_TOKENS.analizar);
+      .filter((m): m is RegExp => Boolean(m))
+      // And whoever the author names in the question, even if only the plan knows them.
+      .concat(questionNames(question));
+    const detail = novel.plot?.trim() ? PLAN_DETAIL_TOKENS.withPlot : PLAN_DETAIL_TOKENS.base;
+    const budget = chars(mode === "conversar" ? detail.conversar : detail.analizar);
     const words = questionWords(`${question} ${anchored ? anchored.title : ""}`);
     const details = planTexts
       .filter((x) => !x.overview.whole)
-      .map((x) => planDetails(x.text, { matchers, words, budget: Math.floor(budget * x.share), skip: x.overview.full }))
-      .filter(Boolean)
+      .map((x) => ({ x, d: planDetails(x.text, { matchers, words, budget: Math.floor(budget * x.share), skip: x.overview.full, current: index + 1 }) }))
+      .filter(({ d }) => d)
+      .map(({ x, d }) => `${x.title}:\n${d}`)
       .join("\n\n");
     if (details)
       blocks.push(part("Plan del autor: pasajes pertinentes", `<plan-del-autor-detalles>\n${details}\n</plan-del-autor-detalles>\n(Intención del autor, no canon: lo que aún no ha ocurrido no se presenta como ocurrido.)`));

@@ -76,7 +76,7 @@ export function backupTexts(data: BackupData): { name: string; text: string }[] 
         "",
         "novela.md            La novela completa para leer (cursivas entre *asteriscos*, cambios de escena como * * *).",
         "capitulos/           Cada capítulo tal como lo guarda Procesador, para recuperar su texto exacto.",
-        "procesador.json      Todos los datos: novela, Guía Maestra, capítulos, Memoria, lectura del Consejero e imágenes.",
+        "procesador.json      Todos los datos: novela, Argumento general, Guía Maestra, capítulos, Memoria, lectura del Consejero e imágenes.",
         "imagenes/            Los archivos originales de las imágenes, tal como se subieron.",
         "",
       ].join("\n"),

@@ -18,6 +18,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const read = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
 const SCHEMA = read("supabase/schema.sql");
 const MIGRATION = read("supabase/actualizar-consejero.sql");
+const PLOT_MIGRATION = read("supabase/actualizar-argumento.sql");
 const VERIFY = read("supabase/verificar.sql");
 const OLD = {
   "2b": read("tests/schema/fixtures/schema-2b.sql"),
@@ -31,7 +32,7 @@ const TABLES = [
 ];
 /** What only schema.sql brings (versions and trash), not actualizar-consejero.sql. */
 const AFTER_CONSEJERO =
-  /chapter_versions|save_chapter_version|trash_chapter|chapter_trash|restore_chapter|chapter_version_auto|chapters_version|time_marks|novels\.calendar|dismissed_warnings|age_anchor|age_approx|characters\.death|anterior a la cronología|novels\.book|anterior a la exportación/;
+  /chapter_versions|save_chapter_version|trash_chapter|chapter_trash|restore_chapter|chapter_version_auto|chapters_version|time_marks|novels\.calendar|dismissed_warnings|age_anchor|age_approx|characters\.death|anterior a la cronología|novels\.book|anterior a la exportación|novels\.plot/;
 
 let bin, dir, port;
 
@@ -415,4 +416,24 @@ test("exportación: los datos del libro se copian al duplicar, con la portada ap
   must(db, `update novels set book = '{"coverAssetId":"55555555-5555-4555-8555-555555555555"}' where id = '${novel}'`);
   must(db, `select public.duplicate_novel('${novel}', 'Copia 2')`);
   assert.equal(must(db, "select coalesce(book->>'coverAssetId', 'null') from novels where title = 'Copia 2'"), "null");
+});
+
+test("argumento general: actualizar-argumento.sql adds novels.plot (empty), twice, without touching data; the duplicate still works", () => {
+  for (const state of ["completamente actualizada (fases 2–4, con los bucles antiguos)", "Consejero fase 1"]) {
+    const db = newDb();
+    STATES[state](db);
+    must(db, SCHEMA.replace(/alter table public\.novels add column if not exists plot[^;]*;/, ""));
+    const before = fingerprint(db);
+    assert.equal(must(db, "select count(*) from information_schema.columns where table_name = 'novels' and column_name = 'plot'"), "0", "the base before");
+    const title = must(db, "select coalesce(string_agg(title || synopsis, '|' order by id), '') from novels");
+    must(db, PLOT_MIGRATION);
+    must(db, PLOT_MIGRATION);
+    assertComplete(db);
+    assertDataKept(db, before);
+    assert.equal(must(db, "select coalesce(string_agg(title || synopsis, '|' order by id), '') from novels"), title, "nothing else changes");
+    assert.equal(must(db, "select count(*) from novels where plot <> ''"), "0", "empty for every novel");
+    assert.equal(must(db, "select is_nullable || ' ' || data_type from information_schema.columns where table_name = 'novels' and column_name = 'plot'"), "NO text");
+    if (before.novels) assert.ok(must(db, "select public.duplicate_novel('11111111-1111-4111-8111-111111111111', 'Copia')"));
+    assert.ok(!run(db, "update novels set plot = null").ok, "never null");
+  }
 });

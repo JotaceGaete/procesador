@@ -137,7 +137,7 @@ npm run test:e2e    # de punta a punta (~2–3 min): API, seguridad e interfaz e
 npm run test:all    # todas
 ```
 
-`npm run test:schema` levanta un Postgres temporal y comprueba que `supabase/schema.sql` y `supabase/actualizar-consejero.sql` se pueden ejecutar completos, dos veces, sin errores y sin alterar los datos.
+`npm run test:schema` levanta un Postgres temporal y comprueba que `supabase/schema.sql` y `supabase/actualizar-consejero.sql` y `supabase/actualizar-argumento.sql` se pueden ejecutar completos, dos veces, sin errores y sin alterar los datos.
 - **Estados de partida:** base vacía; base anterior al Consejero (2b); base de la fase 1; base actualizada a medias a mano; y base con las fases 2–4 (versiones guardadas en `tests/schema/fixtures`).
 - **Modos de ejecución:** el archivo entero como una sola consulta (como el SQL Editor de Supabase) y sentencia a sentencia (como `psql`).
 - **Regresión:** una ejecución que llega al bloque de triggers sin `story_threads` ya no da `relation "public.story_threads" does not exist`.

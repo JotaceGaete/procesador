@@ -16,6 +16,8 @@ with expected(kind, object) as (
     ('columna', 'characters.age_anchor'), ('columna', 'characters.age_approx'), ('columna', 'characters.death'),
     -- Exportación editorial (docs/exportacion.md)
     ('columna', 'novels.book'),
+    -- Argumento general (docs/consejero.md)
+    ('columna', 'novels.plot'),
     ('columna', 'novels.auto_digest'), ('columna', 'assets.orientation'), ('columna', 'chapters.revision'),
     ('columna', 'facts.status'), ('columna', 'chapter_digests.text_sketch'), ('columna', 'advisor_observations.position'),
     ('función', 'duplicate_novel'), ('función', 'sync_chapter_images'), ('función', 'replace_asset_uses'),

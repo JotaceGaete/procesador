@@ -111,7 +111,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
     const chosen = asked === "visual" || asked === "texto" ? asked : pref === "visual" || pref === "texto" ? pref : null;
     return chosen !== "texto";
   });
-  const [modal, setModal] = useState<"novel" | "memory" | "images" | "versions" | "trash" | "chronology" | null>(null);
+  const [modal, setModal] = useState<"novel" | "plot" | "memory" | "images" | "versions" | "trash" | "chronology" | null>(null);
   const editorRef = useRef<EditorHandle>(null);
 
   const openChapter = useCallback(async (id: string) => {
@@ -507,6 +507,10 @@ export default function Workspace({ novelId }: { novelId: string }) {
           if (narrow()) setNavOpen(false);
           setModal("novel");
         }}
+        onPlot={() => {
+          if (narrow()) setNavOpen(false);
+          setModal("plot");
+        }}
         beforeDeleteCurrent={async (neighborId) => {
           if (!(await leaveChapter())) return false;
           await openChapter(neighborId);
@@ -741,9 +745,10 @@ export default function Workspace({ novelId }: { novelId: string }) {
         onClearSelection={clearSelection}
       />
 
-      {modal === "novel" && (
+      {(modal === "novel" || modal === "plot") && (
         <NovelModal
           novel={novel}
+          initialTab={modal === "plot" ? "argumento" : "novela"}
           onClose={() => setModal(null)}
           onSaved={(n) => {
             setNovel(n);

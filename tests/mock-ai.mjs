@@ -180,7 +180,7 @@ function adviceReply(system, user) {
   }
   const anchorTask = task.match(/sigue con la propuesta (\S+) \(«([^»]*)»\)/);
   let creative = null;
-  if (/Propón exactamente 3 (caminos|direcciones)/.test(task)) creative = ["Seguir el conflicto", "Recuperar un cabo", "Cambiar de personaje"].map((t) => proposal(t));
+  if (/Propón exactamente 3 direcciones|Recomienda el camino que tú seguirías/.test(task)) creative = ["Seguir el conflicto", "Recuperar un cabo", "Cambiar de personaje"].map((t) => proposal(t));
   else if (task.includes("necesita un giro")) creative = ["Giro: el secreto sale", "Giro: un testigo", "Giro: la carta"].map((t) => proposal(t));
   else if (task.includes("subir la tensión")) creative = ["Un plazo", "Alguien sabe"].map((t) => proposal(t));
   else if (task.includes("Busca oportunidades")) creative = ["Un secreto sin usar", "Una relación sin escenas", "Un cabo olvidado"].map((t) => proposal(t, { kind: "opportunity" }));

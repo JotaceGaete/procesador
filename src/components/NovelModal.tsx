@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { Guide, GuideKey, Novel } from "@/lib/types";
+import { PLOT_MAX, type Guide, type GuideKey, type Novel } from "@/lib/types";
+import { countWords } from "@/lib/manuscript";
 import { GUIDE_SECTIONS, compileGuide } from "@/lib/guide";
 import { api } from "@/lib/client";
 import Modal from "./Modal";
@@ -10,12 +11,22 @@ import BackupButton from "./BackupButton";
 import BookExport from "./BookExport";
 import { cleanBook, type BookMeta } from "@/lib/book";
 
-type Tab = "novela" | "guia" | "libro";
+export type NovelTab = "novela" | "argumento" | "guia" | "libro";
 
-/** Title, synopsis and notes, the Guía Maestra (all optional, in plain writer's terms), and the book: its data and the exports. */
-export default function NovelModal({ novel, onClose, onSaved }: { novel: Novel; onClose(): void; onSaved(n: Novel): void }) {
-  const [tab, setTab] = useState<Tab>("novela");
-  const [form, setForm] = useState({ title: novel.title, synopsis: novel.synopsis, notes: novel.notes });
+/** Title, synopsis and notes, the Argumento general, the Guía Maestra (all optional, in plain writer's terms), and the book: its data and the exports. */
+export default function NovelModal({
+  novel,
+  initialTab = "novela",
+  onClose,
+  onSaved,
+}: {
+  novel: Novel;
+  initialTab?: NovelTab;
+  onClose(): void;
+  onSaved(n: Novel): void;
+}) {
+  const [tab, setTab] = useState<NovelTab>(initialTab);
+  const [form, setForm] = useState({ title: novel.title, synopsis: novel.synopsis, notes: novel.notes, plot: novel.plot ?? "" });
   const [guide, setGuide] = useState<Guide>(novel.guide ?? {});
   const savedBook = cleanBook(novel.book);
   const [book, setBook] = useState<BookMeta>(savedBook);
@@ -26,6 +37,7 @@ export default function NovelModal({ novel, onClose, onSaved }: { novel: Novel; 
     form.title !== novel.title ||
     form.synopsis !== novel.synopsis ||
     form.notes !== novel.notes ||
+    form.plot !== (novel.plot ?? "") ||
     JSON.stringify(guide) !== JSON.stringify(novel.guide ?? {}) ||
     JSON.stringify(book) !== JSON.stringify(savedBook);
 
@@ -51,6 +63,9 @@ export default function NovelModal({ novel, onClose, onSaved }: { novel: Novel; 
         <button className={tab === "novela" ? "on" : undefined} onClick={() => setTab("novela")}>
           Novela
         </button>
+        <button className={tab === "argumento" ? "on" : undefined} onClick={() => setTab("argumento")}>
+          Argumento general
+        </button>
         <button className={tab === "guia" ? "on" : undefined} onClick={() => setTab("guia")}>
           Guía Maestra
         </button>
@@ -75,9 +90,9 @@ export default function NovelModal({ novel, onClose, onSaved }: { novel: Novel; 
               />
             </label>
             <p className="muted small field-help">
-              La sinopsis y las notas son tu plan: las lee el Consejero, como intención (no como algo que ya ocurrió). El
-              Asistente no las recibe, para que una escena no adelante lo que aún no debe saberse; lo que necesite saber de
-              siempre va en la Memoria (personajes, relaciones, hechos) y en lo que el Consejero le envía.
+              La sinopsis y las notas son tu plan, como el Argumento general: las lee el Consejero, como intención (no como algo
+              que ya ocurrió). El Asistente no las recibe, para que una escena no adelante lo que aún no debe saberse; lo que
+              necesite saber de siempre va en la Memoria (personajes, relaciones, hechos) y en lo que el Consejero le envía.
             </p>
             <label>
               <span>Notas</span>
@@ -89,6 +104,41 @@ export default function NovelModal({ novel, onClose, onSaved }: { novel: Novel; 
               />
             </label>
             <BackupButton novelId={novel.id} />
+          </>
+        ) : tab === "argumento" ? (
+          <>
+            <p className="muted small">
+              Toda la trama, de principio a fin: lo que pasa, los secretos, lo que cada uno oculta y el desenlace que tienes
+              previsto. Solo lo lee el Consejero, como tu plan (no como algo ya escrito), para entender hacia dónde va la novela.
+              El Asistente nunca lo recibe: una escena no puede adelantar lo que no conoce.
+            </p>
+            <label>
+              <span>Argumento general</span>
+              <textarea
+                className="plot"
+                rows={20}
+                maxLength={PLOT_MAX}
+                value={form.plot}
+                placeholder={"Premisa: de qué va la novela.\n\nLo que pasa, por partes o capítulos (puedes usar títulos: ## Primera parte).\n\nSecretos y revelaciones: qué se sabe, quién y cuándo.\n\nDesenlace previsto."}
+                onChange={(e) => setForm({ ...form, plot: e.target.value })}
+              />
+            </label>
+            <p className="muted small field-help">
+              {countWords(form.plot).toLocaleString("es")} palabras · {form.plot.length.toLocaleString("es")} de{" "}
+              {PLOT_MAX.toLocaleString("es")} caracteres. El Consejero no lo lee entero en cada consulta: una visión general
+              (el comienzo, los títulos, la primera frase de cada párrafo y el final) y, completos, los párrafos que tienen que
+              ver con lo que le preguntas. Escribe el desenlace al final y separa los párrafos con una línea en blanco.
+            </p>
+            {!form.plot.trim() && form.synopsis.trim() && (
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => setForm({ ...form, plot: form.synopsis.trim() })}
+                title="Copia aquí la sinopsis para desarrollarla; la sinopsis se queda como está"
+              >
+                Empezar desde la sinopsis
+              </button>
+            )}
           </>
         ) : tab === "libro" ? (
           <BookExport novelId={novel.id} title={form.title.trim() || novel.title} book={book} onChange={setBook} />
@@ -134,8 +184,8 @@ export default function NovelModal({ novel, onClose, onSaved }: { novel: Novel; 
             <details className="group advanced">
               <summary>Ver instrucciones maestras</summary>
               <p className="muted small">
-                Esto es lo que recibe el modelo, generado a partir de la guía, la sinopsis y las notas. Para cambiarlo, edita los
-                campos (o «Instrucciones libres»).
+                Esto es lo que recibe el modelo, generado a partir de la guía (sin la sinopsis, las notas ni el Argumento
+                general, que no van al Asistente). Para cambiarlo, edita los campos (o «Instrucciones libres»).
               </p>
               <pre className="compiled">
                 {compileGuide({ title: form.title, guide })}

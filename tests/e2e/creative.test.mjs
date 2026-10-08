@@ -89,7 +89,7 @@ test("«No sé cómo continuar.» → three paths, Camino A, B and C, each with 
   assert.match(b.body, /^Qué podría ocurrir: .+\nPor qué funciona aquí: .+\nQué aprovecha: .+\nConsecuencias: .+\nRiesgos: .+\nPersonajes: /m);
   assert.equal(b.verified, true, "grounded with a verified quote");
   const prompt = await lastPrompt();
-  assert.match(prompt, /Propón exactamente 3 caminos distintos/);
+  assert.match(prompt, /Recomienda el camino que tú seguirías[\s\S]*defiende tu recomendación con razones narrativas/);
   assert.match(prompt, /"porque" \(por qué funciona específicamente en esta novela\)/);
   s.conversation = saved(list).conversationId;
   s.first = await lastCards();
