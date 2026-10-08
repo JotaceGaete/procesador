@@ -153,14 +153,25 @@ input:focus,
   min-width: 0;
 }
 
+/* The top bar adapts to the manuscript's column, not to the window: with the chapters and the
+   Asistente open, the column is narrower than the screen suggests. The container is a wrapper of
+   the bar alone: making the whole column (editor included) a container slows typing down in
+   very long chapters. */
+.topbar-wrap {
+  container: topbar / inline-size;
+}
 .topbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 18px;
+  gap: 6px 18px;
   padding: 12px 24px;
   font-size: 13px;
   white-space: nowrap;
   transition: opacity 0.25s;
+}
+.topbar > * {
+  flex-shrink: 0;
 }
 .topbar .title {
   font-family: var(--serif);
@@ -169,6 +180,8 @@ input:focus,
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 40%;
+  flex-shrink: 1;
+  min-width: 3em;
 }
 .topbar .format-actions {
   display: inline-flex;
@@ -185,6 +198,18 @@ input:focus,
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 30%;
+  flex-shrink: 1;
+  min-width: 3em;
+}
+/* A narrow column: tighter, without the word count (the chapter list shows it); what still
+   doesn't fit goes to a second line instead of under the panel. */
+@container topbar (max-width: 860px) {
+  .topbar {
+    gap: 6px 14px;
+  }
+  .topbar .words {
+    display: none;
+  }
 }
 .meta {
   color: var(--muted);
@@ -252,8 +277,21 @@ input:focus,
 }
 .panel-head {
   display: flex;
-  align-items: baseline;
+  align-items: flex-end;
+  gap: 12px;
   font-size: 13px;
+  border-bottom: 1px solid var(--faint);
+}
+.panel-head .tabs {
+  flex: 1;
+  flex-wrap: wrap;
+  column-gap: 16px;
+  border-bottom: none;
+  min-width: 0;
+}
+.panel-head .panel-close {
+  padding-bottom: 8px;
+  flex-shrink: 0;
 }
 .panel-title {
   color: var(--text);
@@ -667,6 +705,42 @@ input:focus,
   margin: -4px 0 0 24px;
   font-size: 12px;
 }
+.faint {
+  opacity: 0.75;
+}
+.estimate.quiet {
+  font-size: 11px;
+  opacity: 0.85;
+}
+.estimate.quiet.large {
+  opacity: 1;
+}
+.field-help {
+  margin: -8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.scene-controls {
+  gap: 10px;
+}
+.scene-target-help {
+  margin-top: -6px;
+}
+/* Asistente: the model and other technical choices, out of the literary flow. */
+.advanced {
+  font-size: 12px;
+  color: var(--muted);
+}
+.advanced > summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.advanced[open] > summary {
+  margin-bottom: 8px;
+}
+.advanced .controls {
+  font-size: 13px;
+}
 /* "Ver contexto": what the AI will take into account, in the author's terms. */
 .context-view {
   border-left: 2px solid var(--faint);
@@ -720,21 +794,6 @@ input:focus,
 }
 
 /* ---------- Asistente | Consejero ---------- */
-.sections {
-  display: flex;
-  gap: 14px;
-}
-.sections button {
-  border: none;
-  background: none;
-  padding: 0;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 13px;
-}
-.sections button.on {
-  color: var(--text);
-}
 .overview {
   display: flex;
   flex-direction: column;
@@ -1907,8 +1966,53 @@ details.group > p {
   flex-direction: column;
   gap: 12px;
 }
-.advisor-actions button {
+/* Accesos rápidos: una línea de enlaces discretos por grupo, no una fila de botones. */
+.advisor-quick {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.quick-row {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 4px;
+  line-height: 1.5;
+}
+.quick-label {
+  margin-right: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+.quick {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font: inherit;
   font-size: 13px;
+  color: var(--accent);
+  cursor: pointer;
+}
+.quick + .quick::before {
+  content: "·";
+  color: var(--muted);
+  margin-right: 6px;
+}
+.quick:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.quick:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.focus-chip {
+  margin: 0 0 6px;
+  color: var(--muted);
+}
+.focus-chip strong {
+  color: var(--accent);
 }
 .ask textarea {
   width: 100%;
@@ -1960,6 +2064,29 @@ details.group > p {
 .obs-title {
   font-weight: 600;
 }
+.obs-label {
+  font-weight: 600;
+  font-size: 12px;
+  margin-right: 8px;
+  color: var(--accent);
+}
+.obs-sections {
+  margin: 4px 0;
+}
+.obs-sections div {
+  margin: 0 0 3px;
+}
+.obs-sections dt {
+  display: inline;
+  font-weight: 600;
+}
+.obs-sections dt::after {
+  content: ": ";
+}
+.obs-sections dd {
+  display: inline;
+  margin: 0;
+}
 .obs-body {
   font-size: 14px;
 }
@@ -1995,6 +2122,158 @@ details.group > p {
   border-left-color: #8a8a5c;
 }
 
+/* ---------- Consejero: Conversar ---------- */
+.mode-switch {
+  display: inline-flex;
+  align-self: flex-start;
+  border: 1px solid var(--faint);
+  border-radius: 999px;
+  padding: 2px;
+  gap: 2px;
+}
+.mode-switch button {
+  background: none;
+  border: none;
+  border-radius: 999px;
+  padding: 3px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.mode-switch button.on {
+  background: var(--selection);
+  color: inherit;
+}
+/* A chat turn: the Consejero's words, then (at most) a proposal; no kinds or confidence. */
+.turn.advisor.chat,
+.advisor-result.chat {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.proposals {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.proposal {
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+.proposal p {
+  margin: 0 0 4px;
+}
+.proposal-head {
+  font-size: 12px;
+}
+.proposal-title {
+  font-weight: 600;
+}
+.proposal-body {
+  font-size: 14px;
+}
+.proposal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 6px;
+  font-size: 13px;
+}
+.proposal-actions .strong {
+  font-weight: 600;
+}
+.proposal.saved {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.proposal.dismissed {
+  border: none;
+  background: none;
+  padding: 0;
+}
+/* What the author decided in this conversation: the plan, editable. */
+.plan-bar {
+  border: 1px solid var(--faint);
+  border-radius: 4px;
+  padding: 6px 10px;
+}
+.plan-bar summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.plan-bar ul {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+.plan-add input {
+  width: 100%;
+  border: 1px solid var(--faint);
+  background: transparent;
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+/* The scene order for the Asistente, reviewed before it goes. */
+.brief-box {
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.scene-brief {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.scene-brief p {
+  margin: 0;
+}
+.brief-list {
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+.brief-list legend {
+  font-size: 13px;
+  color: var(--muted);
+}
+.brief-line {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 3px 0;
+}
+.brief-line input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--faint);
+  background: transparent;
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+.brief-note {
+  border-left: 3px solid var(--accent);
+  padding: 4px 10px;
+  margin: 4px 0;
+}
+.brief-note p,
+.brief-note ul {
+  margin: 0;
+}
+@media (max-width: 999px) {
+  /* Fields at 16 px so iOS doesn't zoom on focus. */
+  .brief-line input,
+  .plan-add input,
+  .scene-brief textarea {
+    font-size: 16px;
+  }
+  .proposal-actions {
+    gap: 6px 16px;
+  }
+}
+
 /* ---------- Consejero: conversaciones y guardadas ---------- */
 .conversation-bar {
   display: flex;
@@ -2020,6 +2299,13 @@ details.group > p {
   border-radius: 10px 10px 2px 10px;
   padding: 6px 10px;
   font-size: 14px;
+}
+.turn-anchor {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 .turn.advisor {
   border-bottom: 1px solid var(--faint);
@@ -2631,4 +2917,129 @@ details.group > p {
 }
 .focus .visual-editor {
   padding-top: 12vh;
+}
+
+/* ---------- Asistente: reading a proposal (docs/asistente-contexto.md) ---------- */
+@media (min-width: 1000px) {
+  /* In the side panel the answer reads in the panel's own scroll (no small box inside it),
+     and its actions stay at hand at the bottom while reading. */
+  .panel .result .diff {
+    max-height: none;
+  }
+  /* Tall enough for the panel to bring the answer to its top (the controls stay above, one
+     scroll away). */
+  .panel .result {
+    scroll-margin-top: 8px;
+    min-height: calc(100dvh - 40px);
+  }
+  .panel .result .compare-actions {
+    position: sticky;
+    bottom: -40px;
+    z-index: 1;
+    margin: 12px 0 0;
+    padding: 10px 0 40px;
+    background: var(--paper);
+    border-top: 1px solid var(--faint);
+  }
+}
+/* "Abrir propuesta": the proposal as the book sets it, large, over the manuscript. */
+.reader-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 4vh 16px;
+  background: rgb(0 0 0 / 0.3);
+}
+.proposal-reader {
+  display: flex;
+  flex-direction: column;
+  width: min(820px, 100%);
+  height: 92vh;
+  height: calc(100dvh - 8vh);
+  background: var(--paper);
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+  box-shadow: 0 10px 40px rgb(0 0 0 / 0.12);
+}
+.reader-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 16px 24px 10px;
+  border-bottom: 1px solid var(--faint);
+}
+.reader-head h2 {
+  margin: 0;
+  font-family: var(--serif);
+  font-weight: normal;
+  font-size: 19px;
+}
+.reader-head p {
+  margin: 2px 0 0;
+}
+.reader-tabs {
+  padding: 0 24px;
+}
+.reader-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--faint) transparent;
+}
+.reader-body .reading {
+  overflow: visible;
+  padding: 28px max(24px, calc((100% - 34em) / 2)) 40px;
+}
+.reader-body .diff {
+  max-height: none;
+  margin: 20px 24px;
+  border: none;
+  font-size: 18px;
+  line-height: 1.5;
+}
+.reader-image {
+  text-align: center;
+  text-indent: 0 !important;
+}
+.reader-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--faint);
+}
+.reader-foot .notice {
+  flex-basis: 100%;
+  margin: 0 0 4px;
+}
+@media (max-width: 640px) {
+  .reader-backdrop {
+    padding: 0;
+  }
+  .proposal-reader {
+    width: 100%;
+    height: 100dvh;
+    border: none;
+    border-radius: 0;
+  }
+  .reader-head,
+  .reader-foot {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .reader-body .reading {
+    font-size: 18px;
+    padding: 20px 16px 32px;
+  }
+}
+.reader-head,
+.reader-tabs,
+.reader-foot {
+  flex-shrink: 0;
 }

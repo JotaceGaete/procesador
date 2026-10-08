@@ -403,8 +403,8 @@ export type AssistEvent =
   /** Last event before refusal/truncated: tokens and cost. */
   | ({ type: "usage" } & Usage)
   /** Consejero: how a free question was understood, and the verified cards at the end. */
-  | { type: "plan"; action: string; label: string; detail: string }
-  | { type: "observations"; items: Observation[]; invalid?: boolean }
+  | { type: "plan"; action: string; label: string; detail: string; mode?: "conversar" | "analizar" }
+  | { type: "observations"; items: Observation[]; invalid?: boolean; labels?: { label: string; from: string | null }[] }
   /** Consejero: the exchange is stored; ids to act on the cards. */
   | { type: "saved"; conversationId: string; messageId: string; observationIds: string[] }
   /** Lectura profunda: what was served in a round, what it read in all, and a pause to ask. */
@@ -501,16 +501,46 @@ export interface NovelDigest {
 // Consejero: actions and observations (docs/consejero.md, phase 3)
 // ---------------------------------------------------------------------------
 
-export type AdvisorAction = "analizar" | "seguir" | "repeticiones" | "cabos" | "coherencia" | "personajes";
+export type AdvisorAction =
+  | "analizar"
+  | "seguir"
+  | "repeticiones"
+  | "cabos"
+  | "coherencia"
+  | "personajes"
+  // Consejero creativo (phase 1): think with the author; never write for the manuscript.
+  | "caminos"
+  | "consecuencias"
+  | "giro"
+  | "oportunidades"
+  | "tension"
+  | "explorar"
+  // Conversar (the default mode): an answer in the flow of the conversation.
+  | "conversar";
 
-export const ADVISOR_ACTIONS: { id: AdvisorAction; label: string; hint: string }[] = [
-  { id: "analizar", label: "Analizar capítulo", hint: "Qué funciona y qué no en el capítulo abierto" },
-  { id: "seguir", label: "¿Cómo seguir?", hint: "Varios caminos posibles; no escribe la continuación" },
-  { id: "repeticiones", label: "Repeticiones", hint: "Expresiones, imágenes o situaciones que se repiten" },
-  { id: "cabos", label: "Cabos pendientes", hint: "Qué quedó abierto y cuánto hace que no aparece" },
-  { id: "coherencia", label: "Coherencia", hint: "Contradicciones y revelaciones a destiempo" },
-  { id: "personajes", label: "Personajes", hint: "Presencia, evolución y personajes desaprovechados" },
+/**
+ * group "crear": the creative quick actions (Pensar juntos); "revisar": the analytic ones;
+ * "conversacion": not a button (developing a proposal, or following the conversation).
+ * `ask`: the button only starts the question, the author finishes it ("¿Qué pasa si…?").
+ */
+export const ADVISOR_ACTIONS: { id: AdvisorAction; label: string; hint: string; group: "crear" | "revisar" | "conversacion"; ask?: string }[] = [
+  { id: "seguir", label: "¿Cómo continúo?", hint: "Tres caminos (A, B, C) para seguir desde el final del capítulo; no escribe la continuación", group: "crear" },
+  { id: "caminos", label: "3 caminos", hint: "Tres direcciones para la historia, fundamentadas en lo ya escrito", group: "crear" },
+  { id: "oportunidades", label: "Busca oportunidades", hint: "Secretos, cabos y relaciones que podrías aprovechar", group: "crear" },
+  { id: "cabos", label: "Cabos pendientes", hint: "Qué quedó abierto y cuánto hace que no aparece", group: "crear" },
+  { id: "giro", label: "Necesito un giro", hint: "Giros posibles construidos con elementos reales de la novela", group: "crear" },
+  { id: "tension", label: "Subir tensión", hint: "Cómo aumentar la tensión con lo que ya está en juego", group: "crear" },
+  { id: "consecuencias", label: "¿Qué pasa si…?", hint: "Escribe una posibilidad y el Consejero analiza sus consecuencias", group: "crear", ask: "¿Qué pasa si " },
+  { id: "analizar", label: "Analizar capítulo", hint: "Qué funciona y qué no en el capítulo abierto", group: "revisar" },
+  { id: "repeticiones", label: "Repeticiones", hint: "Expresiones, imágenes o situaciones que se repiten", group: "revisar" },
+  { id: "coherencia", label: "Coherencia", hint: "Contradicciones y revelaciones a destiempo", group: "revisar" },
+  { id: "personajes", label: "Personajes", hint: "Presencia, evolución y personajes ausentes demasiado tiempo", group: "revisar" },
+  { id: "explorar", label: "Desarrollar propuesta", hint: "Seguir con una propuesta de la conversación", group: "conversacion" },
+  { id: "conversar", label: "Conversar", hint: "Una respuesta breve en la conversación", group: "conversacion" },
 ];
+
+/** Actions that propose (ideas, never findings): more room in the answer, cards labelled A/B/C. */
+export const CREATIVE_ACTIONS: AdvisorAction[] = ["seguir", "caminos", "consecuencias", "giro", "oportunidades", "tension", "explorar", "conversar"];
 
 export type ObservationKind = "problem" | "repetition" | "contradiction" | "thread" | "opportunity" | "alternative" | "pacing";
 
@@ -552,6 +582,8 @@ export interface StoredObservation extends Observation {
   id: string;
   message_id: string | null;
   status: ObservationStatus;
+  /** Its place among the cards of its answer. */
+  position: number;
   based_on: Record<string, number>;
   checked_at: string;
   created_at: string;
@@ -570,6 +602,15 @@ export interface AdvisorMessage {
     usage?: Usage | null;
     material?: { label: string; tokens: number }[];
     rounds?: number;
+    /** Author turn: the card it was about ("el segundo", "Seguir con esta"…). */
+    anchor?: { id: string; label: string; title: string; how: "boton" | "etiqueta" | "ordinal" | "ultimo" | "heredado" | "esa" } | null;
+    /** The mode the turn was asked in (Conversar or Analizar). */
+    mode?: "conversar" | "analizar";
+    /** Author turn: decisions and discards in their own words (the conversation's plan). */
+    decisions?: string[];
+    discarded?: string[];
+    /** Advisor turn: the label of each card, in order (B2 is a version of B). */
+    cards?: { label: string; from: string | null }[];
   } | null;
   created_at: string;
   observations: StoredObservation[];

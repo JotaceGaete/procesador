@@ -325,6 +325,8 @@ export function scenePrompt(opts: {
   providerNote?: string | null;
   /** "Ampliar": the scene already written for this argument, to develop (not to rewrite). */
   draft?: string | null;
+  /** «Enviar al Asistente»: the author's decisions, limits and discards from the Consejero. */
+  brief?: string | null;
 }): string {
   const extent = sceneExtent(opts.length);
   const parts: string[] = [];
@@ -358,6 +360,10 @@ export function scenePrompt(opts: {
   }
 
   parts.push(`Argumento del autor: los hechos de la escena (su plan, no su texto):\n<argumento>\n${opts.argument.trim()}\n</argumento>`);
+  if (opts.brief?.trim())
+    parts.push(
+      `Encargo del Consejero: lo que el autor decidió para esta escena al pensarla con su consejero. Tiene la misma autoridad que el argumento: cumple sus decisiones y restricciones, y que no ocurra nada de lo descartado.\n<encargo_del_consejero>\n${opts.brief.trim()}\n</encargo_del_consejero>`,
+    );
   parts.push(`Extensión: ${extent.target}.`);
   if (opts.draft) {
     const written = countWords(opts.draft);

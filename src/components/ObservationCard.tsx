@@ -11,6 +11,44 @@ import {
 } from "@/lib/types";
 import { api } from "@/lib/client";
 
+/** Labels of a proposal's sections, as the server writes them in its body (observations.ts). */
+const SECTION = /^(Qué podría ocurrir|Por qué funciona aquí|Qué aprovecha|Consecuencias|Riesgos|Personajes): /;
+
+/**
+ * What goes to the Asistente as a scene's argument: what would happen (and who), not the
+ * reasons, consequences or risks, which are for the author.
+ */
+function argument(o: Observation): string {
+  const lines = o.body.split("\n");
+  if (!lines.some((l) => SECTION.test(l))) return `${o.title}. ${o.body}`;
+  const pick = (name: string) => lines.find((l) => l.startsWith(`${name}: `))?.slice(name.length + 2) ?? "";
+  const who = pick("Personajes");
+  return [`${o.title}.`, pick("Qué podría ocurrir"), who && `Personajes: ${who}.`].filter(Boolean).join(" ");
+}
+
+/** The body, with the sections of a proposal (one per line) under their label. */
+function Body({ text }: { text: string }) {
+  const lines = text.split("\n").filter((l) => l.trim());
+  if (!lines.some((l) => SECTION.test(l))) return <p className="obs-body">{text}</p>;
+  return (
+    <dl className="obs-body obs-sections">
+      {lines.map((l, i) => {
+        const m = l.match(SECTION);
+        return m ? (
+          <div key={i}>
+            <dt>{m[1]}</dt>
+            <dd>{l.slice(m[0].length)}</dd>
+          </div>
+        ) : (
+          <div key={i}>
+            <dd>{l}</dd>
+          </div>
+        );
+      })}
+    </dl>
+  );
+}
+
 const CONFIDENCE = { high: "confianza alta", medium: "confianza media", low: "confianza baja" };
 
 export interface CardActions {
@@ -37,6 +75,10 @@ export default function ObservationCard(p: {
   onGoTo(chapterId: string, start: number, end: number, text: string): void;
   onSendToAssistant(text: string): void;
   actions?: CardActions;
+  /** Its label in the conversation (A, B, B2 — a version of B). */
+  tag?: { label: string; from: string | null } | null;
+  /** "Seguir con esta": the next message is about this card. */
+  onFollow?(o: StoredObservation): void;
 }) {
   const o = p.o;
   const stored = "id" in o ? (o as StoredObservation) : null;
@@ -63,7 +105,10 @@ export default function ObservationCard(p: {
   if (stored?.status === "dismissed") {
     return (
       <li className="observation dismissed">
-        <span className="muted small">Descartada: {o.title} · </span>
+        <span className="muted small">
+          Descartada: {p.tag ? `${p.tag.label} · ` : ""}
+          {o.title} ·{" "}
+        </span>
         <button className="link small" disabled={busy} onClick={() => setStatus("new")}>
           Restaurar
         </button>
@@ -79,13 +124,19 @@ export default function ObservationCard(p: {
   return (
     <li className={`observation obs-${o.kind}${o.verified ? "" : " unverified"}${stored?.status === "saved" ? " saved" : ""}`}>
       <p className="obs-head">
+        {p.tag && (
+          <span className="obs-label" title={p.tag.from ? `Versión de ${p.tag.from}` : undefined}>
+            {o.kind === "alternative" && !p.tag.from ? `Camino ${p.tag.label}` : p.tag.label}
+            {p.tag.from ? ` · versión de ${p.tag.from}` : ""}
+          </span>
+        )}
         <span className="obs-kind">{OBSERVATION_LABELS[o.kind]}</span>
         <span className="muted small"> · {CONFIDENCE[o.confidence]}</span>
         {stored?.status === "saved" && <span className="tag">guardada</span>}
         {stored?.status === "resolved" && <span className="tag">resuelta</span>}
       </p>
       <p className="obs-title">{o.title}</p>
-      {o.body && <p className="obs-body">{o.body}</p>}
+      {o.body && <Body text={o.body} />}
       {o.refs.length > 0 && (
         <ul className="obs-refs">
           {o.refs.map((r, j) => (
@@ -114,8 +165,13 @@ export default function ObservationCard(p: {
       )}
 
       <div className="obs-actions small">
+        {stored && p.onFollow && (o.kind === "alternative" || o.kind === "opportunity") && (
+          <button className="link" title="Tu próximo mensaje será sobre esta propuesta" onClick={() => p.onFollow!(stored)}>
+            Seguir con esta
+          </button>
+        )}
         {o.kind === "alternative" && (
-          <button className="link" onClick={() => p.onSendToAssistant(`${o.title}. ${o.body}`)}>
+          <button className="link" onClick={() => p.onSendToAssistant(argument(o))}>
             Enviar al Asistente
           </button>
         )}

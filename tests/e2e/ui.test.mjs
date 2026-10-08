@@ -217,6 +217,8 @@ test("edit: chosen provider answers; Original / Propuesta; replace; Ctrl+Z", asy
   });
   await page.keyboard.press("Shift+ArrowRight");
   await page.keyboard.press("Shift+ArrowLeft");
+  // The model, in «Opciones avanzadas» (out of the literary flow, never removed).
+  await page.locator("aside.panel details.advanced > summary").click();
   await page.locator('.controls label:has(> span:text-is("Modelo")) select').selectOption({ label: "GPT" });
   await page.getByRole("button", { name: "Proponer cambios" }).click();
   await page.waitForSelector("text=Reemplazar selección");
@@ -240,7 +242,7 @@ test("edit: chosen provider answers; Original / Propuesta; replace; Ctrl+Z", asy
   assert.equal(await editor().inputValue(), before);
 });
 
-test("edit: 'Probar con Grok' re-runs with another provider; Limpiar clears without using it", async () => {
+test("edit: 'Probar con Grok' re-runs with another provider; Descartar clears without using it", async () => {
   await editor().evaluate((el) => {
     el.focus();
     el.setSelectionRange(0, 8);
@@ -253,7 +255,7 @@ test("edit: 'Probar con Grok' re-runs with another provider; Limpiar clears with
   await page.getByRole("button", { name: "Grok" }).click();
   await page.waitForSelector("text=Reemplazar selección");
   assert.equal((await aiLog()).at(-1).provider, "xai");
-  await page.getByRole("button", { name: "Limpiar" }).click();
+  await page.getByRole("button", { name: "Descartar" }).click();
   assert.equal(await page.locator(".result").count(), 0);
   assert.equal(await editor().inputValue(), text, "the manuscript untouched");
 });

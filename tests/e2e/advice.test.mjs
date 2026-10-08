@@ -57,7 +57,7 @@ test("dry run: the context by levels, and the chapters it would like read first;
   assert.equal(labels.at(-1), "1 capítulo sin ficha al día");
   assert.deepEqual(data.unread.map((u) => u.id), [ch[1]], "chapter 2, before the open one, was never read");
   assert.ok(data.unread[0].estimate > 0);
-  assert.deepEqual(data.plan, { type: "plan", action: "analizar", label: "Analizar capítulo", detail: "" });
+  assert.deepEqual(data.plan, { type: "plan", action: "analizar", label: "Analizar capítulo", detail: "", mode: "analizar" });
   assert.equal((await aiLog()).length, 0);
 });
 
@@ -110,13 +110,13 @@ test("observations: verified quotes point at the text; an invented one is an imp
   assert.deepEqual([moved.verified, moved.refs[0].chapterId], [true, ch[2]], "found in chapter 3, not where the model said");
 });
 
-test("¿Cómo seguir?: paths as alternatives, never the continuation itself", async () => {
+test("¿Cómo continúo?: three paths as alternatives, never the continuation itself", async () => {
   await clearAiLog();
   const list = events((await advise({ action: "seguir" })).data);
   const alternatives = cardsOf(list).items.filter((o) => o.kind === "alternative");
   assert.equal(alternatives.length, 3);
   const prompt = (await aiLog())[0].body.messages[0].content;
-  assert.match(prompt, /Propón de 3 a 4 caminos razonables/);
+  assert.match(prompt, /Propón exactamente 3 caminos distintos/);
   assert.match(prompt, /No escribas la escena ni la continuación/);
   assert.match(prompt, /Cabos abiertos y capítulos sin aparecer:\n- «La carta de Marta»: última vez en el 1, hace 2 capítulos/);
 });
@@ -136,7 +136,7 @@ test("Repeticiones and Cabos: computed data and anchor passages go with the requ
 test("free question: the planner's reading is shown; named chapters go complete; the selection is the focus", async () => {
   await clearAiLog();
   const list = events((await advise({ question: "¿Es coherente lo que sabe Elena del mar en el capítulo 1?" })).data);
-  assert.deepEqual(list[1], { type: "plan", action: "coherencia", label: "Coherencia", detail: "personajes: Elena · capítulos: 1" });
+  assert.deepEqual(list[1], { type: "plan", action: "coherencia", label: "Coherencia", detail: "personajes: Elena · capítulos: 1", mode: "analizar" });
   let prompt = (await aiLog())[0].body.messages[0].content;
   assert.ok(prompt.includes(`<capitulo numero="1" titulo="Capítulo 1">\n${T1}\n</capitulo>`), prompt.slice(0, 600));
   assert.match(prompt, /Pregunta del autor: ¿Es coherente lo que sabe Elena/);
@@ -167,6 +167,8 @@ test("panel: Consultar runs an action; cards show their references; Ir selects t
   page = await ctx.newPage();
   page.on("pageerror", (e) => assert.fail(`page error: ${e.message}`));
   await page.addInitScript(([n, c]) => localStorage.setItem(`chapter:${n}`, c), [novel, ch[2]]);
+  // These are Analizar's cards and actions: the panel opens in Analizar (Conversar is the default).
+  await page.addInitScript((n) => localStorage.setItem(`advisorMode:${n}`, "analizar"), novel);
   await page.goto(`${BASE}/novela/${novel}`);
   const editor = page.locator("textarea.editor");
   await editor.waitFor();
@@ -197,15 +199,17 @@ test("panel: a free question shows how it was understood", async () => {
   );
 });
 
-test("panel: an alternative of ¿Cómo seguir? goes to the Asistente as a scene's argument", async () => {
+test("panel: an alternative of ¿Cómo continúo? goes to the Asistente as a scene's argument", async () => {
   const panel = page.locator("aside.panel");
-  await panel.getByRole("button", { name: "¿Cómo seguir?" }).click();
+  await panel.getByRole("button", { name: "¿Cómo continúo?" }).click();
   const alt = panel.locator(".observation.obs-alternative").first();
   await alt.waitFor({ timeout: 15_000 });
   await alt.getByRole("button", { name: "Enviar al Asistente" }).click();
   assert.equal(await panel.getAttribute("aria-label"), "Asistente");
   const argument = await page.getByPlaceholder(/Qué ocurre en la escena/).inputValue();
-  assert.match(argument, /^Seguir el conflicto\. Seguir el conflicto: qué aprovecha/);
+  // What would happen and who: not the reasons, consequences or risks.
+  assert.match(argument, /^Seguir el conflicto\. Seguir el conflicto: qué podría ocurrir\./);
+  assert.doesNotMatch(argument, /Riesgos|Consecuencias/);
   assert.equal(await page.locator("textarea.editor").inputValue(), LIVE, "nothing written in the manuscript");
 });
 
@@ -221,6 +225,8 @@ test("panel: chapters without a digest are read first, then it answers", async (
   await page.locator(".topbar .link", { hasText: "Consejero" }).click();
   const panel = page.locator("aside.panel");
   await panel.getByRole("button", { name: "Consultar" }).click();
+  // The conversation reloads when Consultar mounts: count its turns once it is there.
+  await panel.locator(".turn.advisor").first().waitFor();
   const turns = await panel.locator(".turn.advisor").count();
   await panel.getByRole("button", { name: "Personajes" }).click();
   await page.waitForFunction((n) => document.querySelectorAll(".turn.advisor").length > n, turns, { timeout: 15_000 });

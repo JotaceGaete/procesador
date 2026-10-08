@@ -156,7 +156,7 @@ for (const device of [
     ]) {
       await generate(s, argument, length);
       assert.equal(await s.panel.locator(".length-note").count(), 0, `${argument} ${length}`);
-      await s.press(s.panel.getByRole("button", { name: "Limpiar" }));
+      await s.press(s.panel.getByRole("button", { name: "Descartar" }));
     }
     await s.ctx.close();
   });

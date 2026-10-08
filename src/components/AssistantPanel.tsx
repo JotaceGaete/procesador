@@ -34,6 +34,8 @@ import { formatCount, formatTokens } from "./format";
 import UsageLine from "./UsageLine";
 import ContextView from "./ContextView";
 import DiffView from "./DiffView";
+import ProposalReader from "./ProposalReader";
+import type { SceneBrief } from "@/lib/advisor/converse";
 
 interface Props {
   hidden: boolean;
@@ -227,6 +229,9 @@ function AssistantPanel(props: Props) {
   const [length, setLength] = useState<SceneLength>("media");
   // Where a new scene goes: the end of the chapter unless the author chooses the cursor.
   const [sceneTarget, setSceneTarget] = useState<SceneTarget>("end");
+  // «Enviar al Asistente» from the Consejero: the decisions, limits and discards that go with
+  // the argument (the author reviewed them there). Only for the next scene.
+  const [brief, setBrief] = useState<SceneBrief | null>(null);
   useEffect(() => setSceneTarget(readPref("sceneTarget") === "cursor" ? "cursor" : "end"), []);
 
   // One pending result per tab (Editar selección, Escribir escena, the Consejero's analysis):
@@ -253,6 +258,8 @@ function AssistantPanel(props: Props) {
   const [compareView, setCompareView] = useState<"changes" | "proposal" | "original">("changes");
   // «Ver lo que se envió», under an answer.
   const [showSent, setShowSent] = useState(false);
+  // "Abrir propuesta": the Asistente's proposal read in large (a view; the proposal stays here).
+  const [readerOpen, setReaderOpen] = useState(false);
   // Where a scene will go follows the cursor while the proposal waits.
   const [, setCaretTick] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -344,6 +351,7 @@ function AssistantPanel(props: Props) {
           characterIds: sceneCharacters,
           placeIds: placeId ? [placeId] : [],
           sceneTarget,
+          ...(brief ? { brief: { decisions: brief.decisions, constraints: brief.constraints, discarded: brief.discarded } } : {}),
           // Written to continue the chapter's end, or the text at the cursor (fixed in run()).
           cursor: sceneTarget === "end" ? getContent().length : getCursor(),
         },
@@ -411,6 +419,7 @@ function AssistantPanel(props: Props) {
     memory,
     provider,
     sceneTarget,
+    brief,
   ]);
 
   async function run(req: Request, using: ProviderId) {
@@ -503,14 +512,15 @@ function AssistantPanel(props: Props) {
     }
   }
 
-  // On a phone the sheet scrolls to the answer as soon as it starts, instead of leaving it
-  // below the controls.
+  // The panel scrolls to the answer as soon as it starts, instead of leaving it below the
+  // controls (on a phone, the sheet).
   // Once per request, when its answer starts to arrive (before that there is nothing to scroll to).
   const scrolledFor = useRef<string | null>(null);
   const answering = runningHere && output.length > 0;
   useEffect(() => {
     if (!runningSlot) scrolledFor.current = null;
-    else if (answering && scrolledFor.current !== runningSlot && window.matchMedia("(max-width: 999px)").matches) {
+    // On a phone, and for the Asistente everywhere: its answer is then the main thing in the panel.
+    else if (answering && scrolledFor.current !== runningSlot && (window.matchMedia("(max-width: 999px)").matches || runningSlot.startsWith("assistant"))) {
       scrolledFor.current = runningSlot;
       resultRef.current?.scrollIntoView({ block: "start" });
     }
@@ -537,6 +547,7 @@ function AssistantPanel(props: Props) {
     if (last?.mode === "scene" && argument.trim() === String(last.body.argument ?? "").trim()) {
       setArgument("");
       writePref(`argument:${novelId}`, "");
+      setBrief(null);
     }
   };
   /**
@@ -575,7 +586,21 @@ function AssistantPanel(props: Props) {
   // The author chose a path of "¿Cómo seguir?": the Asistente gets it as the argument of a scene.
   const sendToAssistant = (text: string) => {
     note(`Enviar al Asistente → argument (${text.length} car.)`);
+    setBrief(null);
     setArgument(text);
+    setMode("scene");
+    onSection("assistant");
+  };
+  // The Consejero's brief, reviewed by the author: it fills the scene's fields (still nothing
+  // is written: the author asks for the scene, reads it and decides).
+  const sendBrief = (b: SceneBrief) => {
+    note(`Enviar al Asistente → encargo (${b.decisions.length} decisiones)`);
+    setArgument(b.argument);
+    writePref(`argument:${novelId}`, b.argument);
+    setSceneCharacters(b.characterIds);
+    setPlaceId(b.placeId ?? "");
+    setSceneTarget(b.target);
+    setBrief(b);
     setMode("scene");
     onSection("assistant");
   };
@@ -630,6 +655,46 @@ function AssistantPanel(props: Props) {
   const chapterIndex = chapters.findIndex((c) => c.id === chapterId);
   const here = chapterIndex >= 0 ? chapterLabel(chapterIndex, chapters[chapterIndex].title) : "este capítulo";
 
+  // What "Abrir propuesta" shows, and its main action (the same as the panel's).
+  const reader =
+    last?.section === "assistant" && parsed?.proposal && !runningHere
+      ? rewrite && last.target
+        ? {
+            title: "Propuesta de cambios",
+            where: `Reemplaza el fragmento seleccionado · ${here}`,
+            text: rewrite.restored.text,
+            changes: rewrite.ops,
+            original: last.target.text,
+            primary: applying ? "Guardando una copia…" : "Reemplazar selección",
+            primaryDisabled: applying,
+            notice: null as string | null,
+            onPrimary: () => {
+              if (rewrite.restored.missing.length) {
+                setReaderOpen(false);
+                return update(slot, () => ({ lostImages: rewrite.restored }));
+              }
+              accept(() => onApply(last.target!, rewrite.restored.text));
+            },
+          }
+        : sceneReady
+          ? {
+              title: "Propuesta de escena",
+              where: insertTarget.kind === "end" ? `Se insertará al final del capítulo · ${here}` : `Se insertará en la posición fijada · ${here}`,
+              text: fromModel(parsed.proposal),
+              changes: undefined,
+              original: undefined,
+              primary: applying ? "Guardando una copia…" : insertTarget.kind === "end" ? "Insertar al final" : "Insertar en el cursor",
+              primaryDisabled: applying || !insertion,
+              notice: insertion ? null : "El texto alrededor del lugar fijado cambió y ya no se encuentra. Fíjalo de nuevo en el cursor o inserta al final.",
+              onPrimary: () => accept(() => onInsert(fromModel(parsed.proposal!), insertTarget)),
+            }
+          : null
+      : null;
+  const canRead = Boolean(reader);
+  useEffect(() => {
+    if (!canRead || hidden) setReaderOpen(false);
+  }, [canRead, hidden]);
+
   const req = buildRequest();
   const canRun = Boolean(req && provider && !running && (mode === "scene" || current.character !== "required" || character));
   const manuscriptTokens = estimateTokens(novelChars);
@@ -658,6 +723,9 @@ function AssistantPanel(props: Props) {
     mode === "scene"
       ? chapters.slice(0, Math.max(0, chapters.findIndex((c) => c.id === chapterId))).reduce((n, c) => n + c.chars, 0) + getCursor()
       : 0;
+  // The Asistente keeps literary decisions in front and the technical figures discreet; the
+  // Consejero keeps its own layout.
+  const quiet = section === "assistant";
   const contextControls = (
     <>
       <label className="check">
@@ -665,12 +733,12 @@ function AssistantPanel(props: Props) {
         {mode === "scene" ? (
           <span>
             Leer toda la historia hasta aquí
-            {storyChars > 0 && <span className="muted"> · ≈{formatTokens(estimateTokens(storyChars))} tokens estimados más</span>}
+            {!quiet && storyChars > 0 && <span className="muted"> · ≈{formatTokens(estimateTokens(storyChars))} tokens estimados más</span>}
           </span>
         ) : (
           <span>
             Leer también la novela completa
-            {novelChars > 0 && <span className="muted"> · ≈{formatTokens(manuscriptTokens)} tokens estimados más por consulta</span>}
+            {!quiet && novelChars > 0 && <span className="muted"> · ≈{formatTokens(manuscriptTokens)} tokens estimados más por consulta</span>}
           </span>
         )}
       </label>
@@ -682,9 +750,15 @@ function AssistantPanel(props: Props) {
           : includeManuscript
             ? "Lee todo el manuscrito: más coherencia, más coste."
             : "Desactivada, la IA no lee todo el manuscrito: trabaja sólo con el contexto seleccionado."}
+        {quiet && (mode === "scene" ? storyChars : novelChars) > 0 && (
+          <span className="faint">
+            {" "}
+            (≈{formatTokens(mode === "scene" ? estimateTokens(storyChars) : manuscriptTokens)} tokens más)
+          </span>
+        )}
       </p>
       {estimate && (
-        <p className={`estimate${estimate.total > confirmTokens ? " large" : ""}`}>
+        <p className={`estimate${estimate.total > confirmTokens ? " large" : ""}${quiet ? " quiet" : ""}`}>
           Contexto de esta consulta: ≈{formatTokens(estimate.total)} tokens estimados
           {estimate.sections && (
             <>
@@ -717,48 +791,36 @@ function AssistantPanel(props: Props) {
       )}
     </>
   );
+  // Asistente: the model is a technical choice, out of the literary flow (never removed).
+  const advanced = quiet && providerSelect && (
+    <details className="advanced">
+      <summary>Opciones avanzadas</summary>
+      <div className="controls">{providerSelect}</div>
+    </details>
+  );
 
-  return (
-    <aside className="panel" hidden={hidden} aria-label={section === "advisor" ? "Consejero" : "Asistente"}>
-      <header className="panel-head">
-        <nav className="sections" aria-label="Sección">
-          <button
-            className={section === "assistant" ? "on" : undefined}
-            aria-pressed={section === "assistant"}
-            onClick={() => onSection("assistant")}
-            title="Escribe contigo: redacta, desarrolla y transforma el texto"
-          >
-            Asistente
+  /** The fragment the request works on: the editor's selection, as the editor reports it. */
+  const quote = (
+    <>
+      {selection && (
+        <div className="quote-head">
+          <span className="muted small">Fragmento seleccionado en el editor</span>
+          <button className="link" onClick={onClearSelection} title="Para usar otro, selecciónalo en el editor">
+            Quitar
           </button>
-          <button
-            className={section === "advisor" ? "on" : undefined}
-            aria-pressed={section === "advisor"}
-            onClick={() => onSection("advisor")}
-            title="Piensa contigo: coherencia, personajes, ritmo y repeticiones"
-          >
-            Consejero
-          </button>
-        </nav>
-        <span className="spacer" />
-        <button className="link" onClick={onClose}>
-          Ocultar
-        </button>
-      </header>
-      {diag && (
-        <pre className="diag" data-origin="diag">
-          {[
-            `build ${BUILD.sha} ${BUILD.time}${BUILD.deployment ? ` ${BUILD.deployment}` : ""}`,
-            `section=${section} mode=${mode} view=${advisorView} slot=${slot}`,
-            `showResult=${Boolean(showResult)} parsed=${Boolean(parsed)} last=${Boolean(last)} runningSlot=${runningSlot ?? "-"}`,
-            `results: ${Object.entries(results).map(([k, r]) => `${k}(${r.output.length} car.${r.notice ? `, ${r.notice.kind}` : ""}${r.applyError ? ", applyError" : ""})`).join(" · ") || "(vacío)"}`,
-            `argument: ${argument.length} car. (localStorage argument:${novelId})`,
-            `toque: ${tapped || "-"}`,
-            ...diagLog,
-          ].join("\n")}
-        </pre>
+        </div>
       )}
+      <blockquote className={`quote${selection ? "" : " empty"}`} data-origin="selection (prop: selección del editor)">
+        {selection
+          ? selection.text.length > 400
+            ? `${selection.text.slice(0, 400)}…`
+            : selection.text
+          : "Selecciona un fragmento en el editor; aparecerá aquí."}
+      </blockquote>
+    </>
+  );
 
-      {section === "assistant" ? (
+  const sectionTabs = section === "assistant" ? (
         <nav className="tabs" aria-label="Modo">
           <button className={mode === "edit" ? "on" : undefined} onClick={() => setMode("edit")}>
             Editar selección
@@ -791,6 +853,30 @@ function AssistantPanel(props: Props) {
             Cabos y lecturas
           </button>
         </nav>
+      );
+
+  return (
+    <aside className="panel" hidden={hidden} aria-label={section === "advisor" ? "Consejero" : "Asistente"}>
+      {/* Asistente | Consejero are chosen in the top bar (one navigation): the panel's header
+          holds what is inside the section, and Ocultar. */}
+      <header className="panel-head">
+        {sectionTabs}
+        <button className="link panel-close" onClick={onClose}>
+          Ocultar
+        </button>
+      </header>
+      {diag && (
+        <pre className="diag" data-origin="diag">
+          {[
+            `build ${BUILD.sha} ${BUILD.time}${BUILD.deployment ? ` ${BUILD.deployment}` : ""}`,
+            `section=${section} mode=${mode} view=${advisorView} slot=${slot}`,
+            `showResult=${Boolean(showResult)} parsed=${Boolean(parsed)} last=${Boolean(last)} runningSlot=${runningSlot ?? "-"}`,
+            `results: ${Object.entries(results).map(([k, r]) => `${k}(${r.output.length} car.${r.notice ? `, ${r.notice.kind}` : ""}${r.applyError ? ", applyError" : ""})`).join(" · ") || "(vacío)"}`,
+            `argument: ${argument.length} car. (localStorage argument:${novelId})`,
+            `toque: ${tapped || "-"}`,
+            ...diagLog,
+          ].join("\n")}
+        </pre>
       )}
 
       {overview ? (
@@ -815,6 +901,7 @@ function AssistantPanel(props: Props) {
               flush={flush}
               onFactAdded={onFactAdded}
               onSendToAssistant={sendToAssistant}
+              onSendBrief={sendBrief}
             />
           </>
         ) : advisorView === "saved" ? (
@@ -856,6 +943,8 @@ function AssistantPanel(props: Props) {
               </button>
             ))}
           </div>
+          {/* Asistente: the fragment first (what will be worked on), then the decisions. */}
+          {quiet && quote}
           <div className="controls">
             <label>
               <span>Personaje</span>
@@ -872,30 +961,17 @@ function AssistantPanel(props: Props) {
                 <span className="muted">Sin personajes en la memoria</span>
               )}
             </label>
-            {providerSelect}
+            {!quiet && providerSelect}
             {contextControls}
           </div>
-          {selection && (
-            <div className="quote-head">
-              <span className="muted small">Fragmento seleccionado en el editor</span>
-              <button className="link" onClick={onClearSelection} title="Para usar otro, selecciónalo en el editor">
-                Quitar
-              </button>
-            </div>
-          )}
-          <blockquote className={`quote${selection ? "" : " empty"}`} data-origin="selection (prop: selección del editor)">
-            {selection
-              ? selection.text.length > 400
-                ? `${selection.text.slice(0, 400)}…`
-                : selection.text
-              : "Selecciona un fragmento en el editor; aparecerá aquí."}
-          </blockquote>
+          {!quiet && quote}
           {current.character === "required" && !memory.characters.length && (
             <p className="muted small">Esta acción necesita la ficha de un personaje.</p>
           )}
         </>
       ) : (
         <>
+          {/* Escribir escena: argumento → dónde va → extensión → (personajes, lugar) → contexto → Desarrollar. */}
           <label className="argument">
             <span>Argumento</span>
             <textarea
@@ -904,10 +980,86 @@ function AssistantPanel(props: Props) {
               rows={6}
               value={argument}
               onChange={(e) => setArgument(e.target.value)}
-              placeholder="Qué ocurre en la escena. Ej.: Es 1972. Juan llega de madrugada. Elena sabe que estuvo con Marta, pero no quiere demostrarlo…"
+              placeholder="Qué ocurre en la escena, con tus palabras. Ej.: ya estaba todo preparado, ducha nueva, el cuarto inmenso… solo faltaba comenzar con el trato."
             />
           </label>
-          <div className="controls">
+          {brief && (
+            <div className="brief-note" data-origin="encargo del Consejero (estado brief)">
+              <p className="small">
+                <strong>Del Consejero</strong>
+                {brief.source ? ` (${brief.source})` : ""}:{" "}
+                {[
+                  brief.decisions.length && `${brief.decisions.length} ${brief.decisions.length === 1 ? "decisión" : "decisiones"}`,
+                  brief.constraints.length && `${brief.constraints.length} ${brief.constraints.length === 1 ? "restricción" : "restricciones"}`,
+                  brief.discarded.length && `${brief.discarded.length} descartado${brief.discarded.length === 1 ? "" : "s"}`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "la propuesta elegida"}{" "}
+                <button className="link small" onClick={() => setBrief(null)} title="La escena se escribirá sólo con el argumento">
+                  Quitar
+                </button>
+              </p>
+              {(brief.decisions.length > 0 || brief.constraints.length > 0 || brief.discarded.length > 0) && (
+                <details>
+                  <summary className="small muted">Ver lo que va con la escena</summary>
+                  <ul className="small">
+                    {brief.decisions.map((d, i) => (
+                      <li key={`d${i}`}>Decisión: {d}</li>
+                    ))}
+                    {brief.constraints.map((d, i) => (
+                      <li key={`c${i}`}>Restricción: {d}</li>
+                    ))}
+                    {brief.discarded.map((d, i) => (
+                      <li key={`x${i}`}>Descartado: {d}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
+          <p className="muted small field-help">
+            Escríbelo como te salga: Procesador lo desarrolla en prosa, con la voz y el contexto de tu novela. Los personajes y
+            lugares que nombres se incluyen solos.
+          </p>
+          <div className="controls scene-controls">
+            <fieldset className="checks inline scene-target">
+              <legend>Dónde va</legend>
+              {(
+                [
+                  ["end", "Al final del capítulo"],
+                  ["cursor", "En el cursor"],
+                ] as const
+              ).map(([id, label]) => (
+                <label key={id} className="check">
+                  <input
+                    type="radio"
+                    name="scene-target"
+                    checked={sceneTarget === id}
+                    onChange={() => {
+                      setSceneTarget(id);
+                      writePref("sceneTarget", id);
+                    }}
+                  />
+                  {label}
+                </label>
+              ))}
+            </fieldset>
+            <p className="muted small check-help scene-target-help">
+              {sceneTarget === "end"
+                ? "Continúa el final del capítulo, esté donde esté el cursor."
+                : "Se escribe para la posición del cursor, que queda fijada al pedirla."}
+            </p>
+            <label>
+              <span>Extensión</span>
+              <select value={length} onChange={(e) => setLength(e.target.value as SceneLength)}>
+                {SCENE_LENGTHS.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.label}
+                    {l.words ? ` (~${l.words} palabras)` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
             {memory.characters.length > 0 && (
               <fieldset className="checks inline">
                 <legend>En escena</legend>
@@ -936,48 +1088,8 @@ function AssistantPanel(props: Props) {
                 </select>
               </label>
             )}
-            <fieldset className="checks inline scene-target">
-              <legend>Dónde va</legend>
-              {(
-                [
-                  ["end", "Al final del capítulo"],
-                  ["cursor", "En el cursor"],
-                ] as const
-              ).map(([id, label]) => (
-                <label key={id} className="check">
-                  <input
-                    type="radio"
-                    name="scene-target"
-                    checked={sceneTarget === id}
-                    onChange={() => {
-                      setSceneTarget(id);
-                      writePref("sceneTarget", id);
-                    }}
-                  />
-                  {label}
-                </label>
-              ))}
-            </fieldset>
-            <label>
-              <span>Extensión</span>
-              <select value={length} onChange={(e) => setLength(e.target.value as SceneLength)}>
-                {SCENE_LENGTHS.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.label}
-                    {l.words ? ` (~${l.words} palabras)` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {providerSelect}
             {contextControls}
           </div>
-          <p className="muted small">
-            Los personajes y lugares nombrados en el argumento se incluyen solos.{" "}
-            {sceneTarget === "end"
-              ? "La escena continúa el final del capítulo, donde se insertará, esté donde esté el cursor."
-              : "La escena se escribe para la posición del cursor, que queda fijada al pedirla."}
-          </p>
         </>
       )}
 
@@ -1001,15 +1113,24 @@ function AssistantPanel(props: Props) {
           </button>
         )}
       </div>
+      {!overview && advanced}
 
       {showResult && parsed && last && (
         <section className="result" aria-live="polite" ref={resultRef} data-origin={`results["${slot}"] (showResult && parsed && last)`}>
           <div className="result-head">
             <span className="muted small">Respuesta del {last.section === "advisor" ? "Consejero" : "Asistente"}</span>
             <span className="spacer" />
-            <button className="link small" onClick={discard} title="Quitar esta propuesta del panel sin usarla">
-              Limpiar
-            </button>
+            {last.section === "advisor" ? (
+              <button className="link small" onClick={discard} title="Quitar esta propuesta del panel sin usarla">
+                Limpiar
+              </button>
+            ) : (
+              canRead && (
+                <button className="link small" onClick={() => setReaderOpen(true)} title="Leer la propuesta en grande, con sus acciones">
+                  Abrir propuesta
+                </button>
+              )
+            )}
           </div>
           {parsed.notes && (
             <div className="markdown">
@@ -1185,6 +1306,11 @@ function AssistantPanel(props: Props) {
               <button className="btn ghost" onClick={() => run(last, last.provider)}>
                 Otra versión
               </button>
+              {last.section === "assistant" && (
+                <button className="btn ghost" onClick={discard} title="Quitar esta propuesta sin usarla">
+                  Descartar
+                </button>
+              )}
               {parsed.proposal && (
                 <button className="btn ghost" onClick={() => navigator.clipboard.writeText(parsed.proposal!)}>
                   Copiar
@@ -1244,6 +1370,29 @@ function AssistantPanel(props: Props) {
             </p>
           )}
         </section>
+      )}
+      {readerOpen && reader && last && (
+        <ProposalReader
+          title={reader.title}
+          where={reader.where}
+          text={reader.text}
+          changes={reader.changes}
+          original={reader.original}
+          words={countWords(reader.text)}
+          primary={reader.primary}
+          primaryDisabled={reader.primaryDisabled}
+          notice={reader.notice ?? (result?.applyFailed || null)}
+          onPrimary={reader.onPrimary}
+          onRetry={() => {
+            setReaderOpen(false);
+            run(last, last.provider);
+          }}
+          onDiscard={() => {
+            setReaderOpen(false);
+            discard();
+          }}
+          onClose={() => setReaderOpen(false)}
+        />
       )}
     </aside>
   );
