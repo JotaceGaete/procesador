@@ -7,7 +7,8 @@ import { splitAnswer, verifyObservations } from "@/lib/advisor/observations";
 import { extractJson } from "@/lib/ai/structured";
 import { getProvider } from "@/lib/ai/providers";
 import { recordUsage } from "@/lib/ai/usage";
-import { conversationContext, getConversation, saveExchange } from "@/lib/advisor/conversations";
+import { conversationContext, getConversation, saveExchange, setObservationStatus, type ConversationState } from "@/lib/advisor/conversations";
+import { assignLabels } from "@/lib/advisor/cards";
 import { adviseRounds, type LoopResult } from "@/lib/advisor/loop";
 import type { DeepRequest } from "@/lib/advisor/deep";
 import type { AdvisorAction, AssistEvent, Observation, ProviderId, Usage } from "@/lib/types";
@@ -29,11 +30,18 @@ export const POST = handler(async (request) => {
   // Continuing a conversation: its summary and last turns go with the question
   // (compacting the older ones first if needed; never on a dry run).
   const conversationId = typeof body.conversationId === "string" && body.conversationId ? body.conversationId : null;
-  let conversation: { text: string; messages: number } | null = null;
+  // Its cards come too (labelled, with their states), so "el segundo" can be resolved.
+  let conversation: ConversationState | null = null;
   if (conversationId) {
     const c = await getConversation(conversationId);
     if (c.novel_id !== novelId) throw new HttpError(404, "Conversación no encontrada");
-    if (!body.dryRun) conversation = await conversationContext({ conversationId, novelId, provider: body.provider as ProviderId, signal: request.signal });
+    conversation = await conversationContext({
+      conversationId,
+      novelId,
+      provider: body.provider as ProviderId,
+      signal: request.signal,
+      compact: !body.dryRun,
+    });
   }
   const advice = await buildAdvice(
     {
@@ -46,10 +54,20 @@ export const POST = handler(async (request) => {
       characterIds: Array.isArray(body.characterIds) ? body.characterIds.filter((x): x is string => typeof x === "string") : [],
       conversation: conversation?.text,
       deep: body.deep !== false,
+      cards: conversation?.cards ?? [],
+      focus: conversation?.focus ?? null,
+      anchorId: typeof body.anchorId === "string" && body.anchorId ? body.anchorId : null,
+      release: body.release === true,
     },
     request.signal,
   );
-  const plan = { type: "plan" as const, action: advice.plan.action, label: actionLabel(advice.plan.action), detail: advice.detail };
+  const anchorLabel = advice.anchor ? ` · ${advice.anchor.label}` : "";
+  const plan = {
+    type: "plan" as const,
+    action: advice.plan.action,
+    label: `${actionLabel(advice.plan.action)}${advice.plan.action === "explorar" ? anchorLabel : ""}`,
+    detail: advice.detail,
+  };
 
   if (body.dryRun) {
     return NextResponse.json({
@@ -59,6 +77,20 @@ export const POST = handler(async (request) => {
       unread: advice.unread,
     });
   }
+
+  // What the author did by naming a card: "descarta la C" discards it; choosing one they
+  // had discarded ("volvamos a la C") brings it back. Only the card's status changes:
+  // never the manuscript, Memoria, facts or threads.
+  if (advice.discard && advice.discard.status !== "dismissed") await setObservationStatus(advice.discard.id, "dismissed");
+  if (advice.anchor && conversation?.cards.find((c) => c.id === advice.anchor!.id)?.status === "dismissed")
+    await setObservationStatus(advice.anchor.id, "new");
+  // Labels of the new cards: the next letters, or versions of the card being developed (B2).
+  const labelsFor = (items: Observation[]) =>
+    assignLabels(
+      (conversation?.cards ?? []).map((c) => c.label),
+      items.map((o) => o.kind),
+      advice.plan.action === "explorar" && advice.anchor ? advice.anchor : null,
+    );
 
   const encoder = new TextEncoder();
   const send = (c: ReadableStreamDefaultController<Uint8Array>, e: AssistEvent) => c.enqueue(encoder.encode(`${JSON.stringify(e)}\n`));
@@ -99,7 +131,7 @@ export const POST = handler(async (request) => {
         if (json !== null) {
           try {
             items = verifyObservations(parseList(json), advice.chapters);
-            send(c, { type: "observations", items });
+            send(c, { type: "observations", items, labels: labelsFor(items) });
           } catch {
             send(c, { type: "observations", items: [], invalid: true });
           }
@@ -125,7 +157,9 @@ export const POST = handler(async (request) => {
               usage: result.usage,
               material: result.items.map(({ label, tokens }) => ({ label, tokens })),
               rounds: result.rounds,
+              cards: labelsFor(items),
             },
+            anchor: advice.anchor,
             observations: items,
             basedOn,
           });

@@ -1956,8 +1956,53 @@ details.group > p {
   flex-direction: column;
   gap: 12px;
 }
-.advisor-actions button {
+/* Accesos rápidos: una línea de enlaces discretos por grupo, no una fila de botones. */
+.advisor-quick {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.quick-row {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 4px;
+  line-height: 1.5;
+}
+.quick-label {
+  margin-right: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+.quick {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font: inherit;
   font-size: 13px;
+  color: var(--accent);
+  cursor: pointer;
+}
+.quick + .quick::before {
+  content: "·";
+  color: var(--muted);
+  margin-right: 6px;
+}
+.quick:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.quick:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.focus-chip {
+  margin: 0 0 6px;
+  color: var(--muted);
+}
+.focus-chip strong {
+  color: var(--accent);
 }
 .ask textarea {
   width: 100%;
@@ -2008,6 +2053,29 @@ details.group > p {
 }
 .obs-title {
   font-weight: 600;
+}
+.obs-label {
+  font-weight: 600;
+  font-size: 12px;
+  margin-right: 8px;
+  color: var(--accent);
+}
+.obs-sections {
+  margin: 4px 0;
+}
+.obs-sections div {
+  margin: 0 0 3px;
+}
+.obs-sections dt {
+  display: inline;
+  font-weight: 600;
+}
+.obs-sections dt::after {
+  content: ": ";
+}
+.obs-sections dd {
+  display: inline;
+  margin: 0;
 }
 .obs-body {
   font-size: 14px;
@@ -2069,6 +2137,13 @@ details.group > p {
   border-radius: 10px 10px 2px 10px;
   padding: 6px 10px;
   font-size: 14px;
+}
+.turn-anchor {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 .turn.advisor {
   border-bottom: 1px solid var(--faint);

@@ -25,6 +25,7 @@ import type { Selection } from "./ChapterEditor";
 import { formatTokens } from "./format";
 import UsageLine from "./UsageLine";
 import ObservationCard, { type CardActions } from "./ObservationCard";
+import { conversationCards, currentFocus } from "@/lib/advisor/cards";
 
 interface Props {
   novelId: string;
@@ -49,6 +50,8 @@ type Ask = {
   action?: AdvisorAction;
   question?: string;
   useSelection: boolean;
+  /** "Seguir con esta": the card the question is about. */
+  anchorId?: string;
   /** After a pause: the material the author approved, and up to how many tokens. */
   preload?: unknown[];
   approvedTokens?: number;
@@ -92,6 +95,10 @@ export default function AdvisorConsult(p: Props) {
   const [plan, setPlan] = useState<{ label: string; detail: string } | null>(null);
   const [text, setText] = useState("");
   const [cards, setCards] = useState<Observation[] | null>(null);
+  const [labels, setLabels] = useState<{ label: string; from: string | null }[] | null>(null);
+  // The author let the proposal in course go: the next message is not about it.
+  const [released, setReleased] = useState(false);
+  const input = useRef<HTMLTextAreaElement | null>(null);
   const [invalid, setInvalid] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [parts, setParts] = useState<ContextPart[] | null>(null);
@@ -126,6 +133,7 @@ export default function AdvisorConsult(p: Props) {
       setLast(null);
       setStored(false);
     }
+    setReleased(false);
     setHistory(id ? (await api<{ messages: AdvisorMessage[] }>(`/api/conversations/${id}`)).messages : []);
   }, [p.novelId]);
   useEffect(() => {
@@ -149,6 +157,8 @@ export default function AdvisorConsult(p: Props) {
       provider: using,
       conversationId,
       deep,
+      anchorId: ask.anchorId,
+      release: released && !ask.anchorId,
       preload: ask.preload,
       approvedTokens: ask.approvedTokens,
     };
@@ -170,6 +180,7 @@ export default function AdvisorConsult(p: Props) {
     setLast({ ...ask, provider: using });
     setText("");
     setCards(null);
+    setLabels(null);
     setInvalid(false);
     setNotice(null);
     setParts(null);
@@ -231,6 +242,7 @@ export default function AdvisorConsult(p: Props) {
           else if (e.type === "usage") setUsage(e);
           else if (e.type === "observations") {
             setCards(e.items);
+            setLabels(e.labels ?? null);
             setInvalid(Boolean(e.invalid));
           } else if (e.type === "saved") savedTo = e.conversationId;
           else if (e.type === "refusal" || e.type === "error") setNotice(e.message);
@@ -256,6 +268,7 @@ export default function AdvisorConsult(p: Props) {
     // Stored: it now belongs to the conversation's history, where its cards can be acted on.
     if (savedTo) {
       setStored(true);
+      setReleased(false);
       // Threads may have changed (reading chapters first, or elsewhere): the cards act on the current ones.
       await Promise.all([open(savedTo, true), loadThreads()]);
       if (ask.question) setQuestion("");
@@ -279,6 +292,28 @@ export default function AdvisorConsult(p: Props) {
       ask({ question: `Vuelve a comprobar esta observación con el texto actual: «${o.title}». ${o.body}`, useSelection: false }),
   };
   const lastAdvisor = [...history].reverse().find((m) => m.role === "advisor");
+  // Labels of the cards (A, B, B2…) and the proposal being developed, as the server sees them.
+  const tags = new Map(conversationCards(history).map((c) => [c.id, { label: c.label, from: c.from }]));
+  const focus = released ? null : currentFocus(history);
+  const follow = (o: StoredObservation) => {
+    const tag = tags.get(o.id);
+    ask({ question: `Sigamos con ${tag ? `${o.kind === "alternative" && !tag.from ? "el camino " : ""}${tag.label}` : "esta propuesta"}: «${o.title}».`, anchorId: o.id, useSelection: false });
+  };
+  const creative = ADVISOR_ACTIONS.filter((a) => a.group === "crear");
+  const review = ADVISOR_ACTIONS.filter((a) => a.group === "revisar");
+  const quick = (a: (typeof ADVISOR_ACTIONS)[number]) =>
+    a.ask
+      ? () => {
+          // "¿Qué pasa si…?": the author writes the possibility.
+          setQuestion((q) => (q.trim() ? q : a.ask!));
+          requestAnimationFrame(() => {
+            const t = input.current;
+            if (!t) return;
+            t.focus();
+            t.setSelectionRange(t.value.length, t.value.length);
+          });
+        }
+      : () => ask({ action: a.id, useSelection });
 
   return (
     <div className="consult">
@@ -321,6 +356,7 @@ export default function AdvisorConsult(p: Props) {
           {history.map((m, k) =>
             m.role === "author" ? (
               <li key={m.id} className="turn author">
+                {m.context?.anchor && <span className="turn-anchor small">sobre {m.context.anchor.label}</span>}
                 {m.content}
               </li>
             ) : (
@@ -347,6 +383,8 @@ export default function AdvisorConsult(p: Props) {
                         onGoTo={p.onGoTo}
                         onSendToAssistant={p.onSendToAssistant}
                         actions={actions}
+                        tag={tags.get(o.id)}
+                        onFollow={running || !p.provider ? undefined : follow}
                       />
                     ))}
                   </ul>
@@ -358,17 +396,28 @@ export default function AdvisorConsult(p: Props) {
           )}
         </ol>
       )}
-      <div className="actions advisor-actions" role="group" aria-label="Acciones del Consejero">
-        {ADVISOR_ACTIONS.map((a) => (
-          <button key={a.id} title={a.hint} disabled={running || !p.provider} onClick={() => ask({ action: a.id, useSelection })}>
-            {a.label}
-          </button>
-        ))}
+      <div className="advisor-quick" role="group" aria-label="Acciones del Consejero">
+        <p className="quick-row">
+          <span className="quick-label muted small">Pensar juntos</span>
+          {creative.map((a) => (
+            <button key={a.id} className="quick" title={a.hint} disabled={running || !p.provider} onClick={quick(a)}>
+              {a.label}
+            </button>
+          ))}
+        </p>
+        <p className="quick-row">
+          <span className="quick-label muted small">Revisar</span>
+          {review.map((a) => (
+            <button key={a.id} className="quick" title={a.hint} disabled={running || !p.provider} onClick={quick(a)}>
+              {a.label}
+            </button>
+          ))}
+        </p>
       </div>
       {p.selection && (
         <label className="check small">
           <input type="checkbox" checked={useSelection} onChange={(e) => setUseSelection(e.target.checked)} />
-          <span>Sobre la selección (Analizar y Coherencia)</span>
+          <span>Sobre la selección (Analizar, Coherencia y Subir tensión)</span>
         </label>
       )}
       <label className="check small" title="Si lo necesita, el Consejero pide fichas, pasajes o capítulos concretos, con límites. Nunca la novela completa.">
@@ -389,12 +438,23 @@ export default function AdvisorConsult(p: Props) {
           if (question.trim()) ask({ question: question.trim(), useSelection });
         }}
       >
+        {focus && (
+          <p className="focus-chip small" aria-live="polite">
+            Desarrollando <strong>{focus.label}</strong> «{focus.title}» ·{" "}
+            <button type="button" className="link small" disabled={running} onClick={() => setReleased(true)} title="Tu próximo mensaje no será sobre esta propuesta">
+              Soltar
+            </button>
+          </p>
+        )}
         <textarea
+          ref={input}
           rows={2}
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           placeholder={
-            conversationId ? "Sigue la conversación…" : "Pregúntale al Consejero… Ej.: ¿Revelo demasiado pronto lo de la carta?"
+            conversationId
+              ? "Sigue la conversación… Ej.: Me gusta el segundo, pero quiero que aparezca Nacho."
+              : "Piensa con el Consejero… Ej.: No sé cómo continuar. · ¿Qué pasa si Elena descubre la carta?"
           }
           aria-label="Pregunta al Consejero"
           onKeyDown={(e) => {
@@ -443,7 +503,7 @@ export default function AdvisorConsult(p: Props) {
           {cards && cards.length > 0 && (
             <ul className="observations">
               {cards.map((o, k) => (
-                <ObservationCard key={k} o={o} label={label} onGoTo={p.onGoTo} onSendToAssistant={p.onSendToAssistant} />
+                <ObservationCard key={k} o={o} label={label} onGoTo={p.onGoTo} onSendToAssistant={p.onSendToAssistant} tag={labels?.[k]} />
               ))}
             </ul>
           )}
