@@ -725,3 +725,43 @@ del canon.
   *Ir*), accesos rápidos *¿Cómo continúo?* · *Dame opciones* · *Necesito un giro* · *¿Qué pasa si…?*,
   y sin opciones técnicas. En el teléfono, lo mismo dentro de la hoja.
 - **API:** sin `mode`, el Consejero responde en Analizar, como antes; el panel envía `conversar`.
+
+## Argumento general · Fase 1: cuatro capas, el plan del autor y los tokens (sin cambios de base de datos)
+
+- **Cuatro capas que no se confunden** (instrucciones de Analizar y Conversar): *canon* (el
+  manuscrito y la Memoria aprobada), *estado actual* (fichas, lo que cada personaje sabe hasta aquí,
+  cronología), *plan del autor* (sinopsis y notas: intención, no canon; nunca presentarlo como ya
+  ocurrido ni adelantar sus revelaciones) e *ideas* (la conversación).
+- **El plan del autor, una vez y sin IA** (`plan-text.ts`):
+  - *visión general*, en el marco que se cachea: el plan entero si cabe (≈2.000 tokens); si no, su
+    primer párrafo (la premisa), los títulos, la primera frase de cada párrafo y el último (el
+    desenlace). Es la misma en cada turno;
+  - *detalles*, en la petición: los párrafos completos que nombran a los personajes y lugares en
+    juego o comparten palabras con la pregunta (≈1.500 tokens en Conversar, ≈2.500 en Analizar);
+  - la sinopsis ya no va dos veces (antes en la Guía y en «Plan del autor») y las notas tampoco.
+- **«Lo que saben hasta aquí»**: las revelaciones de las fichas a los personajes elegidos, hasta el
+  capítulo actual (las últimas 15).
+- **Un marco estable**: el mapa usa los capítulos guardados y las palabras redondeadas a cientos, así
+  que escribir entre turnos no invalida la caché.
+- **Conversar ligero**: las propuestas anteriores van más resumidas (25 como máximo, el texto de las
+  5 últimas) y la que está en la mesa, siempre entera.
+
+### Medición (`tests/e2e/tokens.test.mjs`)
+
+Una novela de 30 capítulos (≈2.500 palabras cada uno) con fichas, sinopsis de 18.000 caracteres,
+notas de 6.000 y 8 personajes; 8 turnos de Conversar (con escritura entre turnos), 2 de Analizar y
+una escena del Asistente. Tokens de entrada estimados (caracteres / 3,5):
+
+| | antes (main) | ahora |
+|---|---|---|
+| Conversar, por turno (instrucciones + marco + petición) | ≈17.000 | ≈13.700 |
+| … de ellos, el prefijo cacheable | ≈9.400 | ≈4.600 |
+| … turnos que reutilizan la caché | 5 de 8 | 7 de 8 |
+| … coste efectivo con caché de Anthropic, por turno | ≈12.600 | ≈10.200 |
+| Analizar, por turno | ≈19.500–22.300 | ≈17.200–19.900 |
+| Escena del Asistente | ≈12.500 | ≈7.900 (sin el plan) |
+
+Coste efectivo: la petición a precio normal, el prefijo a 1,25× cuando se escribe en caché y a 0,1×
+cuando se reutiliza. La salida no cambia (tope de 3.000 tokens en Conversar, 4.000–6.000 en
+Analizar). Ninguna llamada de IA nueva: la visión general, los detalles y la continuidad se calculan
+sin IA.

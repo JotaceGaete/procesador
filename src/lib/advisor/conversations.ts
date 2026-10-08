@@ -108,6 +108,8 @@ export async function conversationContext(opts: {
   provider: ProviderId;
   signal: AbortSignal;
   compact?: boolean;
+  /** Conversar: the cards block is shorter (the latest proposals with their text, the rest by title). */
+  lean?: boolean;
 }): Promise<ConversationState> {
   const c = await getConversation(opts.conversationId);
   if (c.novel_id !== opts.novelId) throw new HttpError(404, "Conversación no encontrada");
@@ -152,7 +154,7 @@ export async function conversationContext(opts: {
     if (error) throw error;
   }
   const recent = messages.slice(from);
-  const block = cardsBlock(cards, focus);
+  const block = opts.lean ? cardsBlock(cards, focus, 25, { recent: 5, chars: 450 }) : cardsBlock(cards, focus);
   if (!summary && !recent.length) return { text: "", messages: 0, cards, focus, plan };
   const text = [
     summary && `Resumen de lo hablado antes (ideas en discusión; nada de esto es un hecho de la novela):\n${summary}`,

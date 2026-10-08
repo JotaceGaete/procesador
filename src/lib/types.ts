@@ -390,6 +390,8 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = { anthropic: "Claude"
 /** Events of the /api/assist stream, one JSON object per line. */
 export type AssistEvent =
   | { type: "text"; text: string }
+  /** The automatic continuity check of a proposal of the Asistente (lib/continuity.ts). */
+  | { type: "continuity"; warnings: { kind: string; message: string }[] }
   | { type: "refusal"; message: string }
   | { type: "truncated" }
   | { type: "error"; message: string }

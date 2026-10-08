@@ -90,6 +90,8 @@ interface Result {
   /** Where a scene will go: the chapter's end, or a fixed position. Only the author changes it. */
   insertTarget: InsertTarget;
   usage: Usage | null;
+  /** Continuidad: what the proposal may change of what is established (checked without AI). */
+  continuity?: { kind: string; message: string }[];
 }
 
 /** What a run was asked, so "Otra versión" and "Probar con…" repeat it exactly. */
@@ -498,6 +500,7 @@ function AssistantPanel(props: Props) {
           if (event.type === "text") update(key, (r) => ({ output: r.output + event.text }));
           else if (event.type === "refusal") update(key, () => ({ notice: { kind: "refusal", message: event.message } }));
           else if (event.type === "error") update(key, () => ({ notice: { kind: "error", message: event.message } }));
+          else if (event.type === "continuity") update(key, () => ({ continuity: event.warnings }));
           else if (event.type === "truncated")
             update(key, () => ({ notice: { kind: "truncated", message: "La respuesta se cortó por longitud." } }));
           else if (event.type === "context") update(key, () => ({ readParts: event.parts, sent: event.sent ?? null }));
@@ -1355,6 +1358,18 @@ function AssistantPanel(props: Props) {
                   Cancelar
                 </button>
               </div>
+            </div>
+          )}
+          {result?.continuity && result.continuity.length > 0 && (
+            <div className="continuity-note" role="note" aria-label="Continuidad">
+              <p className="small">
+                <strong>Revisa la continuidad</strong> <span className="muted">· comprobado con la Memoria y lo ya escrito, sin IA</span>
+              </p>
+              <ul className="small">
+                {result.continuity.map((w, i) => (
+                  <li key={i}>{w.message}</li>
+                ))}
+              </ul>
             </div>
           )}
           {result?.applyFailed && (

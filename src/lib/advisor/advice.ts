@@ -15,9 +15,13 @@ import { chapterRows, digestEstimate, digestRows, novelDigestRow, threadRows } f
 import { freshness } from "./freshness";
 import { echoes, phraseRepetitions, presence } from "./stats";
 import { NEW_TOPIC, planQuestion, type Plan } from "./planner";
+import { planDetails, planOverview, questionWords } from "./plan-text";
 import { ADVISE_INSTRUCTIONS, ADVISE_TASKS, CONVERSE_INSTRUCTIONS, CONVERSE_TASKS } from "./prompts";
 import { lastProposal, likesProposal, wantsAnalysis, wantsOptions, type AdvisorMode } from "./converse";
 import { deepInstructions, deepLimits, type ToolContext } from "./deep";
+
+/** Rounded to hundreds, so the map (in the cached frame) does not change while the author types. */
+const roundedWords = (n: number) => (n < 100 ? "menos de 100 palabras" : `≈${(Math.round(n / 100) * 100).toLocaleString("es")} palabras`);
 
 /**
  * Context for each Consejero action (docs/consejero.md §4): levels with a budget each,
@@ -64,6 +68,10 @@ const RECIPES: Record<AdvisorAction, { focus: "chapter" | "tail" | "none"; diges
   personajes: { focus: "chapter", digests: 4000, passages: 2500, data: ["presence"] },
 };
 const FOCUS_TOKENS = 18_000;
+/** The author's plan (synopsis and notes): its global view, in the cached frame, and the
+ *  paragraphs that matter for this turn, in the prompt (docs/consejero.md, «Argumento general»). */
+const PLAN_OVERVIEW_TOKENS = 2000;
+const PLAN_DETAIL_TOKENS = { conversar: 1500, analizar: 2500 };
 const TAIL_CHARS = 8000;
 const NAMED_CHAPTERS_TOKENS = 14_000;
 
@@ -215,17 +223,34 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
   // ---------- 0 · frame (stable, cached) ----------
   const names = new Map([...memory.characters, ...memory.places].map((x) => [x.id, x.name]));
   const people = presence(chapters, memory.characters, index);
-  const mapLines = chapters.map((c, i) => {
+  // The map, stable between turns so the frame can be cached: the saved chapters (not the
+  // live text, which changes as the author types) and their length rounded to hundreds.
+  const savedPeople = presence(rows, memory.characters, index);
+  const mapLines = rows.map((c, i) => {
     const d = byChapter.get(c.id);
-    const who = people.filter((p) => p.counts[i] > 0).map((p) => p.name).slice(0, 6).join(", ");
+    const who = savedPeople.filter((p) => p.counts[i] > 0).map((p) => p.name).slice(0, 6).join(", ");
     const line = d ? d.summary.split(/(?<=[.!?])\s/)[0] : "sin ficha";
     const stale = d && status(i) === "stale" ? " (ficha de una versión anterior)" : "";
-    return `- ${label(i)} · ${countWords(c.content)} palabras${who ? ` · aparecen: ${who}` : ""} · ${clip(line, 220)}${stale}`;
+    return `- ${label(i)} · ${roundedWords(countWords(c.content))}${who ? ` · aparecen: ${who}` : ""} · ${clip(line, 220)}${stale}`;
   });
   const threadLines = threads.map((t) => threadLine(t, chapters, label));
+  // The author's plan: the synopsis and the notes (never sent to the Asistente). Its global
+  // view goes in the frame, once; the details that matter, in the prompt.
+  // Each text keeps its own premise and ending (the synopsis' last paragraph is its ending).
+  const planTexts = [
+    { title: "Sinopsis", text: novel.synopsis.trim(), share: novel.notes.trim() ? 0.75 : 1 },
+    { title: "Notas del autor", text: novel.notes.trim(), share: novel.synopsis.trim() ? 0.25 : 1 },
+  ]
+    .filter((x) => x.text)
+    .map((x) => ({ ...x, overview: planOverview(x.text, Math.floor(chars(PLAN_OVERVIEW_TOKENS) * x.share)) }));
+  const overview = {
+    whole: planTexts.every((x) => x.overview.whole),
+    text: planTexts.map((x) => `${x.title}:\n${x.overview.text}`).join("\n\n"),
+  };
   const frame = [
-    compileGuide(novel) && `## Guía Maestra\n${compileGuide(novel)}`,
-    novel.synopsis.trim() && `## Plan del autor (sinopsis)\n${clip(novel.synopsis.trim(), 6000)}`,
+    `## Guía Maestra (estilo)\n${compileGuide(novel)}`,
+    overview.text &&
+      `## Plan del autor${overview.whole ? "" : " (visión general; los detalles pertinentes van aparte)"}\nSu intención para la novela. En gran parte aún no está escrito: no es canon ni algo que ya ocurrió.\n${overview.text}`,
     `## Mapa de la novela\n${mapLines.join("\n")}`,
     global && `## Resumen global (derivado de las fichas)\n${clip(global.summary, 9000)}`,
     `## Cabos\n${threadLines.length ? threadLines.join("\n") : "(ninguno registrado)"}`,
@@ -308,6 +333,35 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
   });
   const mem = memoryBlock(selected, memory, outline, current.id, time);
   if (mem) blocks.push(part(`Memoria de ${selected.characters.length} personaje${selected.characters.length === 1 ? "" : "s"}`, mem));
+  // The plan's paragraphs about the people and places in play, or the question's words.
+  if (!overview.whole) {
+    const matchers = [
+      ...memory.characters.filter((c) => selected.characters.some((x) => x.id === c.id) || plan.characterIds.includes(c.id)),
+      ...memory.places.filter((p) => plan.placeIds.includes(p.id) || selected.places.some((x) => x.id === p.id)),
+    ]
+      .map(nameMatcher)
+      .filter((m): m is RegExp => Boolean(m));
+    const budget = chars(mode === "conversar" ? PLAN_DETAIL_TOKENS.conversar : PLAN_DETAIL_TOKENS.analizar);
+    const words = questionWords(`${question} ${anchored ? anchored.title : ""}`);
+    const details = planTexts
+      .filter((x) => !x.overview.whole)
+      .map((x) => planDetails(x.text, { matchers, words, budget: Math.floor(budget * x.share), skip: x.overview.full }))
+      .filter(Boolean)
+      .join("\n\n");
+    if (details)
+      blocks.push(part("Plan del autor: pasajes pertinentes", `<plan-del-autor-detalles>\n${details}\n</plan-del-autor-detalles>\n(Intención del autor, no canon: lo que aún no ha ocurrido no se presenta como ocurrido.)`));
+  }
+  // Estado actual: what the people in play have learned so far (the digests' revelations).
+  const knowing = selected.characters.slice(0, 6);
+  const learned: string[] = [];
+  for (let i = 0; i <= index; i++) {
+    const d = byChapter.get(chapters[i].id);
+    for (const r of d?.revelations ?? []) {
+      const who = knowing.find((c) => c.id === r.to);
+      if (who) learned.push(`- ${who.name}: ${clip(r.text.trim(), 200)} (${label(i)})`);
+    }
+  }
+  if (learned.length) blocks.push(part("Lo que saben hasta aquí", `<lo-que-saben>\n${learned.slice(-15).join("\n")}\n</lo-que-saben>`));
   if (chron.marks.length) {
     const lines = chapters.map((c, i) => {
       const p = chron.result.points[i];

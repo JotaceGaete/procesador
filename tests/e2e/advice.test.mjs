@@ -86,8 +86,8 @@ test("Analizar capítulo: the Consejero's model, a cached frame, the live chapte
   assert.match(instructions.text, /Nunca escribas texto para el manuscrito/);
   assert.match(instructions.text, /Nunca inventes una cita/);
   assert.deepEqual(frame.cache_control, { type: "ephemeral" }, "the stable frame is cached");
-  assert.match(frame.text, /## Plan del autor \(sinopsis\)\nElena descubre/);
-  assert.match(frame.text, /## Mapa de la novela\n- Capítulo 1 · \d+ palabras · aparecen: Elena, Juan/);
+  assert.match(frame.text, /## Plan del autor\nSu intención para la novela\. En gran parte aún no está escrito: no es canon ni algo que ya ocurrió\.\nSinopsis:\nElena descubre/);
+  assert.match(frame.text, /## Mapa de la novela\n- Capítulo 1 · (≈\d+|menos de 100) palabras · aparecen: Elena, Juan/);
   assert.match(frame.text, /## Cabos\n- «La carta de Marta»/);
   const prompt = sent.body.messages[0].content;
   assert.ok(prompt.includes(`<capitulo-actual numero="3" titulo="Tres">\n${LIVE}\n</capitulo-actual>`), "live, unsaved text");

@@ -4,6 +4,7 @@ import { db, getChapterTexts, getMemory, getNovel, getOutline } from "@/lib/supa
 import { countWords, forModel, protectImages, separatorsForModel } from "@/lib/manuscript";
 import { HttpError, readJson } from "@/lib/http";
 import { briefBlock, parseBrief } from "@/lib/advisor/converse";
+import { checkContinuity, currentScene, type ContinuityInput, type ContinuityWarning } from "@/lib/continuity";
 import { compileGuide } from "@/lib/guide";
 import {
   buildManuscript,
@@ -115,7 +116,15 @@ type BuiltRequest = CompletionRequest & {
   sections: ContextSection[];
   /** What the author should know about the context (chapters without a digest…). */
   notices: string[];
+  /** The automatic continuity check of the answer (scenes and rewrites): no AI, run at the end. */
+  continuity?: (output: string) => ContinuityWarning[];
 };
+
+/** The proposal inside the answer (<escena> or <reescritura>), as the panel will show it. */
+function proposalOf(output: string, tag: "escena" | "reescritura"): string {
+  const m = output.match(new RegExp(`<${tag}>([\\s\\S]*?)(?:</${tag}>|$)`));
+  return m ? m[1].trim() : "";
+}
 
 async function buildRequest(body: Record<string, unknown>, signal: AbortSignal): Promise<BuiltRequest> {
   const novel = await getNovel(String(body.novelId ?? ""));
@@ -144,6 +153,15 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
         .filter((x): x is readonly [string, string] => Boolean(x[1])),
     ),
   };
+  // Continuidad (no AI): the Memoria and each character's age at this point of the story.
+  const continuityBase = (): Pick<ContinuityInput, "characters" | "places" | "ages"> => ({
+    characters: memory.characters,
+    places: memory.places,
+    ages: memory.characters.flatMap((c) => {
+      const a = chron.marks.length ? chron.result.ages.get(c.id)?.[chapterIndex] : null;
+      return a ? [{ name: c.name, aliases: c.aliases, min: a.min, max: a.max, approx: a.approx }] : [];
+    }),
+  });
   const project = (selected: SelectedMemory) =>
     [guide, memoryBlock(selected, memory, outline, chapter.id, time)].filter(Boolean).join("\n\n");
   const guideInventory = guideSection(novel, guide);
@@ -358,6 +376,16 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
         draft,
         brief,
       }),
+      continuity: (output) => {
+        const chosen = memory.places.find((p) => placeIds.includes(p.id)) ?? null;
+        return checkContinuity({
+          ...continuityBase(),
+          proposal: proposalOf(output, "escena"),
+          before: currentScene(content.slice(0, cursor)),
+          given: `${argument}\n${brief ?? ""}`,
+          place: chosen,
+        });
+      },
       signal,
       role: "write",
       novelId: novel.id,
@@ -465,6 +493,11 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       timeWarnings,
     }),
     signal,
+    // A rewrite keeps what the fragment established (clothes, names, ages); analyses are not checked.
+    continuity:
+      action.section === "advisor"
+        ? undefined
+        : (output) => checkContinuity({ ...continuityBase(), proposal: proposalOf(output, "reescritura"), before: selection }),
     // Rewrites are the Asistente's; the analyses belong to the Consejero and use its model.
     role: action.section === "advisor" ? "advise" : "write",
     novelId: novel.id,
@@ -474,7 +507,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
 
 function streamResponse(
   provider: NonNullable<ReturnType<typeof getProvider>>,
-  completion: CompletionRequest,
+  completion: CompletionRequest & { continuity?: (output: string) => ContinuityWarning[] },
   inventory: { parts: ContextPart[] } & ContextInventory,
   onUsage: (u: Extract<AssistEvent, { type: "usage" }>) => Promise<void>,
 ) {
@@ -483,6 +516,7 @@ function streamResponse(
     controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
 
   const generator = provider.stream(completion);
+  let output = "";
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const { parts, total, sections, notices, instructions } = inventory;
@@ -491,8 +525,13 @@ function streamResponse(
     async pull(controller) {
       try {
         const { value, done } = await generator.next();
-        if (done) controller.close();
-        else {
+        if (done) {
+          // Continuidad: what the proposal changes of what is established (never blocks).
+          const warnings = output && completion.continuity ? completion.continuity(output) : [];
+          if (warnings.length) send(controller, { type: "continuity", warnings });
+          controller.close();
+        } else {
+          if (value.type === "text") output += value.text;
           if (value.type === "usage") await onUsage(value);
           send(controller, value);
         }

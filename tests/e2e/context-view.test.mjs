@@ -72,7 +72,7 @@ test("escena: el inventario dice qué va y por qué; nada de lo que no va", asyn
   assert.equal(sec.chapter.label, "Capítulo 2: El regreso");
   assert.match(sec.chapter.items[0].label, /antes del cursor/);
   assert.match(sec.previous.items[0].label, /^Capítulo 1: últimas/);
-  assert.deepEqual(sec.guide.items.map((i) => i.label), ["Sinopsis", "Mundo", "Narración"]);
+  assert.deepEqual(sec.guide.items.map((i) => i.label), ["Mundo", "Narración"], "the synopsis is the author's plan: the Consejero's, not the Asistente's");
   assert.deepEqual(
     sec.characters.items.map((i) => [i.label, i.reason]),
     [
@@ -106,7 +106,7 @@ test("escena: lo que recibe el modelo coincide con el inventario", async () => {
   assert.doesNotMatch(system, /La iglesia/);
   assert.ok(system.includes(FACT_SENT));
   assert.ok(!system.includes(FACT_SUGGESTED) && !system.includes(FACT_UNRELATED));
-  assert.match(system, /Una jueza vuelve al pueblo/);
+  assert.doesNotMatch(system, /Una jueza vuelve al pueblo/, "nor the synopsis");
   assert.ok(prompt.includes(ARGUMENT));
   assert.ok(prompt.includes("FINAL-DEL-UNO"), "the previous chapter's end, as listed");
   assert.ok(!system.includes("FINAL-DEL-UNO"), "no whole novel: it wasn't listed");
