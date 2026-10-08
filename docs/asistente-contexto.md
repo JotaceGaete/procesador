@@ -150,7 +150,7 @@ Junto a «Contexto de esta consulta: ≈6 mil tokens» aparece un enlace discret
 > - ▸ Lo ocurrido antes: caps. 2–3 en detalle · cap. 1 en una línea *(cap. 1: ficha desactualizada)*
 > - ▸ Hilos abiertos: 3
 > - ▸ Lo que saben: Pilar (2), Héctor (1)
-> - Guía Maestra y sinopsis
+> - Guía Maestra (estilo; la sinopsis y las notas no: ver §13)
 > - ▸ Personajes: Pilar *(argumento)*, Héctor *(en escena en el cap. 3)*, Anaís *(elegida)*
 > - ▸ Lugares: El puerto
 > - ▸ Hechos aprobados: 6
@@ -313,3 +313,29 @@ acompaña.
 
 El Consejero conserva su disposición. El Asistente en el teléfono (selección + hoja propia) queda
 para su propio diseño.
+
+## 13. El plan del autor no llega al Asistente; continuidad sin IA (Argumento general, Fase 1)
+
+- **Sin sinopsis ni notas.** `compileGuide` ya no las incluye: el Asistente recibe la Guía Maestra
+  (estilo, mundo, narración) y nada del plan. La sinopsis y las notas suelen contar lo que aún no
+  ocurrió (secretos, revelaciones, el final); una instrucción («no adelantes») no basta si el texto
+  está en la petición, así que no se envía. «Ver contexto» ya no las lista. Lo que una escena
+  necesita del plan llega por el argumento del autor o por el encargo del Consejero, que el autor
+  revisa antes de enviarlo.
+- **Novelas existentes:** nada que migrar. Las sinopsis y notas siguen donde estaban y las lee el
+  Consejero; el editor de la novela explica que el Asistente no las recibe. Si alguien guardaba en
+  las notas reglas de estilo para el Asistente, el lugar es la Guía Maestra.
+- **Continuidad automática** (`src/lib/continuity.ts`): al terminar cada escena o reescritura, el
+  servidor compara la propuesta con la escena actual (desde el último separador) o con el fragmento
+  reescrito, con la Memoria y con la Cronología, y envía un evento `continuity` si hay algo que
+  mirar. Sin IA: unos milisegundos y ningún token. Avisa de
+  - un nombre propio que no está en la Memoria, ni antes en la escena, ni en el argumento o el encargo;
+  - una prenda que cambia de color, u otra prenda del mismo tipo donde se describió una;
+  - la escena situada en otro lugar de la Memoria que el elegido;
+  - una edad que contradice la Cronología en ese punto (no los recuerdos: «cuando tenía veinte años»).
+
+  Como mucho dos avisos por tipo; son «revisa», no veredictos, y no bloquean nada. Se muestran bajo
+  la propuesta («Revisa la continuidad · comprobado con la Memoria y lo ya escrito, sin IA»). La
+  revisión profunda (con IA) sigue siendo la acción *Revisar continuidad*.
+- **Tokens:** la escena medida en `tests/e2e/tokens.test.mjs` (sinopsis de 18.000 caracteres, notas
+  de 6.000) pasa de ≈12.500 a ≈7.900 tokens de entrada.

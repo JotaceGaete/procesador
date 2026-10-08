@@ -46,10 +46,11 @@ test("inventory: nothing selected → no memory sections at all", () => {
 });
 
 test("inventory: guide lists the parts that are filled; an empty guide says so", () => {
-  const full = guideSection({ synopsis: "Algo", notes: "", guide: { genre: "Drama" } }, "x".repeat(35));
-  assert.deepEqual(full.items.map((i) => i.label), ["Sinopsis", "Mundo"]);
+  // The Asistente's guide: the style only; the synopsis and notes never go (they are the plan).
+  const full = guideSection({ guide: { genre: "Drama" } }, "x".repeat(35));
+  assert.deepEqual(full.items.map((i) => i.label), ["Mundo"]);
   assert.equal(full.tokens, 10);
-  const empty = guideSection({ synopsis: "", notes: "", guide: {} }, "x");
+  const empty = guideSection({ guide: {} }, "x");
   assert.match(empty.label, /sólo el título/);
   assert.match(empty.items[0].label, /Sin guía de estilo/);
 });

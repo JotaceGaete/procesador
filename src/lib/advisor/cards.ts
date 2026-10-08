@@ -276,18 +276,24 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s
  * ones go with their title only, marked as not to be proposed again and not true. The
  * oldest ones are shortened so a long conversation stays within budget.
  */
-export function cardsBlock(cards: CardWithState[], focus: CardRef | null, max = 40): string {
+export function cardsBlock(
+  cards: CardWithState[],
+  focus: CardRef | null,
+  max = 40,
+  /** How many of the latest cards go with their text, and how much of it (Conversar: fewer, shorter). */
+  detail: { recent: number; chars: number } = { recent: 12, chars: 700 },
+): string {
   if (!cards.length) return "";
   const kept = cards.slice(-max);
   const lines = kept.map((c, i) => {
-    const recent = i >= kept.length - 12;
+    const recent = i >= kept.length - detail.recent || (focus != null && c.id === focus.id);
     const extra = c.state === "MODIFICADO" ? ` → ${c.versions.join(", ")}` : "";
     const chosen = c.chosen && c.state === "MODIFICADO" ? " (lo eligió el autor)" : "";
     const version = c.from ? ` · versión de ${c.from}` : "";
     const saved = c.status === "saved" ? " · guardada por el autor como idea" : "";
     if (c.state === "DESCARTADO")
       return `- ${c.label} · DESCARTADO por el autor — «${c.title}». No la propongas de nuevo salvo que el autor la recupere; no es verdad en la novela.`;
-    return `- ${c.label}${version} · ${c.state}${extra}${chosen}${saved} — «${c.title}»${recent ? `: ${clip(c.body, 700)}` : ""}`;
+    return `- ${c.label}${version} · ${c.state}${extra}${chosen}${saved} — «${c.title}»${recent ? `: ${clip(c.body, detail.chars)}` : ""}`;
   });
   return [
     `Propuestas y observaciones de esta conversación (${cards.length > max ? `las últimas ${max} de ${cards.length}` : cards.length}). Ninguna es un hecho de la novela: ni las propuestas, ni las elegidas, ni las modificadas. Sólo el manuscrito, la Memoria y los hechos aprobados dicen lo que ocurre.`,

@@ -12,8 +12,14 @@ const LONG_SCENE = (tag) =>
   `<escena>${tag}. ${Array.from({ length: 45 }, (_, i) => `Juan cruzó la cocina despacio, paso ${i + 1}, sin mirarla.\n\n—¿Vas a seguir callada? —preguntó él.`).join("\n\n")}</escena>`;
 // "ESCENA-FORMATO" in the argument: a scene with italics, a scene break and bold, as models write them.
 const FORMAT_SCENE = "<escena>Leyó *Rayuela* de un tirón.\n\n* * *\n\nAl día siguiente dijo **nunca**.</escena>";
+// Continuity hooks in the argument: "ESCENA-ROPA" changes the garment and brings in a new
+// name; "ESCENA-EDAD" gives Claudia an age the chronology contradicts.
 const sceneReply = (prompt) =>
-  prompt.includes("<borrador>")
+  prompt.includes("ESCENA-ROPA")
+    ? "<escena>Marcela se ajustó la blusa roja frente al espejo. En el pasillo, Rodrigo esperaba sin decir nada.</escena>"
+    : prompt.includes("ESCENA-EDAD")
+      ? "<escena>Claudia, que tenía veinte años, cerró la ventana.</escena>"
+      : prompt.includes("<borrador>")
     ? LONG_SCENE("ESCENA-AMPLIADA")
     : prompt.includes("ESCENA-LARGA")
       ? LONG_SCENE("ESCENA-DESARROLLADA")

@@ -53,6 +53,7 @@ export const POST = handler(async (request) => {
       provider: body.provider as ProviderId,
       signal: request.signal,
       compact: !body.dryRun,
+      lean: body.mode === "conversar",
     });
   }
   const advice = await buildAdvice(

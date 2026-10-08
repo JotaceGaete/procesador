@@ -74,6 +74,11 @@ export default function NovelModal({ novel, onClose, onSaved }: { novel: Novel; 
                 onChange={(e) => setForm({ ...form, synopsis: e.target.value })}
               />
             </label>
+            <p className="muted small field-help">
+              La sinopsis y las notas son tu plan: las lee el Consejero, como intención (no como algo que ya ocurrió). El
+              Asistente no las recibe, para que una escena no adelante lo que aún no debe saberse; lo que necesite saber de
+              siempre va en la Memoria (personajes, relaciones, hechos) y en lo que el Consejero le envía.
+            </p>
             <label>
               <span>Notas</span>
               <textarea
@@ -133,7 +138,7 @@ export default function NovelModal({ novel, onClose, onSaved }: { novel: Novel; 
                 campos (o «Instrucciones libres»).
               </p>
               <pre className="compiled">
-                {compileGuide({ title: form.title, synopsis: form.synopsis, notes: form.notes, guide })}
+                {compileGuide({ title: form.title, guide })}
               </pre>
             </details>
           </>

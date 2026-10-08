@@ -29,17 +29,16 @@ function reasonFor(who: { id: string; name: string; aliases: string }, chosen: s
   return (m && sources.find((s) => m.test(s.text))?.reason) || null;
 }
 
-export function guideSection(novel: Pick<Novel, "synopsis" | "notes" | "guide">, compiled: string): ContextSection {
+/** The Guía Maestra as the Asistente receives it: the style, never the synopsis nor the notes. */
+export function guideSection(novel: Pick<Novel, "guide">, compiled: string): ContextSection {
   const g = novel.guide ?? {};
   const items: ContextItem[] = [];
-  if (novel.synopsis.trim()) items.push({ label: "Sinopsis", detail: clip(novel.synopsis.trim(), 600) });
   for (const section of GUIDE_SECTIONS) {
     const filled = section.fields.filter((f) => g[f.key]?.trim());
     if (filled.length)
       items.push({ label: section.title, detail: filled.map((f) => `${f.label}: ${clip(g[f.key]!.trim(), 160)}`).join("\n") });
   }
-  if (novel.notes.trim()) items.push({ label: "Notas del autor", detail: clip(novel.notes.trim(), 600) });
-  const hasGuide = items.some((i) => i.label !== "Sinopsis" && i.label !== "Notas del autor");
+  const hasGuide = items.length > 0;
   return {
     id: "guide",
     label: items.length ? "Guía Maestra" : "Guía Maestra (sólo el título de la novela)",

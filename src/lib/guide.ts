@@ -106,19 +106,23 @@ export function cleanGuide(input: unknown): Guide {
 }
 
 /**
- * Turns the author's guide into the "Prompt Maestro" sent with every AI operation.
- * Only filled fields appear; the author never has to write prompt text.
+ * Turns the author's guide into the "Prompt Maestro" sent with every AI operation: how the
+ * novel is written (narrator, tone, dialogue…). Only filled fields appear; the author never
+ * has to write prompt text.
+ *
+ * The synopsis and the author's notes are not part of it (docs/consejero.md, «Argumento
+ * general»): they hold the author's plan, often with what hasn't happened yet and secrets the
+ * reader doesn't know. The Asistente never receives them (so a scene can't reveal them early);
+ * the Consejero reads them apart, as the plan (`authorPlan`).
  */
-export function compileGuide(novel: Pick<Novel, "title" | "synopsis" | "notes" | "guide">): string {
+export function compileGuide(novel: Pick<Novel, "title" | "guide">): string {
   const g = novel.guide ?? {};
   const parts: string[] = [`# Novela: ${novel.title}`];
-  if (novel.synopsis.trim()) parts.push(`## Sinopsis\n${novel.synopsis.trim()}`);
 
   for (const section of GUIDE_SECTIONS) {
     const lines = section.fields.filter((f) => g[f.key]?.trim()).map((f) => `- ${f.label}: ${g[f.key]!.trim()}`);
     if (lines.length) parts.push(`## ${section.title}\n${lines.join("\n")}`);
   }
-  if (novel.notes.trim()) parts.push(`## Notas del autor\n${novel.notes.trim()}`);
 
   const hasGuide = GUIDE_KEYS.some((k) => g[k]?.trim());
   parts.push(

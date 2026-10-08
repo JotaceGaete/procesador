@@ -76,11 +76,12 @@ test("memory block: relationships by name, and facts of later chapters flagged",
 test("Guía Maestra: only filled fields, unknown fields dropped", () => {
   const guide = cleanGuide({ person: "Primera persona", avoid: "Metáforas marinas", tone: "  ", junk: "x" });
   assert.deepEqual(guide, { person: "Primera persona", avoid: "Metáforas marinas" });
-  const compiled = compileGuide({ title: "T", synopsis: "Sinopsis.", notes: "", guide });
+  const compiled = compileGuide({ title: "T", guide, ...{ synopsis: "Pola ama a Eduardo en secreto.", notes: "Gerardo llegará." } } as never);
   assert.ok(compiled.includes("Persona narrativa: Primera persona") && compiled.includes("## Intención"));
   assert.ok(!compiled.includes("## Mundo"));
-  assert.ok(compiled.includes("## Sinopsis\nSinopsis."));
-  assert.match(compileGuide({ title: "T", synopsis: "", notes: "", guide: {} }), /infiere el estilo del texto/);
+  // The synopsis and the notes are the author's plan: never in the guide the Asistente receives.
+  assert.doesNotMatch(compiled, /Sinopsis|Eduardo|Notas del autor|Gerardo/);
+  assert.match(compileGuide({ title: "T", guide: {} }), /infiere el estilo del texto/);
 });
 
 test("both modes explain the manuscript's format: italics *así*, scene breaks * * *, no other formatting", () => {

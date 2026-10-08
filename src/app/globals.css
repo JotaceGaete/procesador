@@ -2122,6 +2122,20 @@ details.group > p {
   border-left-color: #8a8a5c;
 }
 
+/* Asistente: the automatic continuity check, under a proposal (never blocks). */
+.continuity-note {
+  border-left: 3px solid #b8892c;
+  padding: 4px 10px;
+  margin: 8px 0;
+}
+.continuity-note p,
+.continuity-note ul {
+  margin: 0;
+}
+.continuity-note ul {
+  padding-left: 18px;
+}
+
 /* ---------- Consejero: Conversar ---------- */
 .mode-switch {
   display: inline-flex;
