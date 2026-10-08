@@ -63,7 +63,25 @@ test("the writer keeps the Argumento general in its own section (from the chapte
   const saved = (await call(`/api/novels/${novel}`)).data;
   assert.equal(saved.novel.plot, PLOT);
   assert.equal(saved.novel.synopsis, "Un matrimonio en un pueblo del sur.", "the synopsis stays as it was");
+
+  // A long one (≈95.000 characters: accents, blank lines, emoji): saved, the novel closed and
+  // opened again from the library, and the same text, to the character.
+  const LONG = `${PLOT}\n\n${Array.from({ length: 700 }, (_, i) => `Párrafo ${i + 1} — «¿Quién lo sabía?» 🌧️ Ñandú, pingüino, acción.`).join("\n\n")}`.slice(0, 95_000);
+  await page.getByRole("button", { name: "Argumento general" }).click();
+  await dialog.locator("textarea.plot").fill(LONG);
+  await dialog.getByRole("button", { name: "Guardar" }).click();
+  await dialog.waitFor({ state: "detached" });
+  await page.goto(`${BASE}/`);
+  await page.goto(`${BASE}/novela/${novel}`);
+  await page.locator("textarea.editor").waitFor();
+  if (!(await page.locator("nav.chapters").isVisible())) await page.locator(".topbar .chapter-title").click();
+  await page.getByRole("button", { name: "Argumento general" }).click();
+  assert.equal(await dialog.locator("textarea.plot").inputValue(), LONG, "the same text after reopening");
+  assert.equal((await call(`/api/novels/${novel}`)).data.novel.plot, LONG);
+  await dialog.getByRole("button", { name: "Novela", exact: true }).click();
+  assert.equal(await dialog.getByLabel("Sinopsis").inputValue(), "Un matrimonio en un pueblo del sur.");
   await ctx.close();
+  await call(`/api/novels/${novel}`, "PATCH", { plot: PLOT });
 });
 
 test("API: limited to 100.000 characters; copied with the novel; in the backup", async () => {
