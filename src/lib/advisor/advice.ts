@@ -338,6 +338,15 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
   });
   const mem = memoryBlock(selected, memory, outline, current.id, time);
   if (mem) blocks.push(part(`Memoria de ${selected.characters.length} personaje${selected.characters.length === 1 ? "" : "s"}`, mem));
+  // Where the author is: what the plan puts later has not happened (not in the cached frame:
+  // it changes with the chapter).
+  if (overview.text)
+    blocks.push(
+      part(
+        "Posición en la novela",
+        `<posicion>El autor tiene abierto el capítulo ${index + 1} de ${chapters.length}. Del plan del autor, lo que no está en el manuscrito ni en las fichas hasta aquí todavía no ha ocurrido: trátalo como intención, sin adelantar sus revelaciones.</posicion>`,
+      ),
+    );
   // The plan's paragraphs about the people and places in play, or the question's words.
   if (!overview.whole) {
     const matchers = [
@@ -351,7 +360,7 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
     const words = questionWords(`${question} ${anchored ? anchored.title : ""}`);
     const details = planTexts
       .filter((x) => !x.overview.whole)
-      .map((x) => ({ x, d: planDetails(x.text, { matchers, words, budget: Math.floor(budget * x.share), skip: x.overview.full }) }))
+      .map((x) => ({ x, d: planDetails(x.text, { matchers, words, budget: Math.floor(budget * x.share), skip: x.overview.full, current: index + 1 }) }))
       .filter(({ d }) => d)
       .map(({ x, d }) => `${x.title}:\n${d}`)
       .join("\n\n");

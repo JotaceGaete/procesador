@@ -57,7 +57,10 @@ export function planOverview(text: string, budget: number): { text: string; whol
 }
 
 /** The complete paragraphs that matter for this turn, best first, within a budget, in order. */
-export function planDetails(text: string, opts: { matchers: RegExp[]; words: string[]; budget: number; skip: Set<number> }): string {
+export function planDetails(
+  text: string,
+  opts: { matchers: RegExp[]; words: string[]; budget: number; skip: Set<number>; current?: number },
+): string {
   const ps = paragraphs(text.trim()).filter((p) => !opts.skip.has(p.i) && !p.heading);
   const scored = ps
     .map((p) => {
@@ -78,7 +81,10 @@ export function planDetails(text: string, opts: { matchers: RegExp[]; words: str
   }
   return picked
     .sort((a, b) => a.i - b.i)
-    .map((p) => p.text)
+    .map((p) => {
+      const tag = opts.current ? chapterTag(p.text, opts.current) : "";
+      return tag ? `${tag} ${p.text}` : p.text;
+    })
     .join("\n\n");
 }
 
@@ -87,4 +93,22 @@ const STOP = /^(que|para|como|pero|porque|cuando|donde|esta|este|esto|todo|toda|
 /** The content words of a question (five letters or more), for `planDetails`. */
 export function questionWords(question: string): string[] {
   return [...new Set(question.toLocaleLowerCase("es").match(/[\p{L}]{5,}/gu) ?? [])].filter((w) => !STOP.test(w));
+}
+
+/**
+ * Where a paragraph of the plan sits relative to the open chapter, when it says so («en el
+ * capítulo 12», «cap. 3–5»): a tag before it, so the Consejero tells what is still to come
+ * from what should already be written. Untagged when the paragraph names no chapter.
+ */
+export function chapterTag(text: string, current: number): string {
+  const nums = [...text.matchAll(/\bcap(?:[íi]tulos?|s?\.)\s*(\d{1,4})(?:\s*(?:[-–]|a|al|y)\s*(\d{1,4}))?/giu)].flatMap((m) =>
+    [m[1], m[2]].filter(Boolean).map(Number),
+  );
+  if (!nums.length) return "";
+  const min = Math.min(...nums);
+  const max = Math.max(...nums);
+  const where = min === max ? `el cap. ${min}` : `los caps. ${min}–${max}`;
+  if (min > current) return `[Previsto para ${where} · aún no escrito: no ha ocurrido]`;
+  if (max <= current) return `[Previsto para ${where} · ya escrito: manda el manuscrito; compruébalo]`;
+  return `[Previsto para ${where} · el abierto es el ${current}: lo posterior no ha ocurrido]`;
 }

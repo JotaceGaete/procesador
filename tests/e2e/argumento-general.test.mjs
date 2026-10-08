@@ -103,7 +103,9 @@ test("the Consejero: its global view first in the cached frame (premise, parts, 
   assert.match(frame, /Sinopsis:\nUn matrimonio en un pueblo del sur\./, "the synopsis, after it");
   assert.ok(frame.length < 20_000, `the frame stays bounded (${frame.length})`);
   const prompt = req.messages[0].content;
-  assert.match(prompt, /<plan-del-autor-detalles>\nArgumento general:\n[\s\S]*Gerardo, primo de Héctor, llega en el capítulo 12/, "the paragraph about Gerardo, whole");
+  assert.match(prompt, /<plan-del-autor-detalles>\nArgumento general:\n[\s\S]*\[Previsto para el cap\. 12 · aún no escrito: no ha ocurrido\] Gerardo, primo de Héctor, llega en el capítulo 12/, "the paragraph about Gerardo, whole, marked as still to come");
+  assert.match(prompt, /<posicion>El autor tiene abierto el capítulo 1 de 1\. Del plan del autor, lo que no está en el manuscrito ni en las fichas hasta aquí todavía no ha ocurrido/);
+  assert.match(req.system[0].text, /Pasado y futuro del plan[\s\S]*Ningún personaje lo sabe, lo da por cierto ni lo deja escapar en un diálogo antes de tiempo/);
   // The same frame next turn.
   await clearAiLog();
   const id = list.find((e) => e.type === "saved").conversationId;

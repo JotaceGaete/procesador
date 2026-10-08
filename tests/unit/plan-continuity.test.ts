@@ -2,7 +2,7 @@
 // continuity check of the Asistente's proposals (no AI).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planDetails, planOverview, paragraphs, questionWords } from "@/lib/advisor/plan-text";
+import { chapterTag, planDetails, planOverview, paragraphs, questionWords } from "@/lib/advisor/plan-text";
 import { checkContinuity, currentScene, spanishNumber } from "@/lib/continuity";
 import { nameMatcher } from "@/lib/ai/context";
 
@@ -89,4 +89,15 @@ test("continuity: the scene's place and the ages of the Cronología", () => {
 test("continuity: the current scene starts after the last scene break", () => {
   assert.equal(currentScene("Antes.\n\n[[separador]]\n\nAhora."), "[[separador]]\n\nAhora.");
   assert.equal(currentScene("Sin cortes."), "Sin cortes.");
+});
+
+test("plan: a paragraph that names its chapter is tagged as still to come or already written, by the open chapter", () => {
+  assert.equal(chapterTag("Gerardo llega en el capítulo 12.", 5), "[Previsto para el cap. 12 · aún no escrito: no ha ocurrido]");
+  assert.equal(chapterTag("En el cap. 3 Pola miente.", 5), "[Previsto para el cap. 3 · ya escrito: manda el manuscrito; compruébalo]");
+  assert.equal(chapterTag("Entre los capítulos 4 y 9 crece la sospecha.", 5), "[Previsto para los caps. 4–9 · el abierto es el 5: lo posterior no ha ocurrido]");
+  assert.equal(chapterTag("Caps. 20-22: la boda.", 5), "[Previsto para los caps. 20–22 · aún no escrito: no ha ocurrido]");
+  assert.equal(chapterTag("Pola y Eduardo se aman.", 5), "", "no chapter: no tag");
+  const gerardo = nameMatcher({ name: "Gerardo", aliases: "" })!;
+  const d = planDetails(LONG, { matchers: [gerardo], words: [], budget: 3000, skip: planOverview(LONG, 4000).full, current: 4 });
+  assert.equal(d, `[Previsto para el cap. 12 · aún no escrito: no ha ocurrido] ${middle[17]}`);
 });
