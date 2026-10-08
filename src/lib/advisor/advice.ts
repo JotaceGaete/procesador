@@ -15,7 +15,7 @@ import { chapterRows, digestEstimate, digestRows, novelDigestRow, threadRows } f
 import { freshness } from "./freshness";
 import { echoes, phraseRepetitions, presence } from "./stats";
 import { NEW_TOPIC, planQuestion, type Plan } from "./planner";
-import { planDetails, planOverview, questionWords } from "./plan-text";
+import { planCast, planDetails, planOverview, questionNames, questionWords } from "./plan-text";
 import { ADVISE_INSTRUCTIONS, ADVISE_TASKS, CONVERSE_INSTRUCTIONS, CONVERSE_TASKS } from "./prompts";
 import { lastProposal, likesProposal, wantsAnalysis, wantsOptions, type AdvisorMode } from "./converse";
 import { deepInstructions, deepLimits, type ToolContext } from "./deep";
@@ -72,6 +72,7 @@ const FOCUS_TOKENS = 18_000;
  *  frame (larger with an Argumento general: it is cached, so cheap after the first turn), and
  *  the paragraphs that matter for this turn, in the prompt (docs/consejero.md, «Argumento general»). */
 const PLAN_OVERVIEW_TOKENS = { base: 2000, withPlot: 3000 };
+const PLAN_CAST_TOKENS = 600;
 const PLAN_DETAIL_TOKENS = { base: { conversar: 1500, analizar: 2500 }, withPlot: { conversar: 2000, analizar: 3500 } };
 const TAIL_CHARS = 8000;
 const NAMED_CHAPTERS_TOKENS = 14_000;
@@ -248,9 +249,20 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
   const planTexts = planSources
     .map((x) => ({ ...x, share: x.weight / totalWeight }))
     .map((x) => ({ ...x, overview: planOverview(x.text, Math.floor(overviewBudget * x.share)) }));
+  const cast = planCast(
+    planTexts.map((x) => x.text).join("\n\n"),
+    memory.characters.flatMap((c) => [c.name, ...c.aliases.split(",")]).filter((n) => n.trim()),
+    chars(PLAN_CAST_TOKENS),
+    planTexts.map((x) => x.overview.text).join("\n"),
+  );
   const overview = {
     whole: planTexts.every((x) => x.overview.whole),
-    text: planTexts.map((x) => `${x.title}:\n${x.overview.text}`).join("\n\n"),
+    text: [
+      planTexts.map((x) => `${x.title}:\n${x.overview.text}`).join("\n\n"),
+      cast && `Personajes del plan que aún no están en la Memoria (primera mención):\n${cast}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
   };
   const frame = [
     `## Guía Maestra (estilo)\n${compileGuide(novel)}`,
@@ -354,7 +366,9 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
       ...memory.places.filter((p) => plan.placeIds.includes(p.id) || selected.places.some((x) => x.id === p.id)),
     ]
       .map(nameMatcher)
-      .filter((m): m is RegExp => Boolean(m));
+      .filter((m): m is RegExp => Boolean(m))
+      // And whoever the author names in the question, even if only the plan knows them.
+      .concat(questionNames(question));
     const detail = novel.plot?.trim() ? PLAN_DETAIL_TOKENS.withPlot : PLAN_DETAIL_TOKENS.base;
     const budget = chars(mode === "conversar" ? detail.conversar : detail.analizar);
     const words = questionWords(`${question} ${anchored ? anchored.title : ""}`);

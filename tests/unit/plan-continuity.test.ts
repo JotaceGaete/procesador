@@ -2,7 +2,7 @@
 // continuity check of the Asistente's proposals (no AI).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chapterTag, planDetails, planOverview, paragraphs, questionWords } from "@/lib/advisor/plan-text";
+import { chapterTag, planCast, planDetails, planOverview, paragraphs, questionNames, questionWords } from "@/lib/advisor/plan-text";
 import { checkContinuity, currentScene, spanishNumber } from "@/lib/continuity";
 import { nameMatcher } from "@/lib/ai/context";
 
@@ -39,7 +39,8 @@ test("plan: the details are the whole paragraphs about the people in play or the
   const d = planDetails(LONG, { matchers: [gerardo], words: [], budget: 3000, skip: o.full });
   assert.equal(d, middle[17]);
   assert.match(d, /Intentará quedarse con Pola/);
-  assert.equal(planDetails(LONG, { matchers: [], words: questionWords("¿Cómo sigue la historia paralela?"), budget: 400, skip: o.full }).split("\n\n").length, 2, "within budget");
+  assert.equal(planDetails(LONG, { matchers: [], words: questionWords("¿Cómo sigue la historia paralela?"), budget: 400, skip: o.full }), "", "words that are everywhere in the plan tell nothing");
+  assert.equal(planDetails(LONG, { matchers: [], words: questionWords("¿Lo intentará de verdad?"), budget: 3000, skip: o.full }), middle[17], "a rare word finds its paragraph");
   assert.equal(planDetails(LONG, { matchers: [], words: [], budget: 3000, skip: o.full }), "", "nothing relevant: nothing");
   assert.equal(paragraphs(LONG)[1].heading, true);
 });
@@ -100,4 +101,45 @@ test("plan: a paragraph that names its chapter is tagged as still to come or alr
   const gerardo = nameMatcher({ name: "Gerardo", aliases: "" })!;
   const d = planDetails(LONG, { matchers: [gerardo], words: [], budget: 3000, skip: planOverview(LONG, 4000).full, current: 4 });
   assert.equal(d, `[Previsto para el cap. 12 · aún no escrito: no ha ocurrido] ${middle[17]}`);
+});
+
+// The case of «Fronteras invisibles»: a long plot written with single line breaks, Gerardo only
+// in the plan (not in the Memoria nor in the chapters), asked about with a short question.
+const G = "Gerardo, primo de Héctor, regresa del norte después de veinte años y más adelante tendrá una relación con Pola.";
+const part = (i: number) =>
+  `En esta parte ${i}, Pola y Héctor discuten en la casa, ¿quién tiene la culpa?, y el pueblo observa. Se suceden escenas en el almacén, la iglesia y el muelle, con detalles del clima y de los vecinos.`;
+const singleLines = Array.from({ length: 120 }, (_, i) => (i === 60 ? `${part(i)} ${part(i)} ${G} ${part(i + 1)}` : part(i))).join("\n");
+
+test("plan: a line break is a paragraph, and a text without any is cut in sentences (nothing beyond the start is lost)", () => {
+  assert.equal(paragraphs("Uno.\nDos.\n\nTres.").length, 3);
+  assert.ok(paragraphs(singleLines).length >= 120);
+  const noBreaks = singleLines.replace(/\n/g, " ");
+  const units = paragraphs(noBreaks);
+  assert.ok(units.length > 15 && units.every((u) => u.text.length <= 1200), "pieces of whole sentences");
+  assert.ok(units.some((u) => u.text.includes("Gerardo, primo")));
+});
+
+test("plan: «¿Quién es Gerardo?» finds him in a long plot written with single line breaks, without the noise of «quién»", () => {
+  assert.deepEqual(questionWords("¿Quién es Gerardo?"), ["gerardo"], "interrogatives are not content");
+  const names = questionNames("¿Quién es Gerardo?");
+  assert.equal(names.length, 1);
+  assert.ok(names[0].test("Gerardo, primo"));
+  assert.deepEqual(questionNames("¿Cómo sigue? Dame opciones"), []);
+  for (const text of [singleLines, singleLines.replace(/\n/g, " ")]) {
+    const o = planOverview(text, 6300);
+    const d = planDetails(text, { matchers: names, words: questionWords("¿Quién es Gerardo?"), budget: 4200, skip: o.full });
+    assert.match(d, /Gerardo, primo de Héctor, regresa del norte después de veinte años y más adelante tendrá una relación con Pola\./);
+    assert.ok(d.length <= 4200);
+  }
+});
+
+test("plan: the people of the plan the Memoria does not have yet, each with their first mention", () => {
+  const cast = planCast(`Pola vive en el sur.\nEl lunes llega ${G}\nMás tarde, Gerardo se queda. En marzo, Rosario lo sabe todo.`, ["Pola", "Héctor"], 2000);
+  assert.match(cast, /^- Gerardo: «El lunes llega Gerardo, primo de Héctor, regresa del norte/m);
+  assert.match(cast, /^- Rosario: «En marzo, Rosario lo sabe todo\.»/m);
+  assert.doesNotMatch(cast, /Pola:|Héctor:|Lunes|Marzo/, "known people, days and months are not cast");
+  const opening = planCast("Gerardo vuelve del norte. Cuando llega, nadie lo espera. Después, cuando todo calla, se va.", [], 2000);
+  assert.equal(opening, "- Gerardo: «Gerardo vuelve del norte.»", "a name that opens its sentence counts; «Cuando» and «Después» do not");
+  assert.ok(planCast(singleLines, [], 300).length <= 300, "within budget");
+  assert.equal(planCast("Pola vive en el sur con Héctor.", ["Pola"], 2000, "Pola vive en el sur con Héctor."), "- Héctor (en la visión general)", "never the same sentence twice");
 });

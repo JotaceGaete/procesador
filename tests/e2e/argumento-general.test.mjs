@@ -130,3 +130,25 @@ test("the Consejero: its global view first in the cached frame (premise, parts, 
   await call("/api/advisor", "POST", { novelId: novel, chapterId: ch, content: `${T1} Llovía.`, provider: "anthropic", mode: "conversar", question: "¿Y Pola?", conversationId: id });
   assert.equal((await aiLog()).at(-1).body.system[1].text, frame, "identical cached frame");
 });
+
+test("«¿Quién es Gerardo?»: a long plot written with single line breaks, Gerardo only in the plan — the Consejero gets who he is, as planned", async () => {
+  const id = (await call("/api/novels", "POST", { title: "Fronteras" })).data.id;
+  const chapter = (await call(`/api/novels/${id}`)).data.chapters[0].id;
+  await call(`/api/chapters/${chapter}`, "PATCH", { content: "Pola abrió el almacén. Héctor no habló.", revision: 0 });
+  for (const name of ["Pola", "Héctor"]) await call(`/api/novels/${id}/memory/characters`, "POST", { name });
+  const part = (i) => `En esta parte ${i}, Pola y Héctor discuten en la casa, ¿quién tiene la culpa?, y el pueblo observa. Se suceden escenas en el almacén, la iglesia y el muelle, con detalles del clima y de los vecinos.`;
+  const G = "Gerardo, primo de Héctor, regresa del norte después de veinte años y más adelante tendrá una relación con Pola.";
+  const plot = Array.from({ length: 150 }, (_, i) => (i === 70 ? `${part(i)} ${G} ${part(i + 1)}` : part(i))).join("\n").slice(0, 26_185);
+  assert.ok(plot.includes(G) && plot.length > 26_000);
+  await call(`/api/novels/${id}`, "PATCH", { plot });
+  for (const mode of ["conversar", "analizar"]) {
+    await clearAiLog();
+    events((await call("/api/advisor", "POST", { novelId: id, chapterId: chapter, content: "Pola abrió el almacén. Héctor no habló.", provider: "anthropic", mode, question: "¿Quién es Gerardo?" })).data);
+    const req = (await aiLog()).filter((x) => /<consejero>/.test(x.body.system?.[0]?.text ?? "")).at(-1).body;
+    const frame = req.system[1].text;
+    assert.match(frame, /Personajes del plan que aún no están en la Memoria \(primera mención\):\n- Gerardo: «/, `${mode}: Gerardo in the cached frame`);
+    assert.match(req.messages[0].content, /<plan-del-autor-detalles>[\s\S]*Gerardo, primo de Héctor, regresa del norte después de veinte años y más adelante tendrá una relación con Pola\./, `${mode}: the passage, whole`);
+    assert.match(req.system[0].text, /búscalo en el plan del autor[\s\S]*antes de decir que no existe/);
+  }
+  await call(`/api/novels/${id}`, "DELETE");
+});
