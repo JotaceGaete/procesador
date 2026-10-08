@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byBody, novelHandler } from "@/lib/access";
 import { db, getChapterTexts, getMemory, getNovel, getOutline } from "@/lib/supabase";
 import { countWords, forModel, protectImages, separatorsForModel } from "@/lib/manuscript";
 import { HttpError, readJson } from "@/lib/http";
@@ -74,7 +74,7 @@ const SCENE_MARK = "⟦AQUÍ VA LA ESCENA NUEVA⟧";
  * One endpoint for every AI operation. `dryRun: true` returns the size of the
  * context that would be sent, without calling any provider.
  */
-export const POST = handler(async (request) => {
+export const POST = novelHandler(byBody(), async (request) => {
   const body = await readJson(request);
   const provider = getProvider(body.provider as ProviderId);
   if (!provider && !body.dryRun) throw new HttpError(400, "Ese proveedor de IA no está configurado.");

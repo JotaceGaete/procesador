@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byParam, novelHandler } from "@/lib/access";
 import { assertId, db, getNovel } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { getManuscriptImages } from "@/lib/assets-server";
@@ -8,7 +8,7 @@ import { applyUse, readManuscriptFields } from "@/lib/asset-uses";
 type Ctx = { params: Promise<{ id: string }> };
 
 /** The novel's images of the book, placed or not. */
-export const GET = handler<Ctx>(async (_request, { params }) => {
+export const GET = novelHandler<Ctx>(byParam(), async (_request, { params }) => {
   const novel = await getNovel((await params).id);
   return NextResponse.json(await getManuscriptImages(novel.id), { headers: { "Cache-Control": "no-store" } });
 });
@@ -18,7 +18,7 @@ export const GET = handler<Ctx>(async (_request, { params }) => {
  * gallery, or found by the duplicate check): the file is reused, never copied.
  * Body: { asset_id, id?, alt?, decorative?, caption?, credit?, layout?, align?, width_pct? }.
  */
-export const POST = handler<Ctx>(async (request, { params }) => {
+export const POST = novelHandler<Ctx>(byParam(), async (request, { params }) => {
   const novel = await getNovel((await params).id);
   const body = await readJson(request);
   const assetId = assertId(body.asset_id, "Archivo");

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byParam, novelHandler } from "@/lib/access";
 import { db, getMemory, getNovel } from "@/lib/supabase";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -9,7 +9,7 @@ type Ctx = { params: Promise<{ id: string }> };
  * novel, as data. The browser adds the original files (each through its own short-lived
  * link: they can be larger than what a function may return) and builds the ZIP.
  */
-export const GET = handler<Ctx>(async (_request, { params }) => {
+export const GET = novelHandler<Ctx>(byParam(), async (_request, { params }) => {
   const novel = await getNovel((await params).id);
   const of = (table: string, columns: string, order = "created_at") =>
     db().from(table).select(columns).eq("novel_id", novel.id).order(order);

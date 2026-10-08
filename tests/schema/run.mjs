@@ -18,6 +18,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const read = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
 const SCHEMA = read("supabase/schema.sql");
 const MIGRATION = read("supabase/actualizar-consejero.sql");
+const SESSIONS = read("supabase/actualizar-sesiones.sql");
+const PROTECTED = read("supabase/actualizar-protegidas.sql");
 const VERIFY = read("supabase/verificar.sql");
 const OLD = {
   "2b": read("tests/schema/fixtures/schema-2b.sql"),
@@ -28,10 +30,11 @@ const TABLES = [
   "novels", "chapters", "characters", "relationships", "places", "facts", "fact_characters", "assets",
   "character_images", "manuscript_images", "ai_usage", "story_threads", "chapter_digests", "novel_digests",
   "advisor_conversations", "advisor_messages", "advisor_observations", "chapter_versions", "time_marks",
+  "app_settings", "app_sessions", "credential_attempts", "novel_protection", "novel_unlocks",
 ];
 /** What only schema.sql brings (versions and trash), not actualizar-consejero.sql. */
 const AFTER_CONSEJERO =
-  /chapter_versions|save_chapter_version|trash_chapter|chapter_trash|restore_chapter|chapter_version_auto|chapters_version|time_marks|novels\.calendar|dismissed_warnings|age_anchor|age_approx|characters\.death|anterior a la cronología|novels\.book|anterior a la exportación/;
+  /app_settings|app_sessions|credential_attempts|novel_protection|novel_unlocks|forget_session_unlocks|novel_access|novel_unlock|novel_protect|novel_unprotect|duplicate_novel_with_protection|library\(uuid\)|session_touch|session_set_locked|session_revoke|credential_failure|credential_success|purge_sessions|chapter_versions|save_chapter_version|trash_chapter|chapter_trash|restore_chapter|chapter_version_auto|chapters_version|time_marks|novels\.calendar|dismissed_warnings|age_anchor|age_approx|characters\.death|anterior a la cronología|novels\.book|anterior a la exportación/;
 
 let bin, dir, port;
 
@@ -180,7 +183,7 @@ test("regression: story_threads missing when the touch-trigger block is reached"
 
 test("static: no statement refers to a table before the statement that guarantees it exists", () => {
   // The first-stage cleanup at the top only inspects information_schema and drops legacy tables.
-  for (const [name, sql] of [["schema.sql", SCHEMA], ["actualizar-consejero.sql", MIGRATION]]) {
+  for (const [name, sql] of [["schema.sql", SCHEMA], ["actualizar-consejero.sql", MIGRATION], ["actualizar-sesiones.sql", SESSIONS], ["actualizar-protegidas.sql", PROTECTED]]) {
     const body = sql
       .slice(sql.indexOf("-- Utilidades del esquema") === -1 ? 0 : sql.indexOf("-- Utilidades del esquema"))
       .replace(/--[^\n]*/g, "");
@@ -415,4 +418,192 @@ test("exportación: los datos del libro se copian al duplicar, con la portada ap
   must(db, `update novels set book = '{"coverAssetId":"55555555-5555-4555-8555-555555555555"}' where id = '${novel}'`);
   must(db, `select public.duplicate_novel('${novel}', 'Copia 2')`);
   assert.equal(must(db, "select coalesce(book->>'coverAssetId', 'null') from novels where title = 'Copia 2'"), "null");
+});
+
+// ---------------------------------------------------------------------------
+// Sesiones y bloqueo de Procesador (docs/privacidad.md)
+// ---------------------------------------------------------------------------
+
+/** The part of schema.sql that each actualizar-*.sql brings, between its markers. */
+const block = (sql, name) => sql.slice(sql.indexOf(`-- <${name}>`), sql.indexOf(`-- </${name}>`));
+
+test("actualizar-sesiones.sql and actualizar-protegidas.sql bring exactly what schema.sql has", () => {
+  for (const [sql, name] of [[SESSIONS, "sesiones"], [PROTECTED, "protegidas-tablas"], [PROTECTED, "protegidas-funciones"]]) {
+    assert.ok(block(sql, name).length > 1000, name);
+    assert.equal(block(SCHEMA, name), block(sql, name), name);
+  }
+});
+
+/** schema.sql as it was before privacy (Fase 0 and 1): without the blocks. */
+const SCHEMA_BEFORE_PRIVACY = ["sesiones", "protegidas-tablas", "protegidas-funciones"]
+  .reduce((sql, name) => sql.replace(block(sql, name), ""), SCHEMA)
+  .replace(/, 'app_settings', 'app_sessions',\s*'credential_attempts', 'novel_protection', 'novel_unlocks'/, "");
+/** …and before Fase 1 only. */
+const SCHEMA_SESSIONS_ONLY = ["protegidas-tablas", "protegidas-funciones"]
+  .reduce((sql, name) => sql.replace(block(sql, name), ""), SCHEMA)
+  .replace(/, 'novel_protection', 'novel_unlocks'/, "");
+
+for (const state of ["vacía (instalación nueva)", "completamente actualizada (fases 2–4, con los bucles antiguos)"]) {
+  for (const mode of ["editor", "psql"]) {
+    test(`actualizar-sesiones.sql y actualizar-protegidas.sql · base ${state} con schema.sql anterior · ${mode}, dos veces; después schema.sql`, () => {
+      const db = newDb();
+      STATES[state](db);
+      must(db, SCHEMA_BEFORE_PRIVACY, mode);
+      const before = fingerprint(db);
+      must(db, SESSIONS, mode);
+      must(db, SESSIONS, mode);
+      must(db, PROTECTED, mode);
+      must(db, PROTECTED, mode);
+      assertComplete(db);
+      assertDataKept(db, before);
+      must(db, SCHEMA, mode);
+      assertComplete(db);
+      assertDataKept(db, before);
+    });
+  }
+}
+
+test("sesiones: inactividad, bloqueo, revocación y limpieza", () => {
+  const db = newDb();
+  must(db, SCHEMA);
+  const S = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const touch = (t = "true") => JSON.parse(must(db, `select public.session_touch('${S}', ${t})`));
+  assert.equal(touch().state, "revoked", "unknown session");
+  must(db, `insert into app_sessions (id, expires_at) values ('${S}', now() + interval '30 days')`);
+  let t = touch();
+  assert.equal(t.state, "ok");
+  assert.equal(t.idle_minutes, 15, "15 minutes by default");
+  assert.ok(t.remaining_ms > 14 * 60_000 && t.remaining_ms <= 15 * 60_000);
+
+  // 16 minutes without activity: still open (2 minutes of margin for the browser to save).
+  must(db, `update app_sessions set last_activity_at = now() - interval '16 minutes' where id = '${S}'`);
+  assert.equal(touch("false").state, "ok");
+  assert.equal(touch("false").remaining_ms, 0);
+  // 18 minutes: locked, and a touch doesn't open it again.
+  must(db, `update app_sessions set last_activity_at = now() - interval '18 minutes' where id = '${S}'`);
+  assert.equal(touch().state, "locked");
+  assert.equal(touch().state, "locked");
+  must(db, `select public.session_set_locked('${S}', false)`);
+  assert.equal(touch().state, "ok", "unlocked with APP_PASSWORD (checked by the server)");
+
+  // A longer setting gives more time.
+  must(db, "update app_settings set app_idle_minutes = 60");
+  must(db, `update app_sessions set last_activity_at = now() - interval '30 minutes' where id = '${S}'`);
+  assert.equal(touch("false").state, "ok");
+  assert.ok(!run(db, "update app_settings set app_idle_minutes = 45").ok, "only 15, 30, 60, 120 or 240");
+  assert.ok(!run(db, "insert into app_settings (id) values (false)").ok, "one row");
+
+  // «Bloquear Procesador», then logout: revoked for good.
+  must(db, `select public.session_set_locked('${S}', true)`);
+  assert.equal(touch().state, "locked");
+  must(db, `select public.session_revoke('${S}')`);
+  assert.equal(touch().state, "revoked");
+  must(db, `select public.session_set_locked('${S}', false)`);
+  assert.equal(touch().state, "revoked", "a revoked session never opens again");
+
+  // Cleanup: expired and long-revoked sessions go; a live one stays.
+  must(db, `insert into app_sessions (id, expires_at) values ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', now() - interval '1 second'),
+            ('cccccccc-cccc-4ccc-8ccc-cccccccccccc', now() + interval '1 day')`);
+  must(db, `update app_sessions set revoked_at = now() - interval '2 days' where id = '${S}'`);
+  must(db, "select public.purge_sessions()");
+  assert.equal(must(db, "select string_agg(left(id::text, 1), '' order by id) from app_sessions"), "c");
+});
+
+test("intentos: a partir del quinto fallo, espera creciente; un acierto la borra", () => {
+  const db = newDb();
+  must(db, SCHEMA);
+  const fail = () => must(db, "select coalesce(extract(epoch from public.credential_failure('app') - now())::int::text, 'null')");
+  for (let i = 1; i <= 4; i++) assert.equal(fail(), "null", `fallo ${i}: sin espera`);
+  assert.ok(Math.abs(Number(fail()) - 30) <= 1, "quinto: 30 s");
+  assert.ok(Math.abs(Number(fail()) - 60) <= 1, "sexto: 60 s");
+  for (let i = 0; i < 10; i++) fail();
+  assert.ok(Math.abs(Number(fail()) - 900) <= 1, "como mucho 15 minutos");
+  must(db, "select public.credential_success('app')");
+  assert.equal(must(db, "select count(*) from credential_attempts"), "0");
+  assert.equal(fail(), "null");
+});
+
+test("actualizar-protegidas.sql sin la Fase 0: se detiene con un mensaje claro, sin aplicar nada", () => {
+  const db = newDb();
+  must(db, SCHEMA_BEFORE_PRIVACY);
+  const r = run(db, PROTECTED);
+  assert.ok(!r.ok);
+  assert.match(r.error, /Falta supabase\/actualizar-sesiones\.sql/);
+  assert.equal(must(db, "select to_regclass('public.novel_protection') is null"), "t");
+});
+
+test("actualizar-protegidas.sql sobre una base con la Fase 0: el código anterior sigue funcionando", () => {
+  const db = newDb();
+  must(db, SCHEMA_SESSIONS_ONLY);
+  must(db, DATA, "psql");
+  must(db, PROTECTED);
+  // library() and duplicate_novel() as the previous code calls them.
+  assert.equal(must(db, "select count(*) from public.library()"), "1");
+  assert.ok(must(db, "select public.duplicate_novel('11111111-1111-4111-8111-111111111111', 'Copia')"));
+  assertComplete(db);
+});
+
+test("novelas protegidas: acceso por sesión, inactividad, PIN cambiado, bloqueo de Procesador, biblioteca y duplicado", () => {
+  const db = newDb();
+  must(db, SCHEMA);
+  must(db, DATA, "psql");
+  const N = "11111111-1111-4111-8111-111111111111";
+  const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  must(db, `insert into app_sessions (id, expires_at) values ('${A}', now() + interval '1 day'), ('${B}', now() + interval '1 day')`);
+  const access = (s, touch = "false") => JSON.parse(must(db, `select public.novel_access('${s}', '${N}', ${touch})`));
+  const lib = (s) => JSON.parse(must(db, `select row_to_json(l) from public.library('${s}') l`));
+
+  assert.equal(access(A).state, "open");
+  assert.equal(lib(A).words, 7);
+  must(db, `select public.novel_protect('${A}', '${N}', 'scrypt$x', 'pin', 1::smallint)`);
+  assert.equal(access(A).state, "unlocked", "open where it was protected");
+  assert.equal(access(A).idle_minutes, 15);
+  assert.deepEqual(access(B), { state: "locked", kind: "pin", title: "Mi novela", hide_title: false });
+  assert.deepEqual([lib(B).title, lib(B).chapters, lib(B).words, lib(B).locked], ["Mi novela", null, null, true]);
+  assert.equal(lib(A).words, 7);
+
+  // Hidden title: never in the library, nor in what a locked novel says.
+  must(db, `update novel_protection set hide_title = true where novel_id = '${N}'`);
+  assert.equal(lib(A).title, null);
+  assert.equal(access(B).title, null);
+  must(db, `update novel_protection set hide_title = false where novel_id = '${N}'`);
+
+  // Inactivity: 15 minutes (+2 of margin), or the setting; 8 hours at most.
+  must(db, `select public.novel_unlock('${B}', '${N}')`);
+  must(db, `update novel_unlocks set last_activity_at = now() - interval '16 minutes' where session_id = '${B}'`);
+  assert.equal(access(B).state, "unlocked");
+  must(db, `update novel_unlocks set last_activity_at = now() - interval '18 minutes' where session_id = '${B}'`);
+  assert.equal(access(B).state, "locked");
+  assert.equal(must(db, `select count(*) from novel_unlocks where session_id = '${B}'`), "0", "the expired unlock is gone");
+  must(db, `select public.novel_unlock('${B}', '${N}')`);
+  must(db, `update novel_unlocks set absolute_expires_at = now() - interval '1 second' where session_id = '${B}'`);
+  assert.equal(access(B).state, "locked");
+  assert.ok(!run(db, `update novel_protection set idle_minutes = 45 where novel_id = '${N}'`).ok, "5, 15, 30 or 60");
+
+  // A new PIN: every other unlock ends; this session's stays.
+  must(db, `select public.novel_unlock('${B}', '${N}')`);
+  must(db, `select public.novel_protect('${A}', '${N}', 'scrypt$y', 'password', 1::smallint)`);
+  assert.equal(access(B).state, "locked");
+  assert.equal(access(A).state, "unlocked");
+  assert.equal(access(A).kind, "password");
+
+  // Locking Procesador, or logging out, locks its novels again.
+  must(db, `select public.session_set_locked('${A}', true)`);
+  must(db, `select public.session_set_locked('${A}', false)`);
+  assert.equal(access(A).state, "locked");
+  must(db, `select public.novel_unlock('${A}', '${N}')`);
+  must(db, `select public.session_revoke('${A}')`);
+  assert.equal(must(db, `select count(*) from novel_unlocks where session_id = '${A}'`), "0");
+
+  // The copy is born protected, with the same PIN, and locked everywhere.
+  must(db, `select public.novel_unlock('${B}', '${N}')`);
+  const copy = JSON.parse(must(db, `select public.duplicate_novel_with_protection('${N}', 'Copia')`)).id;
+  assert.equal(must(db, `select secret_hash from novel_protection where novel_id = '${copy}'`), "scrypt$y");
+  assert.equal(JSON.parse(must(db, `select public.novel_access('${B}', '${copy}', false)`)).state, "locked");
+
+  // Removing the protection opens it to every session.
+  must(db, `select public.novel_unprotect('${N}')`);
+  assert.equal(access(A).state, "open");
+  assert.equal(must(db, `select count(*) from novel_unlocks where novel_id = '${N}'`), "0");
 });

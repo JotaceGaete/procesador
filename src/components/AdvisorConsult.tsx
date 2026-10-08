@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { chapterLabel } from "@/lib/ai/context";
-import { api, readPref, writePref } from "@/lib/client";
+import { api, noticeLock, readPref, writePref } from "@/lib/client";
 import {
   ADVISOR_ACTIONS,
   PROVIDER_LABELS,
@@ -183,6 +183,7 @@ export default function AdvisorConsult(p: Props) {
   async function post(path: string, json: unknown, signal: AbortSignal) {
     const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(json), signal });
     if (res.status === 401) window.location.href = "/login";
+    await noticeLock(res);
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Error ${res.status}`);
     return res;
   }

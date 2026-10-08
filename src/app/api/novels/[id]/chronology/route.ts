@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byParam, novelHandler } from "@/lib/access";
 import { db, getNovel } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { novelChronology } from "@/lib/chronology-server";
@@ -12,7 +12,7 @@ type Ctx = { params: Promise<{ id: string }> };
  * Cronología (docs/cronologia-edades.md): each chapter's time, each character's age in each
  * chapter, and the warnings. Computed now from the marks, anchors and texts; nothing stored.
  */
-export const GET = handler<Ctx>(async (_request, { params }) => {
+export const GET = novelHandler<Ctx>(byParam(), async (_request, { params }) => {
   const novel = await getNovel((await params).id);
   const { result, chapters, characters, marks } = await novelChronology(novel, { texts: true });
   const dismissed = novel.dismissed_warnings ?? {};
@@ -40,7 +40,7 @@ export const GET = handler<Ctx>(async (_request, { params }) => {
  * The calendar, and the author's decisions on warnings: `dismiss` {key, fingerprint} ("it's
  * on purpose": it stays hidden while its data doesn't change) or `restore` {key}.
  */
-export const PATCH = handler<Ctx>(async (request, { params }) => {
+export const PATCH = novelHandler<Ctx>(byParam(), async (request, { params }) => {
   const novel = await getNovel((await params).id);
   const body = await readJson(request);
   const update: Record<string, unknown> = {};

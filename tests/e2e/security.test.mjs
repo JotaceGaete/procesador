@@ -5,65 +5,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { BASE, CLOSED, PASSWORD, STACK, client, login } from "./helpers.mjs";
+import { ROUTES, routeUrl } from "./routes.mjs";
 
-const U = "00000000-0000-0000-0000-000000000000";
-const ROUTES = [
-  ["GET", "/api/novels"],
-  ["POST", "/api/novels"],
-  ["GET", `/api/novels/${U}`],
-  ["PATCH", `/api/novels/${U}`],
-  ["DELETE", `/api/novels/${U}`],
-  ["POST", `/api/novels/${U}/duplicate`],
-  ["POST", `/api/novels/${U}/chapters`],
-  ["PUT", `/api/novels/${U}/chapters`],
-  ["POST", `/api/novels/${U}/memory/facts`],
-  ["GET", `/api/chapters/${U}`],
-  ["PATCH", `/api/chapters/${U}`],
-  ["DELETE", `/api/chapters/${U}`],
-  ["PATCH", `/api/memory/characters/${U}`],
-  ["DELETE", `/api/memory/facts/${U}`],
-  ["POST", "/api/assist"],
-  ["POST", `/api/novels/${U}/advisor`],
-  ["POST", "/api/advisor"],
-  ["GET", `/api/novels/${U}/conversations`],
-  ["GET", `/api/novels/${U}/observations`],
-  ["GET", `/api/novels/${U}/threads`],
-  ["GET", `/api/conversations/${U}`],
-  ["PATCH", `/api/conversations/${U}`],
-  ["DELETE", `/api/conversations/${U}`],
-  ["PATCH", `/api/observations/${U}`],
-  ["POST", `/api/observations/${U}/recheck`],
-  ["GET", `/api/novels/${U}/reading`],
-  ["POST", `/api/novels/${U}/digest`],
-  ["POST", `/api/novels/${U}/threads`],
-  ["POST", `/api/chapters/${U}/digest`],
-  ["PATCH", `/api/chapters/${U}/digest`],
-  ["PATCH", `/api/threads/${U}`],
-  ["DELETE", `/api/threads/${U}`],
-  ["POST", `/api/threads/${U}/merge`],
-  ["POST", `/api/novels/${U}/assets`],
-  ["POST", `/api/assets/${U}/complete`],
-  ["GET", `/api/assets/${U}/thumb?v=1`],
-  ["GET", `/api/assets/${U}/original?v=1`],
-  ["POST", `/api/characters/${U}/images`],
-  ["PUT", `/api/characters/${U}/images`],
-  ["PATCH", `/api/character-images/${U}`],
-  ["DELETE", `/api/character-images/${U}`],
-  ["POST", `/api/character-images/${U}/primary`],
-  ["POST", `/api/character-images/${U}/replace`],
-  ["GET", `/api/novels/${U}/manuscript-images`],
-  ["POST", `/api/novels/${U}/manuscript-images`],
-  ["PATCH", `/api/manuscript-images/${U}`],
-  ["DELETE", `/api/manuscript-images/${U}`],
-  ["POST", `/api/manuscript-images/${U}/duplicate`],
-  ["POST", `/api/manuscript-images/${U}/replace`],
-  ["GET", `/api/chapters/${U}/versions`],
-  ["POST", `/api/chapters/${U}/versions`],
-  ["GET", `/api/versions/${U}`],
-  ["GET", `/api/novels/${U}/trash`],
-  ["POST", `/api/novels/${U}/trash`],
-  ["GET", `/api/novels/${U}/backup`],
-];
+const U = "00000000-0000-4000-8000-000000000000";
+const IDS = new Proxy({}, { get: () => U });
+// Every route but the ones before a session (tests/e2e/routes.mjs, complete per tests/unit/routes.test.ts).
+const GUARDED = ROUTES.filter((r) => r.scope !== "open").map((r) => [r.method, routeUrl(r, IDS)]);
 const hit = (base, method, route, headers = {}) =>
   fetch(base + route, {
     method,
@@ -73,18 +20,34 @@ const hit = (base, method, route, headers = {}) =>
   });
 
 test("every API route answers 401 without a session", async () => {
-  for (const [method, route] of ROUTES) {
+  assert.ok(GUARDED.length > 60);
+  for (const [method, route] of GUARDED) {
     assert.equal((await hit(BASE, method, route)).status, 401, `${method} ${route}`);
   }
 });
 
-test("forged, tampered and expired session cookies are rejected", async () => {
+test("forged, tampered, expired and old-format session cookies are rejected", async () => {
   const valid = (await login()).split("=")[1];
-  const [exp, sig] = valid.split(".");
-  for (const token of [`9999999999999.${"0".repeat(64)}`, `${Number(exp) + 1}.${sig}`, `1000.${sig}`, "garbage"]) {
+  const [sid, exp, sig] = valid.split(".");
+  for (const token of [
+    `${sid}.9999999999999.${"0".repeat(64)}`,
+    `${sid}.${Number(exp) + 1}.${sig}`,
+    `${sid}.1000.${sig}`,
+    `${U}.${exp}.${sig}`,
+    `${exp}.${sig}`, // the format before session ids
+    "garbage",
+  ]) {
     assert.equal((await hit(BASE, "GET", "/api/novels", { cookie: `procesador_session=${token}` })).status, 401, token);
   }
   assert.equal((await hit(BASE, "GET", "/api/novels", { cookie: `procesador_session=${valid}` })).status, 200);
+});
+
+test("a validly signed cookie for a session that doesn't exist is rejected", async () => {
+  // Signed like the server does, for an id that was never opened (or was purged).
+  const crypto = await import("node:crypto");
+  const exp = Date.now() + 60_000;
+  const sig = crypto.createHmac("sha256", PASSWORD).update(`session:${U}:${exp}`).digest("hex");
+  assert.equal((await hit(BASE, "GET", "/api/novels", { cookie: `procesador_session=${U}.${exp}.${sig}` })).status, 401);
 });
 
 test("pages redirect to /login without a session, carrying where the author was going", async () => {
@@ -149,6 +112,9 @@ test("the public (anon) key can't read tables or call functions", async () => {
     "advisor_messages",
     "advisor_observations",
     "chapter_versions",
+    "app_settings",
+    "app_sessions",
+    "credential_attempts",
   ]) {
     const res = await fetch(`${STACK}/rest/v1/${table}`, { headers });
     assert.ok([401, 403].includes(res.status), `${table}: ${res.status}`);
@@ -171,6 +137,12 @@ test("the public (anon) key can't read tables or call functions", async () => {
     "trash_chapter",
     "chapter_trash",
     "restore_chapter",
+    "session_touch",
+    "session_set_locked",
+    "session_revoke",
+    "credential_failure",
+    "credential_success",
+    "purge_sessions",
   ]) {
     const res = await fetch(`${STACK}/rest/v1/rpc/${fn}`, {
       method: "POST",

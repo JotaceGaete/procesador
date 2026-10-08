@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "@/lib/client";
+import { api, noticeLock } from "@/lib/client";
 import { chapterLabel } from "@/lib/ai/context";
 import type { ReadingState, ChapterReading } from "@/lib/advisor/reading";
 import {
@@ -79,6 +79,7 @@ export default function AdvisorReading(props: Props) {
       signal,
     });
     if (res.status === 401) window.location.href = "/login";
+    await noticeLock(res);
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Error ${res.status}`);
   }
 

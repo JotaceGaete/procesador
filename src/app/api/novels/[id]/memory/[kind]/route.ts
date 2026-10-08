@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byParam, novelHandler } from "@/lib/access";
 import { db, getNovel } from "@/lib/supabase";
 import { HttpError, pickFields, readJson } from "@/lib/http";
 import { isMemoryKind, MAX_CHARACTERS, MEMORY_KINDS } from "@/lib/memory";
@@ -9,7 +9,7 @@ import { readCharacterTime } from "@/lib/chronology-server";
 type Ctx = { params: Promise<{ id: string; kind: string }> };
 
 /** Adds a character, relationship, place or fact to one novel. */
-export const POST = handler<Ctx>(async (request, { params }) => {
+export const POST = novelHandler<Ctx>(byParam(), async (request, { params }) => {
   const { id, kind } = await params;
   if (!isMemoryKind(kind)) throw new HttpError(404, "Tipo de memoria desconocido");
   const config = MEMORY_KINDS[kind];

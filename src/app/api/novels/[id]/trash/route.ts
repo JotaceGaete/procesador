@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byParam, novelHandler } from "@/lib/access";
 import { assertId, db, getNovel, getOutline } from "@/lib/supabase";
 import { readJson } from "@/lib/http";
 import { imageIds } from "@/lib/manuscript";
@@ -8,7 +8,7 @@ import type { TrashEntry } from "@/lib/types";
 type Ctx = { params: Promise<{ id: string }> };
 
 /** The deleted chapters of the novel (what was deleted more than 30 days ago is emptied first). */
-export const GET = handler<Ctx>(async (_request, { params }) => {
+export const GET = novelHandler<Ctx>(byParam(), async (_request, { params }) => {
   const novel = await getNovel((await params).id);
   const { data, error } = await db().rpc("chapter_trash", { p_novel: novel.id });
   if (error) throw error;
@@ -16,7 +16,7 @@ export const GET = handler<Ctx>(async (_request, { params }) => {
 });
 
 /** Brings a deleted chapter back, at the end, with its history and its images. */
-export const POST = handler<Ctx>(async (request, { params }) => {
+export const POST = novelHandler<Ctx>(byParam(), async (request, { params }) => {
   const novel = await getNovel((await params).id);
   const body = await readJson(request);
   const { data: id, error } = await db().rpc("restore_chapter", {

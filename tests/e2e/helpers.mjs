@@ -87,3 +87,19 @@ export function png(width, height) {
  * the manual fallback, and these tests keep it covered.
  */
 export const textEditor = (ctx) => ctx.addInitScript(() => localStorage.setItem("editor", "texto"));
+
+/** The database through PostgREST with the service key (what the server uses): to set up or inspect state. */
+export async function rest(path, method = "GET", body) {
+  const key = process.env.E2E_SERVICE_KEY;
+  const res = await fetch(`${STACK}/rest/v1/${path}`, {
+    method,
+    headers: { apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json", prefer: "return=representation" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`rest ${method} ${path}: ${res.status} ${text}`);
+  return text ? JSON.parse(text) : null;
+}
+
+/** The session id inside a cookie (`procesador_session=<id>.<expiry>.<signature>`). */
+export const sessionId = (cookie) => cookie.split("=")[1].split(".")[0];

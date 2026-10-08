@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byChild, novelHandler } from "@/lib/access";
 import { assertId, db, getChapter } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { imageIds } from "@/lib/manuscript";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export const GET = handler<Ctx>(async (_request, { params }) => {
+export const GET = novelHandler<Ctx>(byChild("chapters"), async (_request, { params }) => {
   return NextResponse.json(await getChapter((await params).id), { headers: { "Cache-Control": "no-store" } });
 });
 
@@ -16,7 +16,7 @@ export const GET = handler<Ctx>(async (_request, { params }) => {
  * written and the response is 409, so newer text is never silently overwritten.
  * Each chapter has its own revision, so editing chapter 2 never conflicts with chapter 5.
  */
-export const PATCH = handler<Ctx>(async (request, { params }) => {
+export const PATCH = novelHandler<Ctx>(byChild("chapters"), async (request, { params }) => {
   const id = assertId((await params).id, "Capítulo");
   const body = await readJson(request);
 
@@ -49,7 +49,7 @@ export const PATCH = handler<Ctx>(async (request, { params }) => {
 });
 
 /** To the trash (docs/versiones.md): its text and history stay recoverable for 30 days. */
-export const DELETE = handler<Ctx>(async (_request, { params }) => {
+export const DELETE = novelHandler<Ctx>(byChild("chapters"), async (_request, { params }) => {
   const chapter = await getChapter((await params).id);
   const { error } = await db().rpc("trash_chapter", { p_chapter: chapter.id });
   if (error) throw error;

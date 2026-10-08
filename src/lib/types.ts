@@ -3,10 +3,15 @@ import type { AgeAnchor, Calendar, StoryDate, TimeMark, TimeWarning } from "./ch
 
 export interface NovelSummary {
   id: string;
-  title: string;
+  /** null: a protected novel with its title hidden in the library. */
+  title: string | null;
   updated_at: string;
-  chapters: number;
-  words: number;
+  /** null while the novel is protected and locked in this session. */
+  chapters: number | null;
+  words: number | null;
+  protected: boolean;
+  locked: boolean;
+  title_hidden: boolean;
 }
 
 export interface Novel {

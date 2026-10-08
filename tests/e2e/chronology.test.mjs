@@ -173,7 +173,10 @@ for (const device of DEVICES) {
     await form.getByLabel("Capítulo", { exact: true }).selectOption({ index: 0 });
     await press(form.getByRole("button", { name: "Guardar" }));
     await form.getByText(`Marta ${device.name}`).first().waitFor();
-    assert.deepEqual((await call(`/api/novels/${novel}`)).data.memory.characters.find((c) => c.id === marta).age_anchor, {
+    // The name shows at once; the save may still be on its way.
+    const anchor = async () => (await call(`/api/novels/${novel}`)).data.memory.characters.find((c) => c.id === marta).age_anchor;
+    for (let i = 0; i < 50 && !(await anchor()); i++) await new Promise((r) => setTimeout(r, 100));
+    assert.deepEqual(await anchor(), {
       kind: "age_at",
       age: 30,
       at: { chapter_id: ch[0] },

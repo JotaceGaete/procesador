@@ -230,7 +230,13 @@ test("panel: chapters without a digest are read first, then it answers", async (
   const turns = await panel.locator(".turn.advisor").count();
   await panel.getByRole("button", { name: "Personajes" }).click();
   await page.waitForFunction((n) => document.querySelectorAll(".turn.advisor").length > n, turns, { timeout: 15_000 });
-  const log = await aiLog();
+  // The new turn shows at once («Pensando…»); the reading and the answer come right after it.
+  const t0 = Date.now();
+  let log = await aiLog();
+  while (log.length < 2 && Date.now() - t0 < 15_000) {
+    await new Promise((r) => setTimeout(r, 100));
+    log = await aiLog();
+  }
   assert.equal(log.length, 2, JSON.stringify(log.map((x) => x.body.system?.[0]?.text?.slice(0, 20))));
   assert.match(log[0].body.system[0].text, /<ficha-capitulo>/, "first, the missing digest");
   assert.match(log[1].body.system[0].text, /<consejero>/, "then the answer");

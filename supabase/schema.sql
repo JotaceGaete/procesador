@@ -486,6 +486,175 @@ create unique index if not exists time_marks_one_per_chapter on public.time_mark
 create index if not exists time_marks_novel_idx on public.time_marks(novel_id);
 select public.procesador_secure_table('public.time_marks', true);
 
+-- <sesiones>
+-- ---------------------------------------------------------------------------
+-- Sesiones y bloqueo de Procesador (docs/privacidad.md)
+-- ---------------------------------------------------------------------------
+-- Ajustes de la aplicación: una sola fila. En multiusuario pasará a ser una fila por usuario.
+create table if not exists public.app_settings (
+  id               boolean primary key default true check (id),
+  -- Minutos sin actividad tras los que Procesador se bloquea y pide APP_PASSWORD.
+  app_idle_minutes integer not null default 15 check (app_idle_minutes in (15, 30, 60, 120, 240)),
+  updated_at       timestamptz not null default now()
+);
+select public.procesador_secure_table('public.app_settings', true);
+insert into public.app_settings (id) values (true) on conflict (id) do nothing;
+
+-- Una fila por inicio de sesión. La cookie lleva su id firmado; cerrar sesión la revoca aquí.
+create table if not exists public.app_sessions (
+  id               uuid primary key default gen_random_uuid(),
+  -- Vacío mientras Procesador tenga un solo usuario; el de Supabase Auth en multiusuario.
+  user_id          uuid,
+  created_at       timestamptz not null default now(),
+  expires_at       timestamptz not null,
+  last_activity_at timestamptz not null default now(),
+  -- No nulo: Procesador bloqueado en esta sesión (la cookie sigue valiendo, los datos no).
+  app_locked_at    timestamptz,
+  revoked_at       timestamptz
+);
+create index if not exists app_sessions_expires_idx on public.app_sessions(expires_at);
+select public.procesador_secure_table('public.app_sessions', false);
+
+-- Intentos fallidos de una credencial: 'app' (entrar, desbloquear, recuperar) o 'novel:<id>'.
+create table if not exists public.credential_attempts (
+  key           text primary key,
+  failures      integer not null default 0,
+  blocked_until timestamptz,
+  updated_at    timestamptz not null default now()
+);
+select public.procesador_secure_table('public.credential_attempts', true);
+
+-- Comprueba una sesión y, con p_touch, anota actividad (como mucho cada 30 s).
+-- Pasado el plazo de inactividad (más 2 minutos de margen, para que el navegador bloquee
+-- antes y alcance a guardar) bloquea Procesador en esa sesión.
+-- Devuelve state: 'ok' | 'locked' | 'revoked', y los minutos y milisegundos que quedan.
+create or replace function public.session_touch(p_session uuid, p_touch boolean)
+returns jsonb language plpgsql set search_path = '' as $$
+declare
+  s public.app_sessions;
+  v_minutes integer := coalesce((select app_idle_minutes from public.app_settings where id), 15);
+  v_idle interval := make_interval(mins => v_minutes);
+begin
+  select * into s from public.app_sessions where id = p_session for update;
+  if not found or s.revoked_at is not null or s.expires_at <= now() then
+    return jsonb_build_object('state', 'revoked');
+  end if;
+  if s.app_locked_at is null and s.last_activity_at < now() - v_idle - interval '2 minutes' then
+    update public.app_sessions set app_locked_at = now() where id = p_session;
+    s.app_locked_at := now();
+  end if;
+  if s.app_locked_at is not null then
+    return jsonb_build_object('state', 'locked', 'idle_minutes', v_minutes);
+  end if;
+  if p_touch and s.last_activity_at < now() - interval '30 seconds' then
+    update public.app_sessions set last_activity_at = now() where id = p_session;
+    s.last_activity_at := now();
+  end if;
+  return jsonb_build_object('state', 'ok', 'idle_minutes', v_minutes,
+    'remaining_ms', greatest(0, floor(extract(epoch from s.last_activity_at + v_idle - now()) * 1000))::bigint);
+end $$;
+
+-- «Bloquear Procesador» (true) o desbloquearlo tras comprobar APP_PASSWORD (false).
+create or replace function public.session_set_locked(p_session uuid, p_locked boolean)
+returns void language plpgsql set search_path = '' as $$
+begin
+  update public.app_sessions
+     set app_locked_at = case when p_locked then coalesce(app_locked_at, now()) end,
+         last_activity_at = now()
+   where id = p_session and revoked_at is null;
+end $$;
+
+-- Cierra una sesión para siempre.
+create or replace function public.session_revoke(p_session uuid)
+returns void language plpgsql set search_path = '' as $$
+begin
+  update public.app_sessions set revoked_at = coalesce(revoked_at, now()) where id = p_session;
+end $$;
+
+-- Un intento fallido. A partir del quinto, espera de 30 s que se duplica hasta 15 minutos.
+-- Devuelve hasta cuándo queda bloqueada la credencial (null: puede reintentar ya).
+create or replace function public.credential_failure(p_key text)
+returns timestamptz language sql set search_path = '' as $$
+  insert into public.credential_attempts as a (key, failures) values (p_key, 1)
+  on conflict (key) do update set
+    failures = a.failures + 1,
+    blocked_until = case when a.failures + 1 >= 5
+      then now() + least(interval '15 minutes', interval '30 seconds' * power(2, a.failures + 1 - 5))
+      end
+  returning blocked_until;
+$$;
+
+-- Un acierto borra el historial de fallos.
+create or replace function public.credential_success(p_key text)
+returns void language sql set search_path = '' as $$
+  delete from public.credential_attempts where key = p_key;
+$$;
+
+-- Limpieza, al entrar: sesiones caducadas o cerradas hace más de un día, y fallos viejos.
+create or replace function public.purge_sessions()
+returns void language sql set search_path = '' as $$
+  delete from public.app_sessions where expires_at < now() or revoked_at < now() - interval '1 day';
+  delete from public.credential_attempts
+   where updated_at < now() - interval '1 day' and (blocked_until is null or blocked_until < now());
+$$;
+
+revoke execute on function public.session_touch(uuid, boolean), public.session_set_locked(uuid, boolean),
+  public.session_revoke(uuid), public.credential_failure(text), public.credential_success(text),
+  public.purge_sessions() from public, anon, authenticated;
+grant execute on function public.session_touch(uuid, boolean), public.session_set_locked(uuid, boolean),
+  public.session_revoke(uuid), public.credential_failure(text), public.credential_success(text),
+  public.purge_sessions() to service_role;
+-- </sesiones>
+
+-- <protegidas-tablas>
+-- ---------------------------------------------------------------------------
+-- Novelas protegidas (docs/privacidad.md): tablas
+-- ---------------------------------------------------------------------------
+-- La credencial de una novela protegida. Nunca el PIN: su hash scrypt (con pepper del servidor).
+create table if not exists public.novel_protection (
+  novel_id           uuid primary key references public.novels(id) on delete cascade,
+  secret_hash        text not null,
+  secret_kind        text not null check (secret_kind in ('pin', 'password')),
+  pepper_version     smallint not null default 1,
+  -- Sube al cambiar el PIN: los desbloqueos anteriores dejan de valer.
+  credential_version integer not null default 1,
+  idle_minutes       integer not null default 15 check (idle_minutes in (5, 15, 30, 60)),
+  lock_on_hide       boolean not null default false,
+  hide_title         boolean not null default false,
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now()
+);
+select public.procesador_secure_table('public.novel_protection', true);
+
+-- Una novela desbloqueada en una sesión. Bloquear es borrar la fila.
+create table if not exists public.novel_unlocks (
+  session_id          uuid not null references public.app_sessions(id) on delete cascade,
+  novel_id            uuid not null references public.novels(id) on delete cascade,
+  credential_version  integer not null,
+  unlocked_at         timestamptz not null default now(),
+  last_activity_at    timestamptz not null default now(),
+  -- Como mucho 8 horas seguidas, aunque haya actividad.
+  absolute_expires_at timestamptz not null,
+  primary key (session_id, novel_id)
+);
+create index if not exists novel_unlocks_novel_idx on public.novel_unlocks(novel_id);
+select public.procesador_secure_table('public.novel_unlocks', false);
+
+-- Bloquear Procesador o cerrar la sesión vuelve a bloquear todas sus novelas.
+create or replace function public.forget_session_unlocks() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  delete from public.novel_unlocks where session_id = new.id;
+  return new;
+end $$;
+drop trigger if exists app_sessions_forget_unlocks on public.app_sessions;
+create trigger app_sessions_forget_unlocks after update of app_locked_at, revoked_at on public.app_sessions
+  for each row when ((old.app_locked_at is null and new.app_locked_at is not null)
+                     or (old.revoked_at is null and new.revoked_at is not null))
+  execute function public.forget_session_unlocks();
+revoke execute on function public.forget_session_unlocks() from public, anon, authenticated;
+-- </protegidas-tablas>
+
 -- ---------------------------------------------------------------------------
 -- Triggers
 -- ---------------------------------------------------------------------------
@@ -1002,6 +1171,130 @@ begin
   return jsonb_build_object('id', v_new, 'copies', v_copies);
 end $$;
 
+-- <protegidas-funciones>
+-- ---------------------------------------------------------------------------
+-- Novelas protegidas (docs/privacidad.md): funciones del servidor
+-- ---------------------------------------------------------------------------
+
+-- ¿Puede esta sesión usar la novela? state: 'open' (sin protección) · 'unlocked' · 'locked'.
+-- Un desbloqueo vencido (inactividad + 2 min de margen, 8 h, PIN cambiado) se borra.
+-- Con p_touch anota actividad (como mucho cada 30 s). Bloqueada, devuelve sólo lo que la
+-- pantalla de desbloqueo muestra: el título (salvo si está oculto) y el tipo de credencial.
+create or replace function public.novel_access(p_session uuid, p_novel uuid, p_touch boolean)
+returns jsonb language plpgsql set search_path = '' as $$
+declare
+  -- record, not %rowtype: the function is created even where the tables don't exist yet.
+  p record;
+  u record;
+  v_idle interval;
+  v_locked jsonb;
+begin
+  select * into p from public.novel_protection where novel_id = p_novel;
+  if not found then return jsonb_build_object('state', 'open'); end if;
+  v_idle := make_interval(mins => p.idle_minutes);
+  v_locked := jsonb_build_object('state', 'locked', 'kind', p.secret_kind, 'hide_title', p.hide_title,
+    'title', case when p.hide_title then null else (select title from public.novels where id = p_novel) end);
+  select * into u from public.novel_unlocks where session_id = p_session and novel_id = p_novel for update;
+  if not found then return v_locked; end if;
+  if u.credential_version <> p.credential_version or u.absolute_expires_at <= now()
+     or u.last_activity_at < now() - v_idle - interval '2 minutes' then
+    delete from public.novel_unlocks where session_id = p_session and novel_id = p_novel;
+    return v_locked;
+  end if;
+  if p_touch and u.last_activity_at < now() - interval '30 seconds' then
+    update public.novel_unlocks set last_activity_at = now() where session_id = p_session and novel_id = p_novel;
+    u.last_activity_at := now();
+  end if;
+  return jsonb_build_object('state', 'unlocked', 'kind', p.secret_kind, 'hide_title', p.hide_title,
+    'idle_minutes', p.idle_minutes, 'lock_on_hide', p.lock_on_hide,
+    'remaining_ms', greatest(0, floor(extract(epoch from least(u.last_activity_at + v_idle, u.absolute_expires_at) - now()) * 1000))::bigint);
+end $$;
+
+-- Tras comprobar el PIN (en el servidor): la novela queda desbloqueada en esta sesión.
+create or replace function public.novel_unlock(p_session uuid, p_novel uuid)
+returns void language plpgsql set search_path = '' as $$
+begin
+  insert into public.novel_unlocks (session_id, novel_id, credential_version, absolute_expires_at)
+  select p_session, p_novel, credential_version, now() + interval '8 hours'
+  from public.novel_protection where novel_id = p_novel
+  on conflict (session_id, novel_id) do update
+    set credential_version = excluded.credential_version, unlocked_at = now(), last_activity_at = now(),
+        absolute_expires_at = excluded.absolute_expires_at;
+end $$;
+
+-- Proteger una novela, o cambiar su PIN: el hash nuevo invalida todo desbloqueo anterior
+-- (en cualquier sesión y dispositivo) y deja la novela desbloqueada sólo en esta sesión.
+create or replace function public.novel_protect(p_session uuid, p_novel uuid, p_hash text, p_kind text, p_pepper smallint)
+returns void language plpgsql set search_path = '' as $$
+begin
+  insert into public.novel_protection (novel_id, secret_hash, secret_kind, pepper_version)
+  values (p_novel, p_hash, p_kind, p_pepper)
+  on conflict (novel_id) do update
+    set secret_hash = excluded.secret_hash, secret_kind = excluded.secret_kind,
+        pepper_version = excluded.pepper_version,
+        credential_version = public.novel_protection.credential_version + 1;
+  delete from public.novel_unlocks where novel_id = p_novel;
+  perform public.novel_unlock(p_session, p_novel);
+end $$;
+
+-- Quitar la protección (con el PIN, o con APP_PASSWORD como recuperación).
+create or replace function public.novel_unprotect(p_novel uuid)
+returns void language plpgsql set search_path = '' as $$
+begin
+  delete from public.novel_unlocks where novel_id = p_novel;
+  delete from public.novel_protection where novel_id = p_novel;
+end $$;
+
+-- Biblioteca para una sesión: las novelas bloqueadas no dicen cuánto tienen, y las de título
+-- oculto no dicen cómo se llaman. Una por una, con la misma regla que novel_access.
+create or replace function public.library(p_session uuid)
+returns table (id uuid, title text, updated_at timestamptz, chapters integer, words integer,
+               protected boolean, locked boolean, title_hidden boolean)
+language plpgsql stable set search_path = '' as $$
+begin
+  return query
+  select l.id,
+         case when p.hide_title then null else l.title end,
+         l.updated_at,
+         case when p.novel_id is null or u.novel_id is not null then l.chapters end,
+         case when p.novel_id is null or u.novel_id is not null then l.words end,
+         p.novel_id is not null,
+         p.novel_id is not null and u.novel_id is null,
+         coalesce(p.hide_title, false)
+  from public.library() l
+  left join public.novel_protection p on p.novel_id = l.id
+  left join public.novel_unlocks u
+    on u.novel_id = l.id and u.session_id = p_session
+   and u.credential_version = p.credential_version and u.absolute_expires_at > now()
+   and u.last_activity_at > now() - make_interval(mins => p.idle_minutes) - interval '2 minutes'
+  order by l.updated_at desc;
+end $$;
+
+-- Duplicar una novela protegida: la copia nace protegida con el mismo PIN y opciones, en la
+-- misma transacción (nunca existe una copia sin proteger), y bloqueada.
+create or replace function public.duplicate_novel_with_protection(p_novel uuid, p_title text)
+returns jsonb language plpgsql set search_path = '' as $$
+declare v_result jsonb := public.duplicate_novel(p_novel, p_title);
+begin
+  if v_result is not null then
+    insert into public.novel_protection (novel_id, secret_hash, secret_kind, pepper_version, idle_minutes,
+                                         lock_on_hide, hide_title)
+    select (v_result ->> 'id')::uuid, secret_hash, secret_kind, pepper_version, idle_minutes, lock_on_hide, hide_title
+    from public.novel_protection where novel_id = p_novel;
+  end if;
+  return v_result;
+end $$;
+
+revoke execute on function public.novel_access(uuid, uuid, boolean),
+  public.novel_unlock(uuid, uuid), public.novel_protect(uuid, uuid, text, text, smallint),
+  public.novel_unprotect(uuid), public.library(uuid), public.duplicate_novel_with_protection(uuid, text)
+  from public, anon, authenticated;
+grant execute on function public.novel_access(uuid, uuid, boolean), public.novel_unlock(uuid, uuid),
+  public.novel_protect(uuid, uuid, text, text, smallint), public.novel_unprotect(uuid), public.library(uuid),
+  public.duplicate_novel_with_protection(uuid, text)
+  to service_role;
+-- </protegidas-funciones>
+
 -- ---------------------------------------------------------------------------
 -- Privacidad: RLS activado sin políticas y sin permisos para los roles públicos.
 -- Con la clave anon/publishable no se puede leer, escribir ni llamar funciones.
@@ -1018,7 +1311,8 @@ begin
   from unnest(array['novels', 'chapters', 'characters', 'relationships', 'places', 'facts', 'fact_characters',
                     'assets', 'character_images', 'manuscript_images', 'ai_usage', 'story_threads',
                     'chapter_digests', 'novel_digests', 'advisor_conversations', 'advisor_messages',
-                    'advisor_observations', 'chapter_versions', 'time_marks']) as t
+                    'advisor_observations', 'chapter_versions', 'time_marks', 'app_settings', 'app_sessions',
+                    'credential_attempts', 'novel_protection', 'novel_unlocks']) as t
   where to_regclass('public.' || t) is null
      or not (select relrowsecurity from pg_class where oid = to_regclass('public.' || t));
   if v_missing is not null then

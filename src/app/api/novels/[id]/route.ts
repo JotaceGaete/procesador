@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byParam, novelHandler } from "@/lib/access";
+import { checkSecret } from "@/lib/protection";
 import { assertId, db, getMemory, getNovel, getOutline } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { cleanGuide } from "@/lib/guide";
@@ -11,7 +12,7 @@ import { getManuscriptImages, getNovelImages, novelFiles, removeFiles } from "@/
 type Ctx = { params: Promise<{ id: string }> };
 
 /** Everything needed to open a novel, except chapter texts (loaded one at a time). */
-export const GET = handler<Ctx>(async (_request, { params }) => {
+export const GET = novelHandler<Ctx>(byParam(), async (_request, { params }) => {
   const novel = await getNovel((await params).id);
   let chapters = await getOutline(novel.id);
   if (!chapters.length) {
@@ -42,7 +43,7 @@ export const GET = handler<Ctx>(async (_request, { params }) => {
 });
 
 /** Title, synopsis, notes, Guía Maestra, the Consejero's automatic reading switch and the book's data. */
-export const PATCH = handler<Ctx>(async (request, { params }) => {
+export const PATCH = novelHandler<Ctx>(byParam(), async (request, { params }) => {
   const id = assertId((await params).id, "Novela");
   const body = await readJson(request);
   const update: Record<string, unknown> = {};
@@ -68,9 +69,13 @@ export const PATCH = handler<Ctx>(async (request, { params }) => {
   return NextResponse.json({ ...data, book: cleanBook(data.book) });
 });
 
-/** Deletes the novel with its chapters, memory and files (cascade), then the files in Storage. The UI asks for explicit confirmation. */
-export const DELETE = handler<Ctx>(async (_request, { params }) => {
+/**
+ * Deletes the novel with its chapters, memory and files (cascade), then the files in Storage.
+ * The UI asks for explicit confirmation; a protected novel, also for its PIN ({ secret }).
+ */
+export const DELETE = novelHandler<Ctx>(byParam(), async (request, { params }, access) => {
   const id = assertId((await params).id, "Novela");
+  if (access.protected) await checkSecret(id, (await readJson(request).catch(() => ({}) as Record<string, unknown>)).secret);
   const files = await novelFiles(id);
   const { error } = await db().from("novels").delete().eq("id", id);
   if (error) throw error;

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byChild, novelHandler } from "@/lib/access";
 import { assertId, db } from "@/lib/supabase";
 import { HttpError } from "@/lib/http";
 import type { ChapterVersion } from "@/lib/types";
@@ -7,7 +7,7 @@ import type { ChapterVersion } from "@/lib/types";
 type Ctx = { params: Promise<{ id: string }> };
 
 /** One version with its text, to compare it or restore it. */
-export const GET = handler<Ctx>(async (_request, { params }) => {
+export const GET = novelHandler<Ctx>(byChild("chapter_versions"), async (_request, { params }) => {
   const { data, error } = await db()
     .from("chapter_versions")
     .select("id, reason, label, title, words, created_at, content")

@@ -262,6 +262,7 @@ async function main() {
     ...process.env,
     NODE_ENV: "production",
     APP_PASSWORD: "secreto-e2e",
+    NOVEL_LOCK_PEPPER: "pimienta-e2e",
     SUPABASE_URL: STACK,
     SUPABASE_SERVICE_ROLE_KEY: keys.service,
     ANTHROPIC_API_KEY: "test-a",

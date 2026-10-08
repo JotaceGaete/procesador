@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byParam, novelHandler } from "@/lib/access";
 import { db, getNovel } from "@/lib/supabase";
 import { bucket, removeFiles } from "@/lib/assets-server";
 
@@ -11,9 +11,10 @@ type Ctx = { params: Promise<{ id: string }> };
  * uses. The copy is independent (deleting one novel never touches the other's
  * files). If a file can't be copied, the copy is undone: never a half-copied novel.
  */
-export const POST = handler<Ctx>(async (_request, { params }) => {
+export const POST = novelHandler<Ctx>(byParam(), async (_request, { params }) => {
   const source = await getNovel((await params).id);
-  const { data, error } = await db().rpc("duplicate_novel", { p_novel: source.id, p_title: `${source.title} (copia)` });
+  // A protected novel's copy is born protected, with the same PIN, in the same transaction.
+  const { data, error } = await db().rpc("duplicate_novel_with_protection", { p_novel: source.id, p_title: `${source.title} (copia)` });
   if (error) throw error;
   const { id, copies } = data as { id: string; copies: [string, string][] };
 

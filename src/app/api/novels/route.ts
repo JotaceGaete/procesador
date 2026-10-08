@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { handler } from "@/lib/access";
 import { db } from "@/lib/supabase";
 import { readJson } from "@/lib/http";
 
-/** Library: every novel with chapter and word counts. */
-export const GET = handler(async () => {
-  const { data, error } = await db().rpc("library");
+/**
+ * Library: every novel with chapter and word counts. A protected novel locked in this
+ * session doesn't say how much it has; one with its title hidden, not even its title.
+ */
+export const GET = handler(async (_request, _ctx, principal) => {
+  const { data, error } = await db().rpc("library", { p_session: principal.sessionId });
   if (error) throw error;
   return NextResponse.json(data, { headers: { "Cache-Control": "no-store" } });
 });

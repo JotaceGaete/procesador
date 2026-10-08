@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byParam, novelHandler } from "@/lib/access";
 import { db, getNovel, getOutline } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 /** New chapter at the end. */
-export const POST = handler<Ctx>(async (request, { params }) => {
+export const POST = novelHandler<Ctx>(byParam(), async (request, { params }) => {
   const novel = await getNovel((await params).id);
   const body = await readJson(request);
   const outline = await getOutline(novel.id);
@@ -19,7 +19,7 @@ export const POST = handler<Ctx>(async (request, { params }) => {
 });
 
 /** New order: the complete list of chapter ids. Positions change, revisions don't. */
-export const PUT = handler<Ctx>(async (request, { params }) => {
+export const PUT = novelHandler<Ctx>(byParam(), async (request, { params }) => {
   const novel = await getNovel((await params).id);
   const { ids } = await readJson(request);
   if (!Array.isArray(ids) || !ids.every((x) => typeof x === "string")) throw new HttpError(400, "Orden inválido");

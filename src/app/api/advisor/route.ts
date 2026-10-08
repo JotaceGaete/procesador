@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/auth";
+import { byBody, novelHandler } from "@/lib/access";
 import { HttpError, readJson } from "@/lib/http";
 import { buildAdvice } from "@/lib/advisor/advice";
 import { actionLabel } from "@/lib/advisor/planner";
@@ -23,7 +23,7 @@ export const maxDuration = 300;
  * the manuscript. `dryRun` returns the context it would send and the chapters it would
  * like read first, without calling any provider.
  */
-export const POST = handler(async (request) => {
+export const POST = novelHandler(byBody(), async (request) => {
   const body = await readJson(request);
   const provider = getProvider(body.provider as ProviderId);
   if (!provider && !body.dryRun) throw new HttpError(400, "Ese proveedor de IA no está configurado.");

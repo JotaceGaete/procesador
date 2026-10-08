@@ -21,7 +21,15 @@ with expected(kind, object) as (
     ('función', 'duplicate_novel'), ('función', 'sync_chapter_images'), ('función', 'replace_asset_uses'),
     ('función', 'finalize_asset'), ('función', 'novel_outline'), ('función', 'library'),
     ('función', 'save_chapter_version'), ('función', 'trash_chapter'), ('función', 'chapter_trash'),
-    ('función', 'restore_chapter'), ('función', 'chapter_version_auto')
+    ('función', 'restore_chapter'), ('función', 'chapter_version_auto'),
+    -- Sesiones y bloqueo de Procesador (docs/privacidad.md)
+    ('tabla', 'app_settings'), ('tabla', 'app_sessions'), ('tabla', 'credential_attempts'),
+    ('función', 'session_touch'), ('función', 'session_set_locked'), ('función', 'session_revoke'),
+    ('función', 'credential_failure'), ('función', 'credential_success'), ('función', 'purge_sessions'),
+    -- Novelas protegidas (docs/privacidad.md)
+    ('tabla', 'novel_protection'), ('tabla', 'novel_unlocks'), ('función', 'forget_session_unlocks'),
+    ('función', 'novel_access'), ('función', 'novel_unlock'), ('función', 'novel_protect'),
+    ('función', 'novel_unprotect'), ('función', 'duplicate_novel_with_protection')
 )
 select e.kind, e.object, 'falta' as estado
 from expected e
@@ -38,6 +46,15 @@ select 'rls', c.relname, 'sin RLS'
 from pg_class c join pg_namespace n on n.oid = c.relnamespace
 where n.nspname = 'public' and c.relkind = 'r' and not c.relrowsecurity
   and c.relname in (select object from expected where kind = 'tabla')
+union all
+-- La biblioteca por sesión (novelas protegidas): library(uuid), además de library().
+select 'función', 'library(uuid)', 'falta'
+where not exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                  where n.nspname = 'public' and p.proname = 'library' and p.pronargs = 1)
+union all
+select 'trigger', 'app_sessions_forget_unlocks', 'falta'
+where to_regclass('public.app_sessions') is not null
+  and not exists (select 1 from pg_trigger where tgname = 'app_sessions_forget_unlocks')
 union all
 -- duplicate_novel debe copiar el interruptor auto_digest (versión de la fase 2 en adelante).
 select 'función', 'duplicate_novel', 'versión anterior a la fase 2'

@@ -12,6 +12,11 @@ function commit(): string {
 }
 
 const nextConfig: NextConfig = {
+  // Pages are never kept by the browser's cache: after locking, Back can't show them again
+  // (docs/privacidad.md). Their data comes from the API, which answers no-store too.
+  async headers() {
+    return ["/", "/novela/:path*"].map((source) => ({ source, headers: [{ key: "Cache-Control", value: "no-store" }] }));
+  },
   env: {
     NEXT_PUBLIC_BUILD_SHA: commit().slice(0, 7),
     NEXT_PUBLIC_BUILD_TIME: new Date().toISOString(),

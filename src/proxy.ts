@@ -2,7 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, checkSession } from "@/lib/auth";
 
 export async function proxy(request: NextRequest) {
-  const state = await checkSession(request.cookies.get(SESSION_COOKIE)?.value);
+  // Signature only: whether the session was closed, or Procesador is locked, is the API's to say.
+  const { state } = await checkSession(request.cookies.get(SESSION_COOKIE)?.value);
   if (state === "ok") return NextResponse.next();
 
   if (state === "misconfigured") {
