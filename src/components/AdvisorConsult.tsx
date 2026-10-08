@@ -26,6 +26,9 @@ import { formatTokens } from "./format";
 import UsageLine from "./UsageLine";
 import ObservationCard, { type CardActions } from "./ObservationCard";
 import { conversationCards, currentFocus } from "@/lib/advisor/cards";
+import { conversationPlan, lastProposal, wantsHandoff, wantsSave, type AdvisorMode, type SceneBrief } from "@/lib/advisor/converse";
+import ProposalCard from "./ProposalCard";
+import SceneBriefEditor from "./SceneBriefEditor";
 
 interface Props {
   novelId: string;
@@ -40,6 +43,8 @@ interface Props {
   onGoTo(chapterId: string, start: number, end: number, text: string): void;
   /** An alternative of "¿Cómo seguir?" goes to the Asistente as the argument of a scene. */
   onSendToAssistant(text: string): void;
+  /** «Enviar al Asistente» from Conversar: the scene order the author reviewed. */
+  onSendBrief(b: SceneBrief): void;
   memory: Memory;
   /** Saves the open chapter, so what an observation relied on is the saved revision. */
   flush(): Promise<boolean>;
@@ -92,7 +97,17 @@ export default function AdvisorConsult(p: Props) {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [last, setLast] = useState<(Ask & { provider: ProviderId }) | null>(null);
-  const [plan, setPlan] = useState<{ label: string; detail: string } | null>(null);
+  const [plan, setPlan] = useState<{ label: string; detail: string; mode?: AdvisorMode } | null>(null);
+  // Conversar (a companion; the default) or Analizar (the full evaluation), remembered per novel.
+  const [mode, setModeState] = useState<AdvisorMode>("conversar");
+  useEffect(() => setModeState(readPref(`advisorMode:${p.novelId}`) === "analizar" ? "analizar" : "conversar"), [p.novelId]);
+  const setMode = (m: AdvisorMode) => {
+    setModeState(m);
+    writePref(`advisorMode:${p.novelId}`, m);
+  };
+  // «Enviar al Asistente»: the brief being prepared or reviewed.
+  const [brief, setBrief] = useState<{ loading: boolean; data: SceneBrief | null; error: string } | null>(null);
+  const [newDecision, setNewDecision] = useState("");
   const [text, setText] = useState("");
   const [cards, setCards] = useState<Observation[] | null>(null);
   const [labels, setLabels] = useState<{ label: string; from: string | null }[] | null>(null);
@@ -157,6 +172,7 @@ export default function AdvisorConsult(p: Props) {
       provider: using,
       conversationId,
       deep,
+      mode,
       anchorId: ask.anchorId,
       release: released && !ask.anchorId,
       preload: ask.preload,
@@ -238,7 +254,7 @@ export default function AdvisorConsult(p: Props) {
           else if (e.type === "material") setMaterial({ items: e.items, rounds: e.rounds });
           else if (e.type === "confirm") pause = e;
           else if (e.type === "context") setParts(e.parts);
-          else if (e.type === "plan") setPlan({ label: e.label, detail: e.detail });
+          else if (e.type === "plan") setPlan({ label: e.label, detail: e.detail, mode: e.mode });
           else if (e.type === "usage") setUsage(e);
           else if (e.type === "observations") {
             setCards(e.items);
@@ -315,8 +331,119 @@ export default function AdvisorConsult(p: Props) {
         }
       : () => ask({ action: a.id, useSelection });
 
+  // Conversar: what the author decided and ruled out in this conversation (editable).
+  const decided = conversationPlan(history);
+  const planEdit = async (json: unknown) => {
+    if (!conversationId) return;
+    await api(`/api/conversations/${conversationId}`, { method: "PATCH", json: { plan: json } });
+    await open(conversationId, true);
+  };
+  const removeFrom = (kind: "decisions" | "discarded", item: { text: string; message: number }) => {
+    const m = history[item.message];
+    const list = (m?.context?.[kind] ?? []).filter((x) => x !== item.text);
+    return planEdit({ messageId: m.id, [kind]: list });
+  };
+  // «Enviar al Asistente»: the brief, prepared from the conversation, for the author to review.
+  async function handoff(anchorId: string | null) {
+    if (!conversationId || !p.provider) return;
+    setBrief({ loading: true, data: null, error: "" });
+    try {
+      const res = await fetch("/api/advisor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brief: true, novelId: p.novelId, conversationId, anchorId, provider: p.provider }),
+      });
+      if (res.status === 401) window.location.href = "/login";
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `Error ${res.status}`);
+      setBrief({ loading: false, data: json as SceneBrief, error: "" });
+    } catch (e) {
+      setBrief({ loading: false, data: null, error: (e as Error).message });
+    }
+  }
+  const cardsNow = conversationCards(history);
+  const onTable = () => (focus ? cardsNow.find((c) => c.id === focus.id) ?? null : lastProposal(cardsNow));
+  // What the author types: «envíala al Asistente» and «guárdala» act on the proposal on the
+  // table without asking the model; anything else is a message.
+  function submit() {
+    const q = question.trim();
+    if (!q) return;
+    const card = mode === "conversar" && conversationId ? onTable() : null;
+    if (card && wantsHandoff(q)) {
+      setQuestion("");
+      return handoff(card.id);
+    }
+    if (card && wantsSave(q)) {
+      setQuestion("");
+      return api<StoredObservation>(`/api/observations/${card.id}`, { method: "PATCH", json: { status: "saved" } }).then(update);
+    }
+    ask({ question: q, useSelection });
+  }
+  const conversing = mode === "conversar";
+  const develop = (o: StoredObservation) => ask({ question: "Desarróllala.", anchorId: o.id, useSelection: false });
+
+  // The answer on its way: in Conversar, like a chat turn (the text and at most a proposal);
+  // in Analizar, with its plan, reading rounds and cards.
+  const chatTurn = (plan?.mode ?? mode) === "conversar";
+  const liveResult = last && !stored && (chatTurn ? (
+        <section className="result advisor-result chat" aria-live="polite" data-origin="consejero: respuesta en curso (conversar)">
+          {plan?.detail && <p className="muted small plan">{plan.detail}</p>}
+          {progress && <p className="muted small" role="status">{progress}</p>}
+          {visible(text) && (
+            <div className="markdown">
+              <ReactMarkdown>{visible(text)}</ReactMarkdown>
+            </div>
+          )}
+          {running && !text && !progress && <p className="muted">Pensando…</p>}
+          {cards && cards.length > 0 && (
+            <ul className="proposals">
+              {cards.map((o, k) => (
+                <ProposalCard key={k} o={o} tag={labels?.[k]} label={label} onGoTo={p.onGoTo} />
+              ))}
+            </ul>
+          )}
+          {notice && <p className="notice">{notice}</p>}
+          {!running && (parts || usage) && <UsageLine parts={parts} usage={usage} />}
+        </section>
+      ) : (        <section className="result advisor-result" aria-live="polite" data-origin="consejero: respuesta en curso (estado last/text de AdvisorConsult)">
+          {plan && (
+            <p className="muted small plan">
+              {last.question ? "Entendí la pregunta como: " : ""}
+              <strong>{plan.label}</strong>
+              {plan.detail ? ` · ${plan.detail}` : ""}
+            </p>
+          )}
+          {progress && <p className="muted small" role="status">{progress}</p>}
+          {rounds.length > 0 && (
+            <ul className="rounds muted small" aria-label="Lectura profunda">
+              {rounds.map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
+          )}
+          {visible(text) && (
+            <div className="markdown">
+              <ReactMarkdown>{visible(text)}</ReactMarkdown>
+            </div>
+          )}
+          {running && !text && !progress && <p className="muted">Pensando…</p>}
+          {cards && cards.length > 0 && (
+            <ul className="observations">
+              {cards.map((o, k) => (
+                <ObservationCard key={k} o={o} label={label} onGoTo={p.onGoTo} onSendToAssistant={p.onSendToAssistant} tag={labels?.[k]} />
+              ))}
+            </ul>
+          )}
+          {invalid && <p className="notice small">Las observaciones llegaron mal formadas y no se muestran; el texto sí.</p>}
+          {notice && <p className="notice">{notice}</p>}
+          {material && <MaterialLine items={material.items} rounds={material.rounds} />}
+          {!running && (parts || usage) && <UsageLine parts={parts} usage={usage} />}
+        </section>
+      
+      ));
+
   return (
-    <div className="consult">
+    <div className={`consult${conversing ? " conversing" : ""}`}>
       <div className="conversation-bar">
         <select
           aria-label="Conversación"
@@ -359,6 +486,32 @@ export default function AdvisorConsult(p: Props) {
                 {m.context?.anchor && <span className="turn-anchor small">sobre {m.context.anchor.label}</span>}
                 {m.content}
               </li>
+            ) : m.context?.mode === "conversar" ? (
+              <li key={m.id} className="turn advisor chat">
+                {m.content && (
+                  <div className="markdown">
+                    <ReactMarkdown>{m.content}</ReactMarkdown>
+                  </div>
+                )}
+                {m.observations.length > 0 && (
+                  <ul className="proposals">
+                    {m.observations.map((o) => (
+                      <ProposalCard
+                        key={o.id}
+                        o={o}
+                        tag={tags.get(o.id)}
+                        label={label}
+                        onGoTo={p.onGoTo}
+                        onChanged={update}
+                        busy={running || !p.provider}
+                        onDevelop={develop}
+                        onHandoff={(x) => handoff(x.id)}
+                      />
+                    ))}
+                  </ul>
+                )}
+                {m === lastAdvisor && m.context?.parts && <UsageLine parts={m.context.parts} usage={m.context.usage ?? null} />}
+              </li>
             ) : (
               <li key={m.id} className="turn advisor">
                 {m.context?.plan && (
@@ -396,6 +549,36 @@ export default function AdvisorConsult(p: Props) {
           )}
         </ol>
       )}
+      <div className="mode-switch" role="group" aria-label="Modo del Consejero">
+        {(
+          [
+            ["conversar", "Conversar", "Un compañero: respuestas breves, una propuesta, tus decisiones como dirección"],
+            ["analizar", "Analizar", "La evaluación completa: observaciones con citas, coherencia, ritmo, cabos y alternativas"],
+          ] as const
+        ).map(([id, text, hint]) => (
+          <button key={id} className={mode === id ? "on" : undefined} aria-pressed={mode === id} title={hint} disabled={running} onClick={() => setMode(id)}>
+            {text}
+          </button>
+        ))}
+      </div>
+      {conversing ? (
+        <div className="advisor-quick" role="group" aria-label="Acciones del Consejero">
+          <p className="quick-row">
+            {(
+              [
+                [ADVISOR_ACTIONS.find((a) => a.id === "seguir")!, "¿Cómo continúo?"],
+                [ADVISOR_ACTIONS.find((a) => a.id === "caminos")!, "Dame opciones"],
+                [ADVISOR_ACTIONS.find((a) => a.id === "giro")!, "Necesito un giro"],
+                [ADVISOR_ACTIONS.find((a) => a.id === "consecuencias")!, "¿Qué pasa si…?"],
+              ] as const
+            ).map(([a, text]) => (
+              <button key={a.id} className="quick" title={a.hint} disabled={running || !p.provider} onClick={quick(a)}>
+                {text}
+              </button>
+            ))}
+          </p>
+        </div>
+      ) : (
       <div className="advisor-quick" role="group" aria-label="Acciones del Consejero">
         <p className="quick-row">
           <span className="quick-label muted small">Pensar juntos</span>
@@ -414,12 +597,14 @@ export default function AdvisorConsult(p: Props) {
           ))}
         </p>
       </div>
-      {p.selection && (
+      )}
+      {!conversing && p.selection && (
         <label className="check small">
           <input type="checkbox" checked={useSelection} onChange={(e) => setUseSelection(e.target.checked)} />
           <span>Sobre la selección (Analizar, Coherencia y Subir tensión)</span>
         </label>
       )}
+      {!conversing && (
       <label className="check small" title="Si lo necesita, el Consejero pide fichas, pasajes o capítulos concretos, con límites. Nunca la novela completa.">
         <input
           type="checkbox"
@@ -431,11 +616,84 @@ export default function AdvisorConsult(p: Props) {
         />
         <span>Lectura profunda: puede pedir más material si lo necesita</span>
       </label>
+      )}
+      {conversing && (decided.decisions.length > 0 || decided.discarded.length > 0 || conversationId) && (
+        <details className="plan-bar" open={decided.decisions.length > 0 || decided.discarded.length > 0}>
+          <summary className="small">
+            Decidido en esta conversación{decided.decisions.length ? ` (${decided.decisions.length})` : ""}
+            {decided.discarded.length ? ` · descartado (${decided.discarded.length})` : ""}
+          </summary>
+          <ul className="small">
+            {decided.decisions.map((d, i) => (
+              <li key={`d${i}`}>
+                {d.text}{" "}
+                <button className="link small" title="Ya no es una decisión" aria-label={`Quitar decisión: ${d.text}`} onClick={() => removeFrom("decisions", d)}>
+                  ✕
+                </button>{" "}
+                <button
+                  className="link small"
+                  title="Añadir a Memoria como hecho sugerido (no es canon hasta que lo apruebes)"
+                  onClick={async () => {
+                    const f = await api<Fact>(`/api/novels/${p.novelId}/memory/facts`, { method: "POST", json: { text: d.text, status: "suggested" } });
+                    p.onFactAdded(f);
+                  }}
+                >
+                  A Memoria
+                </button>
+              </li>
+            ))}
+            {decided.discarded.map((d, i) => (
+              <li key={`x${i}`} className="muted">
+                Descartado: {d.text}{" "}
+                <button className="link small" aria-label={`Quitar descartado: ${d.text}`} onClick={() => removeFrom("discarded", d)}>
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ul>
+          {conversationId && (
+            <form
+              className="plan-add"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (newDecision.trim()) planEdit({ add: newDecision.trim() }).then(() => setNewDecision(""));
+              }}
+            >
+              <input value={newDecision} onChange={(e) => setNewDecision(e.target.value)} placeholder="Añadir una decisión…" aria-label="Nueva decisión" />
+            </form>
+          )}
+        </details>
+      )}
+      {brief && (
+        <div className="brief-box" data-origin="consejero: encargo para el Asistente">
+          {brief.loading && <p className="muted small" role="status">Preparando el encargo para el Asistente…</p>}
+          {brief.error && (
+            <p className="error small">
+              {brief.error}{" "}
+              <button className="link small" onClick={() => setBrief(null)}>
+                Cerrar
+              </button>
+            </p>
+          )}
+          {brief.data && (
+            <SceneBriefEditor
+              brief={brief.data}
+              memory={p.memory}
+              onCancel={() => setBrief(null)}
+              onSend={(b) => {
+                setBrief(null);
+                p.onSendBrief(b);
+              }}
+            />
+          )}
+        </div>
+      )}
+      {conversing && liveResult}
       <form
         className="ask"
         onSubmit={(e) => {
           e.preventDefault();
-          if (question.trim()) ask({ question: question.trim(), useSelection });
+          submit();
         }}
       >
         {focus && (
@@ -452,9 +710,13 @@ export default function AdvisorConsult(p: Props) {
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           placeholder={
-            conversationId
-              ? "Sigue la conversación… Ej.: Me gusta el segundo, pero quiero que aparezca Nacho."
-              : "Piensa con el Consejero… Ej.: No sé cómo continuar. · ¿Qué pasa si Elena descubre la carta?"
+            conversing
+              ? conversationId
+                ? "Sigue la conversación… Ej.: Me gusta, desarróllala. · Envíala al Asistente."
+                : "Cuéntale al Consejero… Ej.: No sé cómo seguir. · Quiero que Waldo haya sido novio de Pola."
+              : conversationId
+                ? "Sigue la conversación… Ej.: Me gusta el segundo, pero quiero que aparezca Nacho."
+                : "Piensa con el Consejero… Ej.: No sé cómo continuar. · ¿Qué pasa si Elena descubre la carta?"
           }
           aria-label="Pregunta al Consejero"
           onKeyDown={(e) => {
@@ -470,49 +732,14 @@ export default function AdvisorConsult(p: Props) {
             </button>
           ) : (
             <button className="btn" disabled={!question.trim() || !p.provider}>
-              Preguntar
+              {conversing ? "Enviar" : "Preguntar"}
             </button>
           )}
         </div>
       </form>
       {!p.provider && <p className="error">No hay proveedor de IA configurado.</p>}
 
-      {last && !stored && (
-        <section className="result advisor-result" aria-live="polite" data-origin="consejero: respuesta en curso (estado last/text de AdvisorConsult)">
-          {plan && (
-            <p className="muted small plan">
-              {last.question ? "Entendí la pregunta como: " : ""}
-              <strong>{plan.label}</strong>
-              {plan.detail ? ` · ${plan.detail}` : ""}
-            </p>
-          )}
-          {progress && <p className="muted small" role="status">{progress}</p>}
-          {rounds.length > 0 && (
-            <ul className="rounds muted small" aria-label="Lectura profunda">
-              {rounds.map((r, i) => (
-                <li key={i}>{r}</li>
-              ))}
-            </ul>
-          )}
-          {visible(text) && (
-            <div className="markdown">
-              <ReactMarkdown>{visible(text)}</ReactMarkdown>
-            </div>
-          )}
-          {running && !text && !progress && <p className="muted">Pensando…</p>}
-          {cards && cards.length > 0 && (
-            <ul className="observations">
-              {cards.map((o, k) => (
-                <ObservationCard key={k} o={o} label={label} onGoTo={p.onGoTo} onSendToAssistant={p.onSendToAssistant} tag={labels?.[k]} />
-              ))}
-            </ul>
-          )}
-          {invalid && <p className="notice small">Las observaciones llegaron mal formadas y no se muestran; el texto sí.</p>}
-          {notice && <p className="notice">{notice}</p>}
-          {material && <MaterialLine items={material.items} rounds={material.rounds} />}
-          {!running && (parts || usage) && <UsageLine parts={parts} usage={usage} />}
-        </section>
-      )}
+      {!conversing && liveResult}
       {last && !running && others.length > 0 && (
         <p className="retry-with muted small">
           Probar con{" "}

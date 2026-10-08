@@ -9,6 +9,8 @@ import { getProvider } from "@/lib/ai/providers";
 import { recordUsage } from "@/lib/ai/usage";
 import { conversationContext, getConversation, saveExchange, setObservationStatus, type ConversationState } from "@/lib/advisor/conversations";
 import { assignLabels } from "@/lib/advisor/cards";
+import { buildBrief } from "@/lib/advisor/brief";
+import { decisionsIn, discardsIn } from "@/lib/advisor/converse";
 import { adviseRounds, type LoopResult } from "@/lib/advisor/loop";
 import type { DeepRequest } from "@/lib/advisor/deep";
 import type { AdvisorAction, AssistEvent, Observation, ProviderId, Usage } from "@/lib/types";
@@ -27,6 +29,16 @@ export const POST = handler(async (request) => {
   if (!provider && !body.dryRun) throw new HttpError(400, "Ese proveedor de IA no está configurado.");
   const sel = body.selection as { start?: unknown; end?: unknown } | null;
   const novelId = String(body.novelId ?? "");
+  // «Enviar al Asistente»: the scene order from the conversation, for the author to review.
+  // Nothing is stored and nothing reaches the manuscript.
+  if (body.brief === true) {
+    const id = typeof body.conversationId === "string" ? body.conversationId : "";
+    if (!id) throw new HttpError(400, "Falta la conversación.");
+    if ((await getConversation(id)).novel_id !== novelId) throw new HttpError(404, "Conversación no encontrada");
+    if (!provider) throw new HttpError(400, "Ese proveedor de IA no está configurado.");
+    const anchorId = typeof body.anchorId === "string" && body.anchorId ? body.anchorId : null;
+    return NextResponse.json(await buildBrief({ novelId, conversationId: id, anchorId, provider: body.provider as ProviderId, signal: request.signal }));
+  }
   // Continuing a conversation: its summary and last turns go with the question
   // (compacting the older ones first if needed; never on a dry run).
   const conversationId = typeof body.conversationId === "string" && body.conversationId ? body.conversationId : null;
@@ -58,6 +70,7 @@ export const POST = handler(async (request) => {
       focus: conversation?.focus ?? null,
       anchorId: typeof body.anchorId === "string" && body.anchorId ? body.anchorId : null,
       release: body.release === true,
+      mode: body.mode === "conversar" ? "conversar" : "analizar",
     },
     request.signal,
   );
@@ -67,6 +80,7 @@ export const POST = handler(async (request) => {
     action: advice.plan.action,
     label: `${actionLabel(advice.plan.action)}${advice.plan.action === "explorar" ? anchorLabel : ""}`,
     detail: advice.detail,
+    mode: advice.mode,
   };
 
   if (body.dryRun) {
@@ -94,7 +108,8 @@ export const POST = handler(async (request) => {
 
   const encoder = new TextEncoder();
   const send = (c: ReadableStreamDefaultController<Uint8Array>, e: AssistEvent) => c.enqueue(encoder.encode(`${JSON.stringify(e)}\n`));
-  const question = typeof body.question === "string" && body.question.trim() ? body.question.trim().slice(0, 2000) : plan.label;
+  const typed = typeof body.question === "string" && body.question.trim() ? body.question.trim().slice(0, 2000) : "";
+  const question = typed || plan.label;
   // Requests the author approved after a pause, served before the first call.
   const preload = (Array.isArray(body.preload) ? body.preload : [])
     .filter((r): r is DeepRequest => !!r && typeof r === "object" && typeof (r as DeepRequest).tipo === "string")
@@ -107,6 +122,7 @@ export const POST = handler(async (request) => {
     preload,
     approvedTokens: Number(body.approvedTokens) || 0,
     onUsage: (u) => recordUsage(advice.novelId, "advise", body.provider as ProviderId, u),
+    rounds: advice.deepRounds,
   });
   let ended = false;
   const stream = new ReadableStream<Uint8Array>({
@@ -158,8 +174,13 @@ export const POST = handler(async (request) => {
               material: result.items.map(({ label, tokens }) => ({ label, tokens })),
               rounds: result.rounds,
               cards: labelsFor(items),
+              mode: advice.mode,
             },
             anchor: advice.anchor,
+            mode: advice.mode,
+            // The author's decisions and discards, in their own words: the conversation's plan.
+            decisions: typed ? decisionsIn(typed) : [],
+            discarded: typed ? discardsIn(typed) : [],
             observations: items,
             basedOn,
           });

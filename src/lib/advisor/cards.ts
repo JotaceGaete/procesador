@@ -37,7 +37,7 @@ export interface Anchor {
   label: string;
   title: string;
   /** How it was understood: a button, the words of the author, or inherited. */
-  how: "boton" | "etiqueta" | "ordinal" | "ultimo" | "heredado";
+  how: "boton" | "etiqueta" | "ordinal" | "ultimo" | "heredado" | "esa";
 }
 
 export interface ConversationMessage {
@@ -46,6 +46,9 @@ export interface ConversationMessage {
   context: {
     anchor?: Anchor | null;
     cards?: { label: string; from: string | null }[];
+    /** Author turn: the decisions and discards it carries (Conversar). */
+    decisions?: string[];
+    discarded?: string[];
   } | null;
   observations: { id: string; kind: ObservationKind; title: string; body: string; status: ObservationStatus; position?: number }[];
 }

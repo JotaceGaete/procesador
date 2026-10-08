@@ -35,6 +35,7 @@ import UsageLine from "./UsageLine";
 import ContextView from "./ContextView";
 import DiffView from "./DiffView";
 import ProposalReader from "./ProposalReader";
+import type { SceneBrief } from "@/lib/advisor/converse";
 
 interface Props {
   hidden: boolean;
@@ -228,6 +229,9 @@ function AssistantPanel(props: Props) {
   const [length, setLength] = useState<SceneLength>("media");
   // Where a new scene goes: the end of the chapter unless the author chooses the cursor.
   const [sceneTarget, setSceneTarget] = useState<SceneTarget>("end");
+  // «Enviar al Asistente» from the Consejero: the decisions, limits and discards that go with
+  // the argument (the author reviewed them there). Only for the next scene.
+  const [brief, setBrief] = useState<SceneBrief | null>(null);
   useEffect(() => setSceneTarget(readPref("sceneTarget") === "cursor" ? "cursor" : "end"), []);
 
   // One pending result per tab (Editar selección, Escribir escena, the Consejero's analysis):
@@ -347,6 +351,7 @@ function AssistantPanel(props: Props) {
           characterIds: sceneCharacters,
           placeIds: placeId ? [placeId] : [],
           sceneTarget,
+          ...(brief ? { brief: { decisions: brief.decisions, constraints: brief.constraints, discarded: brief.discarded } } : {}),
           // Written to continue the chapter's end, or the text at the cursor (fixed in run()).
           cursor: sceneTarget === "end" ? getContent().length : getCursor(),
         },
@@ -414,6 +419,7 @@ function AssistantPanel(props: Props) {
     memory,
     provider,
     sceneTarget,
+    brief,
   ]);
 
   async function run(req: Request, using: ProviderId) {
@@ -541,6 +547,7 @@ function AssistantPanel(props: Props) {
     if (last?.mode === "scene" && argument.trim() === String(last.body.argument ?? "").trim()) {
       setArgument("");
       writePref(`argument:${novelId}`, "");
+      setBrief(null);
     }
   };
   /**
@@ -579,7 +586,21 @@ function AssistantPanel(props: Props) {
   // The author chose a path of "¿Cómo seguir?": the Asistente gets it as the argument of a scene.
   const sendToAssistant = (text: string) => {
     note(`Enviar al Asistente → argument (${text.length} car.)`);
+    setBrief(null);
     setArgument(text);
+    setMode("scene");
+    onSection("assistant");
+  };
+  // The Consejero's brief, reviewed by the author: it fills the scene's fields (still nothing
+  // is written: the author asks for the scene, reads it and decides).
+  const sendBrief = (b: SceneBrief) => {
+    note(`Enviar al Asistente → encargo (${b.decisions.length} decisiones)`);
+    setArgument(b.argument);
+    writePref(`argument:${novelId}`, b.argument);
+    setSceneCharacters(b.characterIds);
+    setPlaceId(b.placeId ?? "");
+    setSceneTarget(b.target);
+    setBrief(b);
     setMode("scene");
     onSection("assistant");
   };
@@ -880,6 +901,7 @@ function AssistantPanel(props: Props) {
               flush={flush}
               onFactAdded={onFactAdded}
               onSendToAssistant={sendToAssistant}
+              onSendBrief={sendBrief}
             />
           </>
         ) : advisorView === "saved" ? (
@@ -961,6 +983,40 @@ function AssistantPanel(props: Props) {
               placeholder="Qué ocurre en la escena, con tus palabras. Ej.: ya estaba todo preparado, ducha nueva, el cuarto inmenso… solo faltaba comenzar con el trato."
             />
           </label>
+          {brief && (
+            <div className="brief-note" data-origin="encargo del Consejero (estado brief)">
+              <p className="small">
+                <strong>Del Consejero</strong>
+                {brief.source ? ` (${brief.source})` : ""}:{" "}
+                {[
+                  brief.decisions.length && `${brief.decisions.length} ${brief.decisions.length === 1 ? "decisión" : "decisiones"}`,
+                  brief.constraints.length && `${brief.constraints.length} ${brief.constraints.length === 1 ? "restricción" : "restricciones"}`,
+                  brief.discarded.length && `${brief.discarded.length} descartado${brief.discarded.length === 1 ? "" : "s"}`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "la propuesta elegida"}{" "}
+                <button className="link small" onClick={() => setBrief(null)} title="La escena se escribirá sólo con el argumento">
+                  Quitar
+                </button>
+              </p>
+              {(brief.decisions.length > 0 || brief.constraints.length > 0 || brief.discarded.length > 0) && (
+                <details>
+                  <summary className="small muted">Ver lo que va con la escena</summary>
+                  <ul className="small">
+                    {brief.decisions.map((d, i) => (
+                      <li key={`d${i}`}>Decisión: {d}</li>
+                    ))}
+                    {brief.constraints.map((d, i) => (
+                      <li key={`c${i}`}>Restricción: {d}</li>
+                    ))}
+                    {brief.discarded.map((d, i) => (
+                      <li key={`x${i}`}>Descartado: {d}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
           <p className="muted small field-help">
             Escríbelo como te salga: Procesador lo desarrolla en prosa, con la voz y el contexto de tu novela. Los personajes y
             lugares que nombres se incluyen solos.

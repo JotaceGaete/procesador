@@ -2114,6 +2114,158 @@ details.group > p {
   border-left-color: #8a8a5c;
 }
 
+/* ---------- Consejero: Conversar ---------- */
+.mode-switch {
+  display: inline-flex;
+  align-self: flex-start;
+  border: 1px solid var(--faint);
+  border-radius: 999px;
+  padding: 2px;
+  gap: 2px;
+}
+.mode-switch button {
+  background: none;
+  border: none;
+  border-radius: 999px;
+  padding: 3px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.mode-switch button.on {
+  background: var(--selection);
+  color: inherit;
+}
+/* A chat turn: the Consejero's words, then (at most) a proposal; no kinds or confidence. */
+.turn.advisor.chat,
+.advisor-result.chat {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.proposals {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.proposal {
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+.proposal p {
+  margin: 0 0 4px;
+}
+.proposal-head {
+  font-size: 12px;
+}
+.proposal-title {
+  font-weight: 600;
+}
+.proposal-body {
+  font-size: 14px;
+}
+.proposal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 6px;
+  font-size: 13px;
+}
+.proposal-actions .strong {
+  font-weight: 600;
+}
+.proposal.saved {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.proposal.dismissed {
+  border: none;
+  background: none;
+  padding: 0;
+}
+/* What the author decided in this conversation: the plan, editable. */
+.plan-bar {
+  border: 1px solid var(--faint);
+  border-radius: 4px;
+  padding: 6px 10px;
+}
+.plan-bar summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.plan-bar ul {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+.plan-add input {
+  width: 100%;
+  border: 1px solid var(--faint);
+  background: transparent;
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+/* The scene order for the Asistente, reviewed before it goes. */
+.brief-box {
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.scene-brief {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.scene-brief p {
+  margin: 0;
+}
+.brief-list {
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+.brief-list legend {
+  font-size: 13px;
+  color: var(--muted);
+}
+.brief-line {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 3px 0;
+}
+.brief-line input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--faint);
+  background: transparent;
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+.brief-note {
+  border-left: 3px solid var(--accent);
+  padding: 4px 10px;
+  margin: 4px 0;
+}
+.brief-note p,
+.brief-note ul {
+  margin: 0;
+}
+@media (max-width: 999px) {
+  /* Fields at 16 px so iOS doesn't zoom on focus. */
+  .brief-line input,
+  .plan-add input,
+  .scene-brief textarea {
+    font-size: 16px;
+  }
+  .proposal-actions {
+    gap: 6px 16px;
+  }
+}
+
 /* ---------- Consejero: conversaciones y guardadas ---------- */
 .conversation-bar {
   display: flex;

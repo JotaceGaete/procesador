@@ -15,7 +15,7 @@ const INTENTS: [AdvisorAction, RegExp][] = [
   ["tension", /(subir|aumentar|elevar|m[aá]s|falta|poca|sin|baja)\s+(la\s+)?tensi[oó]n|tensi[oó]n\s+(baja|cae|decae|se pierde)|m[aá]s tens[oa]|suspense|suspenso|aburrid|se hace lent/i],
   ["caminos", /\b(tres|3|varios|otros|distintos|diferentes|algunos)\s+caminos|caminos posibles|qu[eé] opciones tengo|opciones (para|de) (seguir|continuar)|alternativas para|ideas para (seguir|continuar)/i],
   ["oportunidades", /oportunidad|(?<!des)aprovech|potencial|qu[eé] (puedo|podr[ií]a) (usar|explotar)|explotar/i],
-  ["seguir", /c[oó]mo (sigo|seguir|contin[uú]o|continuar)|no s[eé] (por d[oó]nde |c[oó]mo )?(seguir|continuar|sigo|contin[uú]o)|bloquead|atascad|y ahora qu[eé]|qu[eé] (pasa|viene|hago) (despu[eé]s|ahora)|siguiente (escena|cap[ií]tulo)|continuaci[oó]n|hacia d[oó]nde/i],
+  ["seguir", /c[oó]mo (puedo |podr[ií]a |deber[ií]a |debo |lo |la )?(sigo|seguir|contin[uú]o|continuar|contin[uú]a)|por d[oó]nde (sigo|seguir|contin[uú]o|continuar)|no s[eé] (por d[oó]nde |c[oó]mo )?(seguir|continuar|sigo|contin[uú]o)|bloquead|atascad|y ahora qu[eé]|qu[eé] (pasa|viene|hago) (despu[eé]s|ahora)|siguiente (escena|cap[ií]tulo)|continuaci[oó]n|hacia d[oó]nde/i],
   // Analytic.
   ["repeticiones", /repit|repeti|reiter|muletilla|redundan/i],
   ["coherencia", /coheren|contradic|incoheren|demasiado pronto|antes de tiempo|revel|continuidad|sab[ií]a|no deber[ií]a saber|error/i],

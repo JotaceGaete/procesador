@@ -17,6 +17,7 @@ import { chapterRows } from "./reading";
 import { findQuote } from "./quotes";
 import { CONVERSATION_SUMMARY_INSTRUCTIONS } from "./prompts";
 import { cardStates, cardsBlock, currentFocus, type Anchor, type CardRef, type CardWithState, type ConversationMessage } from "./cards";
+import { conversationPlan, planBlock, type Plan } from "./converse";
 
 /**
  * The Consejero's memory of a conversation (docs/consejero.md, phase 4): only the last
@@ -90,6 +91,8 @@ export interface ConversationState {
   cards: CardWithState[];
   /** The proposal being developed, if any. */
   focus: CardRef | null;
+  /** The author's decisions (PLAN) and discards in this conversation. */
+  plan: Plan;
 }
 
 /**
@@ -111,6 +114,8 @@ export async function conversationContext(opts: {
   const messages = await withCards(await messageRows(c.id));
   const cards = cardStates(messages);
   const focus = currentFocus(messages);
+  const plan = conversationPlan(messages);
+  const decided = planBlock(plan);
   let summary = c.summary;
   let from = c.summarized_count;
   const cut = messages.length - LITERAL;
@@ -129,7 +134,7 @@ export async function conversationContext(opts: {
         prompt: `${summary ? `<resumen-anterior>\n${summary}\n</resumen-anterior>\n\n` : ""}<mensajes>\n${older
           .slice(from)
           .map((m) => turn(m, cards))
-          .join("\n\n")}\n</mensajes>${states ? `\n\n<estado-de-las-tarjetas>\n${states}\n</estado-de-las-tarjetas>` : ""}\n\nResume la conversación hasta aquí.`,
+          .join("\n\n")}\n</mensajes>${states ? `\n\n<estado-de-las-tarjetas>\n${states}\n</estado-de-las-tarjetas>` : ""}${decided ? `\n\n<plan-del-autor>\n${decided}\n</plan-del-autor>` : ""}\n\nResume la conversación hasta aquí.`,
         signal: opts.signal,
         role: "digest",
         maxOutputTokens: 1500,
@@ -148,15 +153,16 @@ export async function conversationContext(opts: {
   }
   const recent = messages.slice(from);
   const block = cardsBlock(cards, focus);
-  if (!summary && !recent.length) return { text: "", messages: 0, cards, focus };
+  if (!summary && !recent.length) return { text: "", messages: 0, cards, focus, plan };
   const text = [
     summary && `Resumen de lo hablado antes (ideas en discusión; nada de esto es un hecho de la novela):\n${summary}`,
     recent.length && `Últimos mensajes:\n${recent.map((m) => turn(m, cards)).join("\n\n")}`,
     block && `Estado actual de las tarjetas (manda sobre el resumen):\n${block}`,
+    decided,
   ]
     .filter(Boolean)
     .join("\n\n");
-  return { text, messages: messages.length, cards, focus };
+  return { text, messages: messages.length, cards, focus, plan };
 }
 
 /** Revisions of the given chapters now: what an observation relied on. */
@@ -164,6 +170,16 @@ export async function revisionsOf(novelId: string, ids: Iterable<string>): Promi
   const want = new Set(ids);
   const rows = await chapterRows(novelId);
   return Object.fromEntries(rows.filter((r) => want.has(r.id)).map((r) => [r.id, r.revision]));
+}
+
+function authorContext(opts: { anchor?: Anchor | null; mode?: string; decisions?: string[]; discarded?: string[] }) {
+  const ctx = {
+    ...(opts.anchor ? { anchor: opts.anchor } : {}),
+    ...(opts.mode ? { mode: opts.mode } : {}),
+    ...(opts.decisions?.length ? { decisions: opts.decisions } : {}),
+    ...(opts.discarded?.length ? { discarded: opts.discarded } : {}),
+  };
+  return Object.keys(ctx).length ? ctx : null;
 }
 
 /** Stores the author's turn, the Consejero's answer and its cards. */
@@ -181,9 +197,14 @@ export async function saveExchange(opts: {
     material?: { label: string; tokens: number }[];
     rounds?: number;
     cards?: { label: string; from: string | null }[];
+    mode?: "conversar" | "analizar";
   };
   /** The card the author's message was about. */
   anchor?: Anchor | null;
+  /** The mode of the turn, and the decisions and discards in the author's words. */
+  mode?: "conversar" | "analizar";
+  decisions?: string[];
+  discarded?: string[];
   observations: Observation[];
   /** Chapters the whole answer relied on (the focus and any read complete). */
   basedOn: Record<string, number>;
@@ -205,7 +226,7 @@ export async function saveExchange(opts: {
   const { data: msgs, error } = await db()
     .from("advisor_messages")
     .insert([
-      { conversation_id: conversationId, novel_id: opts.novelId, role: "author", content: opts.question, context: opts.anchor ? { anchor: opts.anchor } : null },
+      { conversation_id: conversationId, novel_id: opts.novelId, role: "author", content: opts.question, context: authorContext(opts) },
       { conversation_id: conversationId, novel_id: opts.novelId, role: "advisor", content: opts.answer, context: opts.context },
     ])
     .select("id, role");
@@ -338,4 +359,32 @@ export async function recheckObservation(id: string) {
     .eq("id", o.id);
   if (error) throw error;
   return listOne(o.id, o.novel_id);
+}
+
+/**
+ * The author edits the conversation's plan (Conversar): the decisions and discards of one of
+ * their messages, or a decision added by hand (it goes to their latest message). Only the
+ * message's context changes; nothing of the novel.
+ */
+export async function editPlan(
+  conversationId: string,
+  edit: { messageId?: unknown; decisions?: unknown; discarded?: unknown; add?: unknown },
+) {
+  const c = await getConversation(conversationId);
+  const rows = await messageRows(c.id);
+  const authors = rows.filter((m) => m.role === "author");
+  if (!authors.length) throw new HttpError(400, "La conversación aún no tiene mensajes.");
+  const target = typeof edit.messageId === "string" ? authors.find((m) => m.id === edit.messageId) : authors.at(-1);
+  if (!target) throw new HttpError(404, "Mensaje no encontrado");
+  const strings = (x: unknown, what: string) => {
+    if (!Array.isArray(x) || x.some((s) => typeof s !== "string")) throw new HttpError(400, `${what}: una lista de textos.`);
+    return (x as string[]).map((s) => s.trim().slice(0, 400)).filter(Boolean).slice(0, 20);
+  };
+  const ctx = { ...(target.context ?? {}) } as Record<string, unknown>;
+  if (edit.decisions !== undefined) ctx.decisions = strings(edit.decisions, "Decisiones");
+  if (edit.discarded !== undefined) ctx.discarded = strings(edit.discarded, "Descartado");
+  if (typeof edit.add === "string" && edit.add.trim())
+    ctx.decisions = [...((ctx.decisions as string[] | undefined) ?? []), edit.add.trim().slice(0, 400)].slice(0, 20);
+  const { error } = await db().from("advisor_messages").update({ context: ctx }).eq("id", target.id);
+  if (error) throw error;
 }
