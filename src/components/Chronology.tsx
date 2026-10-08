@@ -403,7 +403,9 @@ export function ChronologyModal({
                       calendar={view.calendar}
                       onCancel={() => setEditing(null)}
                       onSaved={async () => {
-                        setEditing(null);
+                        // Only this chapter's editor: the author may have opened the next one
+                        // while this one was saving (it used to close it).
+                        setEditing((e) => (e === ch.id ? null : e));
                         await onChanged();
                       }}
                     />
