@@ -515,92 +515,96 @@ export default function Workspace({ novelId }: { novelId: string }) {
       />
 
       <main className="editor-col" data-origin="manuscrito (editor)">
-        <header className="topbar">
-          <Link
-            href="/"
-            className="link"
-            title="Biblioteca"
-            onClick={async (e) => {
-              e.preventDefault();
-              if (await leaveChapter()) window.location.href = "/";
-            }}
-          >
-            ←
-          </Link>
-          <button className="link title" onClick={() => setModal("novel")} title="Novela, Guía Maestra y libro">
-            {novel.title}
-          </button>
-          <button
-            className={`link chapter-title${showNav ? " on" : ""}`}
-            onClick={() => toggle("navOpen", setNavOpen)}
-            title="Capítulos"
-          >
-            {current ? chapterLabel(chapterIndex, current.title) : ""}
-          </button>
-          <span className="spacer" />
-          <span className="meta words">{stats.words.toLocaleString("es")} palabras</span>
-          <SaveStatus state={save.state} onRetry={save.retry} onOverwrite={save.overwrite} />
-          {/* Formato (docs/formato-texto.md). The text keeps the focus, and with it the selection. */}
-          <span className="format-actions">
-            <button
-              className="link format"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => editorRef.current?.toggleItalic()}
-              disabled={reading !== null}
-              title="Cursiva (Ctrl/⌘+I): *así*"
-              aria-label="Cursiva"
+        {/* Its own container: the bar adapts to the column's width (container query) without making
+            the whole column, editor included, a container (slower typing in long chapters). */}
+        <div className="topbar-wrap">
+          <header className="topbar">
+            <Link
+              href="/"
+              className="link"
+              title="Biblioteca"
+              onClick={async (e) => {
+                e.preventDefault();
+                if (await leaveChapter()) window.location.href = "/";
+              }}
             >
-              <em>C</em>
+              ←
+            </Link>
+            <button className="link title" onClick={() => setModal("novel")} title="Novela, Guía Maestra y libro">
+              {novel.title}
             </button>
             <button
-              className="link format"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => editorRef.current?.insertSeparator()}
-              disabled={reading !== null}
-              title="Separador de escena"
-              aria-label="Separador de escena"
+              className={`link chapter-title${showNav ? " on" : ""}`}
+              onClick={() => toggle("navOpen", setNavOpen)}
+              title="Capítulos"
             >
-              ⁂
+              {current ? chapterLabel(chapterIndex, current.title) : ""}
             </button>
-          </span>
-          <button
-            className="link"
-            onClick={() => {
-              refreshManuscriptImages();
-              setModal("images");
-            }}
-          >
-            Imágenes
-          </button>
-          <button
-            className={`link${reading !== null ? " on" : ""}`}
-            aria-pressed={reading !== null}
-            onClick={() => setReading((r) => (r === null ? (editorRef.current?.getContent() ?? "") : null))}
-            title="Ver el capítulo con sus imágenes"
-          >
-            Lectura
-          </button>
-          <button className="link" onClick={() => setModal("memory")}>
-            Memoria
-          </button>
-          <button
-            className={`link${showPanel && section === "assistant" ? " on" : ""}`}
-            onClick={() => openSection("assistant")}
-            aria-pressed={showPanel && section === "assistant"}
-          >
-            Asistente
-          </button>
-          <button
-            className={`link${showPanel && section === "advisor" ? " on" : ""}`}
-            onClick={() => openSection("advisor")}
-            aria-pressed={showPanel && section === "advisor"}
-          >
-            Consejero
-          </button>
-          <button className="link focus-toggle" onClick={() => setFocusMode((f) => !f)} title="Ctrl/⌘ + .  ·  Esc para salir">
-            {focusMode ? "Salir" : "Concentración"}
-          </button>
-        </header>
+            <span className="spacer" />
+            <span className="meta words">{stats.words.toLocaleString("es")} palabras</span>
+            <SaveStatus state={save.state} onRetry={save.retry} onOverwrite={save.overwrite} />
+            {/* Formato (docs/formato-texto.md). The text keeps the focus, and with it the selection. */}
+            <span className="format-actions">
+              <button
+                className="link format"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => editorRef.current?.toggleItalic()}
+                disabled={reading !== null}
+                title="Cursiva (Ctrl/⌘+I): *así*"
+                aria-label="Cursiva"
+              >
+                <em>C</em>
+              </button>
+              <button
+                className="link format"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => editorRef.current?.insertSeparator()}
+                disabled={reading !== null}
+                title="Separador de escena"
+                aria-label="Separador de escena"
+              >
+                ⁂
+              </button>
+            </span>
+            <button
+              className="link"
+              onClick={() => {
+                refreshManuscriptImages();
+                setModal("images");
+              }}
+            >
+              Imágenes
+            </button>
+            <button
+              className={`link${reading !== null ? " on" : ""}`}
+              aria-pressed={reading !== null}
+              onClick={() => setReading((r) => (r === null ? (editorRef.current?.getContent() ?? "") : null))}
+              title="Ver el capítulo con sus imágenes"
+            >
+              Lectura
+            </button>
+            <button className="link" onClick={() => setModal("memory")}>
+              Memoria
+            </button>
+            <button
+              className={`link${showPanel && section === "assistant" ? " on" : ""}`}
+              onClick={() => openSection("assistant")}
+              aria-pressed={showPanel && section === "assistant"}
+            >
+              Asistente
+            </button>
+            <button
+              className={`link${showPanel && section === "advisor" ? " on" : ""}`}
+              onClick={() => openSection("advisor")}
+              aria-pressed={showPanel && section === "advisor"}
+            >
+              Consejero
+            </button>
+            <button className="link focus-toggle" onClick={() => setFocusMode((f) => !f)} title="Ctrl/⌘ + .  ·  Esc para salir">
+              {focusMode ? "Salir" : "Concentración"}
+            </button>
+          </header>
+        </div>
         {visualEditor ? (
           <VisualEditor
             key={`${chapter.id}:visual`}

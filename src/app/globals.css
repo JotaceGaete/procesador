@@ -153,10 +153,12 @@ input:focus,
   min-width: 0;
 }
 
-.editor-col {
-  /* The top bar adapts to the manuscript's column, not to the window: with the chapters and
-     the Asistente open, the column is narrower than the screen suggests. */
-  container: editor-col / inline-size;
+/* The top bar adapts to the manuscript's column, not to the window: with the chapters and the
+   Asistente open, the column is narrower than the screen suggests. The container is a wrapper of
+   the bar alone: making the whole column (editor included) a container slows typing down in
+   very long chapters. */
+.topbar-wrap {
+  container: topbar / inline-size;
 }
 .topbar {
   display: flex;
@@ -201,7 +203,7 @@ input:focus,
 }
 /* A narrow column: tighter, without the word count (the chapter list shows it); what still
    doesn't fit goes to a second line instead of under the panel. */
-@container editor-col (max-width: 860px) {
+@container topbar (max-width: 860px) {
   .topbar {
     gap: 6px 14px;
   }
