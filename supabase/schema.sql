@@ -315,6 +315,10 @@ alter table public.novels add column if not exists dismissed_warnings jsonb not 
 -- Exportación editorial (docs/exportacion.md): los datos del libro (autor, ISBN, dedicatoria,
 -- página de créditos, portada, tamaño de página y márgenes). Los valida la app (src/lib/book.ts).
 alter table public.novels add column if not exists book jsonb not null default '{}'::jsonb;
+-- Argumento general (docs/consejero.md): la trama completa, los secretos y el desenlace previsto.
+-- Solo lo lee el Consejero; el Asistente nunca. La app limita su longitud (src/lib/types.ts,
+-- PLOT_MAX) y lo copia al duplicar la novela (no duplicate_novel).
+alter table public.novels add column if not exists plot text not null default '';
 
 -- Cabos y conflictos. Los propone el Consejero al leer (origin 'advisor', sin confirmar:
 -- "posible cabo") o los crea el autor. Capítulo de apertura, última aparición y cierre se

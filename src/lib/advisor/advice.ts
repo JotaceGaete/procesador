@@ -68,10 +68,11 @@ const RECIPES: Record<AdvisorAction, { focus: "chapter" | "tail" | "none"; diges
   personajes: { focus: "chapter", digests: 4000, passages: 2500, data: ["presence"] },
 };
 const FOCUS_TOKENS = 18_000;
-/** The author's plan (synopsis and notes): its global view, in the cached frame, and the
- *  paragraphs that matter for this turn, in the prompt (docs/consejero.md, «Argumento general»). */
-const PLAN_OVERVIEW_TOKENS = 2000;
-const PLAN_DETAIL_TOKENS = { conversar: 1500, analizar: 2500 };
+/** The author's plan (Argumento general, synopsis and notes): its global view, in the cached
+ *  frame (larger with an Argumento general: it is cached, so cheap after the first turn), and
+ *  the paragraphs that matter for this turn, in the prompt (docs/consejero.md, «Argumento general»). */
+const PLAN_OVERVIEW_TOKENS = { base: 2000, withPlot: 3000 };
+const PLAN_DETAIL_TOKENS = { base: { conversar: 1500, analizar: 2500 }, withPlot: { conversar: 2000, analizar: 3500 } };
 const TAIL_CHARS = 8000;
 const NAMED_CHAPTERS_TOKENS = 14_000;
 
@@ -234,15 +235,19 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
     return `- ${label(i)} · ${roundedWords(countWords(c.content))}${who ? ` · aparecen: ${who}` : ""} · ${clip(line, 220)}${stale}`;
   });
   const threadLines = threads.map((t) => threadLine(t, chapters, label));
-  // The author's plan: the synopsis and the notes (never sent to the Asistente). Its global
-  // view goes in the frame, once; the details that matter, in the prompt.
-  // Each text keeps its own premise and ending (the synopsis' last paragraph is its ending).
-  const planTexts = [
-    { title: "Sinopsis", text: novel.synopsis.trim(), share: novel.notes.trim() ? 0.75 : 1 },
-    { title: "Notas del autor", text: novel.notes.trim(), share: novel.synopsis.trim() ? 0.25 : 1 },
-  ]
-    .filter((x) => x.text)
-    .map((x) => ({ ...x, overview: planOverview(x.text, Math.floor(chars(PLAN_OVERVIEW_TOKENS) * x.share)) }));
+  // The author's plan: the Argumento general, the synopsis and the notes (never sent to the
+  // Asistente). Its global view goes in the frame, once; the details that matter, in the prompt.
+  // Each text keeps its own premise and ending, with a share of the budget by its weight.
+  const planSources = [
+    { title: "Argumento general", text: (novel.plot ?? "").trim(), weight: 6 },
+    { title: "Sinopsis", text: novel.synopsis.trim(), weight: 3 },
+    { title: "Notas del autor", text: novel.notes.trim(), weight: 1 },
+  ].filter((x) => x.text);
+  const totalWeight = planSources.reduce((n, x) => n + x.weight, 0);
+  const overviewBudget = chars(novel.plot?.trim() ? PLAN_OVERVIEW_TOKENS.withPlot : PLAN_OVERVIEW_TOKENS.base);
+  const planTexts = planSources
+    .map((x) => ({ ...x, share: x.weight / totalWeight }))
+    .map((x) => ({ ...x, overview: planOverview(x.text, Math.floor(overviewBudget * x.share)) }));
   const overview = {
     whole: planTexts.every((x) => x.overview.whole),
     text: planTexts.map((x) => `${x.title}:\n${x.overview.text}`).join("\n\n"),
@@ -341,12 +346,14 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
     ]
       .map(nameMatcher)
       .filter((m): m is RegExp => Boolean(m));
-    const budget = chars(mode === "conversar" ? PLAN_DETAIL_TOKENS.conversar : PLAN_DETAIL_TOKENS.analizar);
+    const detail = novel.plot?.trim() ? PLAN_DETAIL_TOKENS.withPlot : PLAN_DETAIL_TOKENS.base;
+    const budget = chars(mode === "conversar" ? detail.conversar : detail.analizar);
     const words = questionWords(`${question} ${anchored ? anchored.title : ""}`);
     const details = planTexts
       .filter((x) => !x.overview.whole)
-      .map((x) => planDetails(x.text, { matchers, words, budget: Math.floor(budget * x.share), skip: x.overview.full }))
-      .filter(Boolean)
+      .map((x) => ({ x, d: planDetails(x.text, { matchers, words, budget: Math.floor(budget * x.share), skip: x.overview.full }) }))
+      .filter(({ d }) => d)
+      .map(({ x, d }) => `${x.title}:\n${d}`)
       .join("\n\n");
     if (details)
       blocks.push(part("Plan del autor: pasajes pertinentes", `<plan-del-autor-detalles>\n${details}\n</plan-del-autor-detalles>\n(Intención del autor, no canon: lo que aún no ha ocurrido no se presenta como ocurrido.)`));

@@ -79,7 +79,7 @@ test("the Consejero: the plan once, as intention (not canon), its global view in
   assert.doesNotMatch(frame, /## Sinopsis/, "not inside the Guía Maestra any more");
   const prompt = req.messages[0].content;
   assert.match(prompt, /<plan-del-autor-detalles>\n[\s\S]*intentará quedarse con Pola[\s\S]*<\/plan-del-autor-detalles>\n\(Intención del autor, no canon/, "the paragraph about Gerardo, whole");
-  assert.match(req.system[0].text, /Cuatro capas que no se confunden:[\s\S]*Plan del autor: su sinopsis y sus notas[\s\S]*nunca lo presentes como ya ocurrido ni adelantes sus revelaciones/);
+  assert.match(req.system[0].text, /Cuatro capas que no se confunden:[\s\S]*Plan del autor: su argumento general, su sinopsis y sus notas[\s\S]*nunca lo presentes como ya ocurrido ni adelantes sus revelaciones/);
   // The frame is the same in the next turn (so the provider can reuse it), even after typing.
   await clearAiLog();
   const id = list.find((e) => e.type === "saved").conversationId;

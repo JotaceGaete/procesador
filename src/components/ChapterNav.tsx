@@ -21,6 +21,8 @@ interface Props {
   timeWarnings: number;
   /** The novel: data, Guía Maestra, backup and the book's exports (also reachable on a phone, where the title is hidden). */
   onNovel(): void;
+  /** The Argumento general (the author's plot, for the Consejero only). */
+  onPlot(): void;
   /** Editor visual (docs/editor-visual.md): on by default; the switch turns it off (plain editor), per device. */
   visualEditor: boolean;
   onToggleVisualEditor(): void;
@@ -42,6 +44,7 @@ export default function ChapterNav({
   onChronology,
   timeWarnings,
   onNovel,
+  onPlot,
   visualEditor,
   onToggleVisualEditor,
   beforeDeleteCurrent,
@@ -197,6 +200,9 @@ export default function ChapterNav({
           {timeWarnings > 0 && (
             <span className="muted"> · {timeWarnings === 1 ? "1 advertencia" : `${timeWarnings} advertencias`}</span>
           )}
+        </button>
+        <button className="link" onClick={onPlot}>
+          Argumento general
         </button>
         <button className="link" onClick={onNovel}>
           Novela, copia y exportación

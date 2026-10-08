@@ -9,11 +9,16 @@ export interface NovelSummary {
   words: number;
 }
 
+/** Longest Argumento general (characters): a whole plot, read by the Consejero by parts, never whole. */
+export const PLOT_MAX = 100_000;
+
 export interface Novel {
   id: string;
   title: string;
   synopsis: string;
   notes: string;
+  /** Argumento general: the whole plot, secrets and planned ending. Only the Consejero reads it (docs/consejero.md). */
+  plot: string;
   guide: Guide;
   /** Re-read a chapter on leaving it after a substantial change (Consejero). */
   auto_digest: boolean;
