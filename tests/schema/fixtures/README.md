@@ -11,3 +11,7 @@ actual actualiza cualquier base existente sin errores y sin tocar sus datos.
 - `actualizar-bloqueo-pr12.sql` y `actualizar-reserva-pr13.sql`: las migraciones por separado de
   los PR #12 y #13, sustituidas por `supabase/actualizar-bloqueo-reserva.sql`. Sirven para
   comprobar que la conjunta también funciona si alguien ya aplicó una de ellas.
+- `actualizar-sesiones-privacidad.sql` y `actualizar-protegidas-privacidad.sql`: las migraciones
+  de Privacidad (rama `claude/loving-noether-9syx48`, sin integrar en main), que la base de
+  producción ya tiene aplicadas (app_sessions, novel_protection…). La migración conjunta se prueba
+  también sobre esa base.

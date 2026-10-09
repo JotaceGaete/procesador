@@ -52,6 +52,16 @@ migración**, `supabase/actualizar-bloqueo-reserva.sql`, que sustituye a las dos
   añadía `**` en vez de quitar la cursiva: era el fallo intermitente de `format.test.mjs`, que
   ya estaba en `main`.
 
+## La base de producción real
+
+La huella de producción (2026-10-09) muestra, además de las tablas del Crítico, las de
+Privacidad (`app_settings`, `app_sessions`, `credential_attempts`, `novel_protection`,
+`novel_unlocks`): sus migraciones (`actualizar-sesiones.sql`, `actualizar-protegidas.sql`, rama
+`claude/loving-noether-9syx48`, sin integrar en `main`) están aplicadas. La migración conjunta no
+toca nada de Privacidad; `duplicate_novel_with_protection` llama a `duplicate_novel` en tiempo
+de ejecución, así que sigue funcionando. Hay una prueba de esquema sobre esa base exacta
+(Crítico + Privacidad), con la migración, su recuperación y las funciones de Privacidad.
+
 ## Despliegue
 
 Nada de esto se hace sin autorización expresa de Juan. Todo cabe en los planes gratuitos:
@@ -72,6 +82,8 @@ propio ordenador para el ensayo y el *rollback* de Vercel al despliegue anterior
 3. **Comprobar el respaldo y ensayar.** `node scripts/ensayo-migracion.mjs procesador-antes.dump`.
    La huella que imprime debe ser idéntica a `huella-antes.csv` (así el respaldo está completo)
    y debe terminar en «Ensayo correcto». Lista qué títulos perderán el «Capítulo N».
+   Entre la huella de antes y la de después, no uses Procesador (escribir o consultar a la IA
+   cambia `chapters`, `ai_usage` y otras tablas, y la huella dejaría de coincidir).
 4. **Migración.** SQL Editor → pegar `supabase/actualizar-bloqueo-reserva.sql` entero → Run.
    Una sola transacción: si algo falla, no se aplica nada.
 5. **Comprobar.** `verificar.sql` → vacío. `huella.sql` → igual a `huella-antes.csv` salvo,

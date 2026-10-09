@@ -8,12 +8,17 @@
 -- propósito sólo cuando quita el «Capítulo N» guardado. El título tiene su propia línea,
 -- «chapters.title», que cambia sólo si había títulos con ese número (titulos-antes.csv).
 --
+-- Se dejan fuera también app_sessions y credential_attempts (Privacidad): cambian cada vez que
+-- alguien usa Procesador, así que su huella nunca coincidiría entre dos momentos. Son estado de
+-- inicio de sesión, no texto; el respaldo (pg_dump) sí las incluye.
+--
 -- No modifica nada: se puede ejecutar en el SQL Editor cuantas veces haga falta.
 with cols as (
   select c.table_name, string_agg(quote_ident(c.column_name), ',' order by c.ordinal_position) as list
   from information_schema.columns c
   join information_schema.tables t on t.table_schema = c.table_schema and t.table_name = c.table_name
   where c.table_schema = 'public' and t.table_type = 'BASE TABLE'
+    and c.table_name not in ('app_sessions', 'credential_attempts')
     and c.column_name not in ('locked', 'locked_at', 'reserved')
     and not (c.table_name = 'chapters' and c.column_name in ('title', 'updated_at'))
   group by c.table_name

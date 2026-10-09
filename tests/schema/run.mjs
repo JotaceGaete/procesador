@@ -9,6 +9,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1001,4 +1002,32 @@ test("integración: huella.sql is the same before and after the migration (and a
   const after = must(db, HUELLA);
   const diff = numbered.split("\n").filter((l, i) => l !== after.split("\n")[i]);
   assert.deepEqual(diff.map((l) => l.split("|")[0]), ["chapters.title"], "only the titles line");
+});
+
+test("integración: over production as it really is (Crítico + Privacidad's migrations), the joint migration and its undo leave Privacidad working", () => {
+  const SESSIONS = read("tests/schema/fixtures/actualizar-sesiones-privacidad.sql");
+  const PROTECTED = read("tests/schema/fixtures/actualizar-protegidas-privacidad.sql");
+  for (const mode of ["editor", "psql"]) {
+    const db = newDb();
+    must(db, OLD.critico, "psql");
+    must(db, SESSIONS);
+    must(db, PROTECTED);
+    must(db, DATA, "psql");
+    must(db, `insert into novel_protection (novel_id, secret_hash, secret_kind, pepper_version) values ('${NOVEL}', 'h', 'pin', 1)`);
+    const HUELLA = read("supabase/huella.sql");
+    const before = must(db, HUELLA);
+    assert.match(before, /^novel_protection\|1 filas/m, "the huella covers Privacidad's tables too");
+    must(db, JOINT_MIGRATION, mode);
+    must(db, JOINT_MIGRATION, mode);
+    assertComplete(db);
+    assert.equal(must(db, HUELLA), before);
+    // Privacidad's functions still work over the new ones.
+    const copy = JSON.parse(must(db, `select public.duplicate_novel_with_protection('${NOVEL}', 'Copia')`)).id;
+    assert.equal(must(db, `select count(*) from novel_protection where novel_id = '${copy}'`), "1");
+    assert.equal(outline(db, copy), "Uno|false|false,Dos|false|false");
+    assert.equal(must(db, `select string_agg(title || ':' || protected || ':' || locked, ',' order by title) from public.library('${crypto.randomUUID()}')`), "Copia:true:true,Mi novela:true:true");
+    must(db, UNDO, mode);
+    assert.equal(must(db, `select count(*) from public.novel_protection`), "2");
+    assert.ok(JSON.parse(must(db, `select public.duplicate_novel_with_protection('${NOVEL}', 'Copia 2')`)).id);
+  }
 });
