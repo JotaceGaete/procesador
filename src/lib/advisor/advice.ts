@@ -1,10 +1,10 @@
 import "server-only";
-import { db, getMemory, getNovel, getOutline } from "../supabase";
+import { db, getNovel, getScopedMemory, readingOutline } from "../supabase";
 import { HttpError } from "../http";
 import { compileGuide } from "../guide";
 import { countWords, forModel, separatorsForModel } from "../manuscript";
 import { buildManuscript, chapterLabel, estimateTokens, excerpts, manuscriptRange, nameMatcher, nearbyRange, selectMemory } from "../ai/context";
-import { memoryBlock } from "../ai/prompts";
+import { memoryBlock, RESERVE_NOTE } from "../ai/prompts";
 import type { CompletionRequest } from "../ai/providers";
 import type { AdvisorAction, ChapterDigest, ContextPart, StoryThread } from "../types";
 import { ADVISOR_ACTIONS, CREATIVE_ACTIONS, THREAD_KINDS, THREAD_STATUS_LABELS } from "../types";
@@ -127,6 +127,8 @@ export interface Advice {
   mode: AdvisorMode;
   /** Rounds of lectura profunda this turn may use (Conversar: one). */
   deepRounds: number | null;
+  /** The open chapter and whether it is in reserve (stored with the answer). */
+  chapter: { id: string; reserved: boolean };
 }
 
 function clip(text: string, max: number) {
@@ -135,19 +137,23 @@ function clip(text: string, max: number) {
 
 export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Promise<Advice> {
   const novel = await getNovel(input.novelId);
+  // What the Consejero may read (docs/capitulos-reserva.md): the manuscript and, if the open
+  // chapter is in reserve, that one after it. Never another chapter in reserve.
+  const open = input.chapterId;
   const [rows, memory, digests, threads, global, outline] = await Promise.all([
-    chapterRows(novel.id),
-    getMemory(novel.id),
-    digestRows(novel.id),
-    threadRows(novel.id),
+    chapterRows(novel.id, open),
+    getScopedMemory(novel.id, open),
+    digestRows(novel.id, open),
+    threadRows(novel.id, open),
     novelDigestRow(novel.id),
-    getOutline(novel.id),
+    readingOutline(novel.id, open),
   ]);
   const index = rows.findIndex((c) => c.id === input.chapterId);
   if (index === -1) throw new HttpError(404, "Capítulo no encontrado");
   const chapters = rows.map((c, i) => (i === index ? { ...c, content: input.content } : c));
   const current = chapters[index];
-  const label = (i: number) => chapterLabel(i, chapters[i].title);
+  const label = (i: number) => chapterLabel(i, chapters[i].title, chapters[i].reserved);
+  const reserved = current.reserved;
   const byChapter = new Map(digests.map((d) => [d.chapter_id, d]));
   const status = (i: number) => freshness(byChapter.get(rows[i].id) ?? null, rows[i]).status;
 
@@ -286,6 +292,7 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
 
   // ---------- 1 · focus ----------
   const blocks: string[] = [];
+  if (reserved) blocks.push(part("Capítulo en reserva", `<reserva>${RESERVE_NOTE}</reserva>`));
   const sel = input.selection && input.selection.end > input.selection.start ? input.selection : null;
   let focusRange = { start: 0, end: current.content.length };
   // The author's selection is what the turn is about, in both modes, except for the actions
@@ -366,7 +373,7 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
     blocks.push(
       part(
         "Posición en la novela",
-        `<posicion>El autor tiene abierto el capítulo ${index + 1} de ${chapters.length}. Del plan del autor, lo que no está en el manuscrito ni en las fichas hasta aquí todavía no ha ocurrido: trátalo como intención, sin adelantar sus revelaciones.</posicion>`,
+        `<posicion>${reserved ? `El autor tiene abierto un capítulo en reserva, escrito para más adelante; el manuscrito tiene ${index} capítulo${index === 1 ? "" : "s"}.` : `El autor tiene abierto el capítulo ${index + 1} de ${chapters.length}.`} Del plan del autor, lo que no está en el manuscrito ni en las fichas hasta aquí todavía no ha ocurrido: trátalo como intención, sin adelantar sus revelaciones.</posicion>`,
       ),
     );
   // The plan's paragraphs about the people and places in play, or the question's words.
@@ -594,7 +601,7 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
     chapters: chapters.map((c) => ({ id: c.id, content: c.content })),
     basedOn: Object.fromEntries([index, ...named].map((i) => [rows[i].id, rows[i].revision])),
     tools: {
-      chapters: chapters.map((c, i) => ({ id: c.id, title: c.title, content: c.content, revision: rows[i].revision })),
+      chapters: chapters.map((c, i) => ({ id: c.id, title: c.title, content: c.content, revision: rows[i].revision, reserved: c.reserved })),
       digests: byChapter,
       memory,
       threads,
@@ -606,6 +613,7 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
     discard,
     mode,
     deepRounds: mode === "conversar" ? 1 : null,
+    chapter: { id: current.id, reserved: current.reserved === true },
   };
 }
 

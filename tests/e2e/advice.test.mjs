@@ -138,7 +138,7 @@ test("free question: the planner's reading is shown; named chapters go complete;
   const list = events((await advise({ question: "¿Es coherente lo que sabe Elena del mar en el capítulo 1?" })).data);
   assert.deepEqual(list[1], { type: "plan", action: "coherencia", label: "Coherencia", detail: "personajes: Elena · capítulos: 1", mode: "analizar" });
   let prompt = (await aiLog())[0].body.messages[0].content;
-  assert.ok(prompt.includes(`<capitulo numero="1" titulo="Capítulo 1">\n${T1}\n</capitulo>`), prompt.slice(0, 600));
+  assert.ok(prompt.includes(`<capitulo numero="1" titulo="">\n${T1}\n</capitulo>`), prompt.slice(0, 600));
   assert.match(prompt, /Pregunta del autor: ¿Es coherente lo que sabe Elena/);
   assert.match(prompt, /Nació en Santiago/, "the character's Memory, by reference");
 

@@ -44,3 +44,10 @@ export function pickFields(body: Record<string, unknown>, fields: readonly strin
   }
   return out;
 }
+
+/** A position in a group of chapters (1-based), or null for "at the end" (docs/capitulos-reserva.md). */
+export function groupPosition(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 100_000) throw new HttpError(400, "Posición inválida");
+  return value;
+}

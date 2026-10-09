@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { handler } from "@/lib/auth";
-import { getChapterTexts, getMemory, getNovel } from "@/lib/supabase";
+import { getChapterTexts, getScopedMemory, getNovel } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { echoes, novelMap, phraseRepetitions, presence } from "@/lib/advisor/stats";
 import { monthUsage } from "@/lib/ai/usage";
@@ -15,7 +15,9 @@ type Ctx = { params: Promise<{ id: string }> };
 export const POST = handler<Ctx>(async (request, { params }) => {
   const novel = await getNovel((await params).id);
   const body = await readJson(request);
-  const [saved, memory, usage] = await Promise.all([getChapterTexts(novel.id), getMemory(novel.id), monthUsage(novel.id)]);
+  // The manuscript and, if the open chapter is in reserve, that one (docs/capitulos-reserva.md).
+  const open = typeof body.chapterId === "string" ? body.chapterId : null;
+  const [saved, memory, usage] = await Promise.all([getChapterTexts(novel.id, open), getScopedMemory(novel.id, open), monthUsage(novel.id)]);
   const index = saved.findIndex((c) => c.id === body.chapterId);
   if (index === -1) throw new HttpError(404, "Capítulo no encontrado");
   const chapters = saved.map((c, i) => (i === index && typeof body.content === "string" ? { ...c, content: body.content } : c));

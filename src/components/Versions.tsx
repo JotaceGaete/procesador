@@ -5,6 +5,7 @@ import { VERSION_REASONS, type ChapterVersion, type TrashEntry } from "@/lib/typ
 import { api } from "@/lib/client";
 import { diffStats, diffText } from "@/lib/diff";
 import { chapterLabel } from "@/lib/ai/context";
+import type { ChapterInfo } from "@/lib/types";
 import Modal from "./Modal";
 import DiffView from "./DiffView";
 
@@ -167,7 +168,7 @@ export function TrashModal({
   onClose,
 }: {
   novelId: string;
-  onRestored(id: string, chapters: { id: string; title: string; position: number; chars: number; words: number }[]): void;
+  onRestored(id: string, chapters: ChapterInfo[]): void;
   onClose(): void;
 }) {
   const [list, setList] = useState<TrashEntry[] | null>(null);

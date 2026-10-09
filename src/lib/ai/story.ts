@@ -34,7 +34,7 @@ const list = (n: number[]) => {
 
 export interface StoryInput {
   /** Saved chapters, in order (with their revision, to tell a stale digest). */
-  chapters: { id: string; title: string; content: string; revision: number }[];
+  chapters: { id: string; title: string; content: string; revision: number; reserved?: boolean }[];
   currentIndex: number;
   /** The chapter as on screen, and the cursor in it. */
   liveContent: string;
@@ -66,7 +66,7 @@ const TIER_REASON: Record<Tier, string> = { 1: "en detalle", 2: "resumen", 3: "u
 
 export function storySoFar(input: StoryInput): StoryOutput {
   const { chapters, currentIndex: k } = input;
-  const label = (i: number) => chapterLabel(i, chapters[i].title);
+  const label = (i: number) => chapterLabel(i, chapters[i].title, chapters[i].reserved);
   const index = new Map(chapters.map((c, i) => [c.id, i]));
   const byChapter = new Map(input.digests.map((d) => [d.chapter_id, d]));
   const scene = new Set(input.characters.map((c) => c.id));

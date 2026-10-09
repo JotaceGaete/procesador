@@ -20,11 +20,13 @@ const SCHEMA = read("supabase/schema.sql");
 const MIGRATION = read("supabase/actualizar-consejero.sql");
 const PLOT_MIGRATION = read("supabase/actualizar-argumento.sql");
 const CRITIC_MIGRATION = read("supabase/actualizar-critico.sql");
+const RESERVE_MIGRATION = read("supabase/actualizar-reserva.sql");
 const VERIFY = read("supabase/verificar.sql");
 const OLD = {
   "2b": read("tests/schema/fixtures/schema-2b.sql"),
   fase1: read("tests/schema/fixtures/schema-fase1.sql"),
   fase4: read("tests/schema/fixtures/schema-fase4.sql"),
+  critico: read("tests/schema/fixtures/schema-critico.sql"),
 };
 const TABLES = [
   "novels", "chapters", "characters", "relationships", "places", "facts", "fact_characters", "assets",
@@ -34,7 +36,7 @@ const TABLES = [
 ];
 /** What only schema.sql brings (versions and trash), not actualizar-consejero.sql. */
 const AFTER_CONSEJERO =
-  /chapter_versions|save_chapter_version|trash_chapter|chapter_trash|restore_chapter|chapter_version_auto|chapters_version|time_marks|novels\.calendar|dismissed_warnings|age_anchor|age_approx|characters\.death|anterior a la cronología|novels\.book|anterior a la exportación|novels\.plot|chapter_critiques|ai_usage\.purpose/;
+  /chapter_versions|save_chapter_version|trash_chapter|chapter_trash|restore_chapter|chapter_version_auto|chapters_version|time_marks|novels\.calendar|dismissed_warnings|age_anchor|age_approx|characters\.death|anterior a la cronología|novels\.book|anterior a la exportación|novels\.plot|chapter_critiques|ai_usage\.purpose|chapters\.reserved|chapter_versions\.reserved|create_chapter|move_chapter|capítulos en reserva/;
 
 let bin, dir, port;
 
@@ -467,5 +469,232 @@ test("crítico literario: actualizar-critico.sql adds chapter_critiques and the 
     must(db, SCHEMA);
     assertComplete(db);
     assertDataKept(db, fp);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Capítulos en reserva (docs/capitulos-reserva.md)
+// ---------------------------------------------------------------------------
+
+const NOVEL = "11111111-1111-4111-8111-111111111111";
+/** The novel's chapters as "title:position" per group, in order. */
+const groups = (db, novel = NOVEL) => ({
+  main: must(db, `select coalesce(string_agg(title, ',' order by position, created_at), '') from chapters where novel_id = '${novel}' and not reserved`),
+  reserve: must(db, `select coalesce(string_agg(title, ',' order by position, created_at), '') from chapters where novel_id = '${novel}' and reserved`),
+  positions: must(db, `select string_agg(position::text, ',' order by reserved, position) from chapters where novel_id = '${novel}'`),
+});
+/** A novel of five chapters (A–E) with text, an image and versions, on the current schema. */
+function reserveDb() {
+  const db = newDb();
+  must(db, SCHEMA);
+  must(db, DATA, "psql");
+  must(db, `update chapters set title = 'A' where position = 1; update chapters set title = 'B' where position = 2;`);
+  for (const [t, p] of [["C", 3], ["D", 4], ["E", 5]])
+    must(db, `insert into chapters (novel_id, title, position, content) values ('${NOVEL}', '${t}', ${p}, 'Texto de ${t}.')`);
+  return db;
+}
+const id = (db, title) => must(db, `select id from chapters where title = '${title}'`);
+const move = (db, title, reserved, at) => must(db, `select public.move_chapter('${id(db, title)}', ${reserved}, ${at === null ? "null" : at})`);
+
+test("reserva: the migration over the production base (Crítico) adds the groups, keeps ids, text and order, and only strips stored numbers from titles", () => {
+  for (const mode of ["editor", "psql"]) {
+    const db = newDb();
+    must(db, OLD.critico, "psql");
+    must(db, DATA, "psql");
+    must(db, `insert into chapters (id, novel_id, title, position, content) values
+      ('22222222-2222-4222-8222-222222222223', '${NOVEL}', 'Capítulo 3', 3, 'Tres.'),
+      ('22222222-2222-4222-8222-222222222224', '${NOVEL}', 'CAPÍTULO 4: La manta', 4, 'Cuatro.'),
+      ('22222222-2222-4222-8222-222222222225', '${NOVEL}', 'Capítulo 5 - El tren', 5, 'Cinco.'),
+      ('22222222-2222-4222-8222-222222222226', '${NOVEL}', 'Capítulos perdidos', 6, 'Seis.'),
+      ('22222222-2222-4222-8222-222222222227', '${NOVEL}', 'Capítulo 7 La espera', 7, 'Siete.')`, "psql");
+    const ids = must(db, "select string_agg(id::text || ':' || position || ':' || md5(content), ',' order by id) from chapters");
+    const missing = must(db, VERIFY);
+    assert.match(missing, /chapters\.reserved/, "verificar.sql sees what is missing");
+    must(db, RESERVE_MIGRATION, mode);
+    must(db, RESERVE_MIGRATION, mode);
+    assertComplete(db);
+    assert.equal(must(db, "select string_agg(id::text || ':' || position || ':' || md5(content), ',' order by id) from chapters"), ids, "ids, order and text kept");
+    assert.equal(must(db, "select count(*) from chapters where reserved"), "0", "everything stays in the manuscript");
+    assert.equal(
+      must(db, "select string_agg(title, '|' order by position) from chapters"),
+      "Uno|Dos||La manta|El tren|Capítulos perdidos|Capítulo 7 La espera",
+      "only the number the app stored is removed",
+    );
+    // Run again after the author titles a chapter «Capítulo 3: …» on purpose: it is left alone.
+    must(db, "update chapters set title = 'Capítulo 3: Prólogo' where position = 3");
+    must(db, RESERVE_MIGRATION, mode);
+    assert.equal(must(db, "select title from chapters where position = 3"), "Capítulo 3: Prólogo");
+    // The old app keeps working on the new base: its outline call and its reorder.
+    assert.match(must(db, `select string_agg(title, ',') from public.novel_outline('${NOVEL}')`), /Uno,Dos/);
+    must(db, `select public.reorder_chapters('${NOVEL}', (select array_agg(id order by position desc) from chapters))`);
+    assert.ok(must(db, "select public.duplicate_novel('11111111-1111-4111-8111-111111111111', 'Copia')"));
+    // And schema.sql over it is a no-op.
+    const fp = fingerprint(db);
+    must(db, SCHEMA);
+    assertComplete(db);
+    assertDataKept(db, fp);
+  }
+});
+
+test("reserva: the migration's functions are exactly schema.sql's", () => {
+  const fns = (sql) => Object.fromEntries([...sql.matchAll(/create or replace function public\.(\w+)\([\s\S]*?\$\$;\n/g)].map((m) => [m[1], m[0]]));
+  const mine = fns(RESERVE_MIGRATION);
+  const all = fns(SCHEMA);
+  assert.equal(Object.keys(mine).length, 8);
+  for (const [name, body] of Object.entries(mine)) assert.equal(body, all[name], `${name} igual en los dos archivos`);
+});
+
+test("reserva: create a chapter anywhere in either group; each group numbered 1…n", () => {
+  const db = reserveDb();
+  must(db, `select public.create_chapter('${NOVEL}', 'Entre B y C', false, 3)`);
+  must(db, `select public.create_chapter('${NOVEL}', 'Al principio', false, 1)`);
+  must(db, `select public.create_chapter('${NOVEL}', 'Al final', false, null)`);
+  must(db, `select public.create_chapter('${NOVEL}', 'R1', true, null)`);
+  must(db, `select public.create_chapter('${NOVEL}', 'R0', true, 1)`);
+  must(db, `select public.create_chapter('${NOVEL}', 'Lejos', false, 999)`);
+  const g = groups(db);
+  assert.equal(g.main, "Al principio,A,B,Entre B y C,C,D,E,Al final,Lejos");
+  assert.equal(g.reserve, "R0,R1");
+  assert.equal(g.positions, "1,2,3,4,5,6,7,8,9,1,2");
+  assert.equal(must(db, `select title from chapters where title = '  ' or title = ''`), "", "no number in any title");
+  assert.ok(!run(db, `select public.create_chapter('99999999-9999-4999-8999-999999999999', 'x', false, null)`).ok);
+});
+
+test("reserva: reorder (arrows, drag and drop) and move between groups keep text, images, versions and ids", () => {
+  const db = reserveDb();
+  const mimg = must(db, "select id from manuscript_images limit 1");
+  must(db, `update chapters set content = 'Con imagen.' || chr(10) || '[[imagen:${mimg}]]' where title = 'B'`);
+  must(db, `select public.save_chapter_version('${id(db, "B")}', 'manual', 'Mía')`);
+  const before = must(db, "select string_agg(id::text || md5(content) || revision, ',' order by id) from chapters");
+  const versions = must(db, "select count(*) from chapter_versions");
+
+  move(db, "D", false, 2); // up, by drag and drop
+  assert.equal(groups(db).main, "A,D,B,C,E");
+  move(db, "A", false, 2); // down one (the arrow)
+  assert.equal(groups(db).main, "D,A,B,C,E");
+  move(db, "B", true, null); // to the reserve
+  move(db, "E", true, 1); // to the reserve, first
+  let g = groups(db);
+  assert.equal(g.main, "D,A,C");
+  assert.equal(g.reserve, "E,B");
+  assert.equal(g.positions, "1,2,3,1,2");
+  move(db, "B", false, 2); // into the manuscript, between D and A
+  g = groups(db);
+  assert.equal(g.main, "D,B,A,C");
+  assert.equal(g.reserve, "E");
+  assert.equal(g.positions, "1,2,3,4,1");
+  move(db, "C", false, null); // already last: nothing changes
+  assert.equal(groups(db).main, "D,B,A,C");
+
+  assert.equal(must(db, "select string_agg(id::text || md5(content) || revision, ',' order by id) from chapters"), before, "ids, text and revisions intact");
+  assert.equal(must(db, "select count(*) from chapter_versions"), versions, "moving leaves no version");
+  assert.equal(must(db, `select chapter_id from manuscript_images where id = '${mimg}'`), id(db, "B"), "its image is still in it");
+});
+
+test("reserva: the manuscript keeps a chapter; deleting and restoring keep the group", () => {
+  const db = reserveDb();
+  for (const t of ["B", "C", "D", "E"]) move(db, t, true, null);
+  const r = run(db, `select public.move_chapter('${id(db, "A")}', true, null)`);
+  assert.ok(!r.ok && /al menos un capítulo/.test(r.error), "the last one can't go to the reserve");
+  assert.ok(!run(db, `select public.trash_chapter('${id(db, "A")}')`).ok, "nor to the trash");
+  // A chapter in reserve can always be deleted, and comes back to the reserve.
+  const e = id(db, "E");
+  must(db, `select public.trash_chapter('${e}')`);
+  const back = must(db, `select public.restore_chapter('${NOVEL}', '${e}')`);
+  assert.equal(must(db, `select reserved::text || ':' || position from chapters where id = '${back}'`), "true:4", "back in the reserve, at its end");
+  assert.equal(groups(db).main, "A", "never into the manuscript");
+  // One from the manuscript comes back to the manuscript.
+  move(db, "B", false, null);
+  const b = id(db, "B");
+  must(db, `select public.trash_chapter('${b}')`);
+  const b2 = must(db, `select public.restore_chapter('${NOVEL}', '${b}')`);
+  assert.equal(must(db, `select reserved::text || ':' || position from chapters where id = '${b2}'`), "false:2");
+});
+
+test("reserva: two moves at once are applied one after the other (no duplicate or lost position)", async () => {
+  const db = reserveDb();
+  const { spawn } = await import("node:child_process");
+  const go = (sql) =>
+    new Promise((resolve) => {
+      const p = spawn(path.join(bin, "psql"), ["-h", dir, "-p", String(port), "-U", "postgres", "-d", db, "-v", "ON_ERROR_STOP=1", "-q", "-c", sql]);
+      p.on("exit", resolve);
+    });
+  // The first holds the novel's lock for a moment; the second waits for it.
+  await Promise.all([
+    go(`begin; select public.move_chapter('${id(db, "A")}', true, null); select pg_sleep(0.5); commit;`),
+    go(`select pg_sleep(0.1); select public.move_chapter('${id(db, "E")}', false, 1);`),
+    go(`select pg_sleep(0.15); select public.create_chapter('${NOVEL}', 'Nuevo', false, 2);`),
+  ]);
+  const g = groups(db);
+  assert.equal(g.reserve, "A");
+  assert.equal(g.main, "E,Nuevo,B,C,D");
+  assert.equal(g.positions, "1,2,3,4,5,1");
+});
+
+test("reserva: going to the reserve invalidates what the Consejero derived from it; coming back cleans its thread refs", () => {
+  const db = reserveDb();
+  const [a, b, c] = ["A", "B", "C"].map((t) => id(db, t));
+  const digest = (ch, threads, edited = false) =>
+    must(db, `insert into chapter_digests (chapter_id, novel_id, source_revision, summary, threads, author_edited)
+              values ('${ch}', '${NOVEL}', 0, 'Resumen', '${JSON.stringify(threads)}', ${edited})`);
+  const thread = (title, extra = "") =>
+    must(db, `insert into story_threads (novel_id, title${extra ? ", origin, confirmed" : ""}) values ('${NOVEL}', '${title}'${extra}) returning id`);
+  const onlyB = thread("Sólo de B");
+  const shared = thread("De A y de B");
+  const authors = thread("Del autor", ", 'author', false");
+  const confirmed = thread("Confirmado", ", 'advisor', true");
+  digest(a, [{ thread: shared, change: "opened", quote: "" }]);
+  digest(b, [
+    { thread: onlyB, change: "opened", quote: "" },
+    { thread: shared, change: "advanced", quote: "" },
+    { thread: authors, change: "opened", quote: "" },
+    { thread: confirmed, change: "opened", quote: "" },
+  ]);
+  digest(c, []); // made with B's summary as "the previous chapter"
+  must(db, `insert into novel_digests (novel_id, summary, based_on) values ('${NOVEL}', 'Todo', '{"${a}": 0, "${b}": 0}')`);
+
+  move(db, "B", true, null);
+  assert.equal(must(db, `select count(*) from chapter_digests where chapter_id = '${b}'`), "0", "its digest");
+  assert.equal(must(db, `select count(*) from chapter_digests where chapter_id = '${c}'`), "0", "the next one's");
+  assert.equal(must(db, `select count(*) from chapter_digests where chapter_id = '${a}'`), "1", "others stay");
+  assert.equal(must(db, `select count(*) from novel_digests`), "0", "the global summary that included it");
+  assert.equal(
+    must(db, "select string_agg(title, ',' order by title) from story_threads"),
+    "Confirmado,De A y de B,Del autor",
+    "only the possible thread that came from it alone",
+  );
+
+  // A digest corrected by the author is kept (the app doesn't read it while in reserve)…
+  move(db, "B", false, 2);
+  digest(b, [{ thread: onlyB, change: "opened", quote: "" }, { thread: shared, change: "advanced", quote: "" }], true);
+  must(db, `delete from story_threads where id = '${onlyB}'`);
+  move(db, "C", true, null);
+  move(db, "B", true, null);
+  assert.equal(must(db, `select count(*) from chapter_digests where chapter_id = '${b}'`), "1");
+  // …and coming back it only keeps references to threads that exist.
+  move(db, "B", false, null);
+  assert.equal(must(db, `select threads::text from chapter_digests where chapter_id = '${b}'`), JSON.stringify([{ quote: "", change: "advanced", thread: shared }]).replace(/,/g, ", ").replace(/:/g, ": "));
+  // A global summary made without it is merely incomplete: it stays (and the app sees it is not current).
+  must(db, `insert into novel_digests (novel_id, summary, based_on) values ('${NOVEL}', 'Todo', '{"${a}": 0}')`);
+  move(db, "D", true, null);
+  assert.equal(must(db, `select count(*) from novel_digests`), "1");
+});
+
+test("reserva: duplicating a novel keeps each chapter's group", () => {
+  const db = reserveDb();
+  move(db, "C", true, null);
+  must(db, `select public.duplicate_novel('${NOVEL}', 'Copia')`);
+  const copy = must(db, "select id from novels where title = 'Copia'");
+  const g = groups(db, copy);
+  assert.equal(g.main, "A,B,D,E");
+  assert.equal(g.reserve, "C");
+});
+
+test("reserva: closed to the public keys", () => {
+  const db = reserveDb();
+  for (const fn of ["create_chapter(uuid, text, boolean, integer)", "move_chapter(uuid, boolean, integer)"]) {
+    assert.equal(must(db, `select has_function_privilege('anon', 'public.${fn}', 'execute')`), "f");
+    assert.equal(must(db, `select has_function_privilege('authenticated', 'public.${fn}', 'execute')`), "f");
+    assert.equal(must(db, `select has_function_privilege('service_role', 'public.${fn}', 'execute')`), "t");
   }
 });

@@ -81,7 +81,7 @@ export function CharacterTimeEditor({
 }: {
   value: CharacterTimeValue;
   onChange(v: CharacterTimeValue): void;
-  chapters: { id: string; title: string }[];
+  chapters: { id: string; title: string; reserved?: boolean }[];
   calendar: Calendar;
   /** "En este capítulo: 26 años", as last computed by the server. */
   now: string | null;
@@ -180,7 +180,7 @@ export function CharacterTimeEditor({
               >
                 {chapters.map((c, i) => (
                   <option key={c.id} value={c.id}>
-                    {chapterLabel(i, c.title)}
+                    {chapterLabel(i, c.title, c.reserved)}
                   </option>
                 ))}
               </select>

@@ -62,6 +62,8 @@ export interface ChapterText {
   id: string;
   title: string;
   content: string;
+  /** In reserve: only the one the author has open ever reaches the AI (docs/capitulos-reserva.md). */
+  reserved?: boolean;
 }
 
 export interface Manuscript {
@@ -75,7 +77,7 @@ export function buildManuscript(chapters: ChapterText[], current: { id: string; 
   const out: Manuscript["chapters"] = [];
   chapters.forEach((c, index) => {
     const content = c.id === current.id ? current.content : c.content;
-    const header = `## ${chapterLabel(index, c.title)}\n\n`;
+    const header = `## ${chapterLabel(index, c.title, c.reserved)}\n\n`;
     if (text) text += "\n\n";
     text += header;
     const start = text.length;
@@ -85,14 +87,20 @@ export function buildManuscript(chapters: ChapterText[], current: { id: string; 
   return { text, chapters: out };
 }
 
-export function chapterLabel(index: number, title: string) {
+/**
+ * «Capítulo 3: La manta». The number is the chapter's place in the manuscript, never part of
+ * its title. A chapter in reserve has no number (docs/capitulos-reserva.md).
+ */
+export function chapterLabel(index: number, title: string, reserved = false) {
   const t = title.trim();
-  return t && !/^cap[ií]tulo\s+\d+$/i.test(t) ? `Capítulo ${index + 1}: ${t}` : `Capítulo ${index + 1}`;
+  const own = t && !/^cap[ií]tulo\s+\d+$/i.test(t) ? t : "";
+  if (reserved) return own ? `Capítulo en reserva: ${own}` : "Capítulo en reserva (sin título)";
+  return own ? `Capítulo ${index + 1}: ${own}` : `Capítulo ${index + 1}`;
 }
 
 function locate(ms: Manuscript, offset: number): string {
   const c = ms.chapters.find((ch) => offset >= ch.start && offset <= ch.end) ?? ms.chapters.at(-1);
-  return c ? chapterLabel(c.index, c.title) : "";
+  return c ? chapterLabel(c.index, c.title, c.reserved) : "";
 }
 
 interface Paragraph extends Range {

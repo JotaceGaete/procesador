@@ -63,7 +63,7 @@ export default function AdvisorOverview({ novelId, chapterId, memory, getContent
   const index = data.chapters.findIndex((c) => c.id === data.chapterId);
   const label = (id: string) => {
     const i = data.chapters.findIndex((c) => c.id === id);
-    return i === -1 ? "" : chapterLabel(i, data.chapters[i].title);
+    return i === -1 ? "" : chapterLabel(i, data.chapters[i].title, data.chapters[i].reserved);
   };
   const names = new Map([...memory.characters, ...memory.places].map((x) => [x.id, x.name]));
   // Who has been away the longest comes first; those not yet in the story, last.
@@ -160,7 +160,7 @@ export default function AdvisorOverview({ novelId, chapterId, memory, getContent
         <ol className="novel-map">
           {data.chapters.map((c, i) => (
             <li key={c.id} className={c.id === data.chapterId ? "current" : undefined}>
-              <span className="map-title">{chapterLabel(i, c.title)}</span>
+              <span className="map-title">{chapterLabel(i, c.title, c.reserved)}</span>
               <span className="muted small"> · {c.words.toLocaleString("es")} palabras</span>
               {(c.characters.length > 0 || c.places.length > 0) && (
                 <span className="muted small map-who">

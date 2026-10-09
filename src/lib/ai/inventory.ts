@@ -54,7 +54,7 @@ export function guideSection(novel: Pick<Novel, "guide">, compiled: string): Con
 export function memorySectionsFor(opts: {
   selected: SelectedMemory;
   memory: Memory;
-  chapters: { id: string; title: string }[];
+  chapters: { id: string; title: string; reserved?: boolean }[];
   currentChapterId: string;
   chosenCharacters: string[];
   chosenCharacterReason: string;
@@ -132,7 +132,7 @@ export function memorySectionsFor(opts: {
       items: selected.facts.map((f) => {
         const i = f.chapter_id ? chapters.findIndex((c) => c.id === f.chapter_id) : -1;
         const where = [
-          i >= 0 ? chapterLabel(i, chapters[i].title) + (current >= 0 && i > current ? " (posterior)" : "") : null,
+          i >= 0 ? chapterLabel(i, chapters[i].title, chapters[i].reserved) + (current >= 0 && i > current ? " (posterior)" : "") : null,
           f.place_id ? placeNames.get(f.place_id) : null,
           f.character_ids.map((id) => names.get(id)).filter(Boolean).join(", ") || null,
         ].filter(Boolean);
@@ -159,6 +159,8 @@ function characterSummary(c: Character, age?: string | null): string {
 export function sceneTextSections(opts: {
   chapterIndex: number;
   chapterTitle: string;
+  /** The chapter is in reserve (docs/capitulos-reserva.md): no number, no previous chapter. */
+  chapterReserved?: boolean;
   before: string;
   after: string;
   /** The chapter from its start up to `before`, and the words of it left out. */
@@ -171,7 +173,7 @@ export function sceneTextSections(opts: {
   previousTitle: string;
   argument: string;
 }): { text: ContextSection[]; argument: ContextSection } {
-  const label = chapterLabel(opts.chapterIndex, opts.chapterTitle);
+  const label = chapterLabel(opts.chapterIndex, opts.chapterTitle, opts.chapterReserved);
   const argument: ContextSection = {
     id: "argument",
     label: "Tu argumento",
@@ -228,10 +230,11 @@ export function passagesSection(found: { name: string; text: string }[]): Contex
 }
 
 /** «Leer toda la historia hasta aquí» (scene): the previous chapters and this one up to the cursor. */
-export function storyManuscriptSection(text: string, chapterIndex: number): ContextSection {
+export function storyManuscriptSection(text: string, chapterIndex: number, reserved = false): ContextSection {
   const n = chapterIndex + 1;
-  const which =
-    n === 1 ? "El capítulo 1 hasta el cursor" : n === 2 ? "El capítulo 1 y el 2 hasta el cursor" : `Los capítulos 1 a ${n - 1} y el ${n} hasta el cursor`;
+  const which = reserved
+    ? `El manuscrito (${chapterIndex === 1 ? "1 capítulo" : `${chapterIndex} capítulos`}) y este capítulo en reserva hasta el cursor`
+    : n === 1 ? "El capítulo 1 hasta el cursor" : n === 2 ? "El capítulo 1 y el 2 hasta el cursor" : `Los capítulos 1 a ${n - 1} y el ${n} hasta el cursor`;
   return {
     id: "manuscript",
     label: "La historia hasta aquí",

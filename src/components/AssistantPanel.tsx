@@ -732,7 +732,7 @@ function AssistantPanel(props: Props) {
   const insertion = sceneReady && parsed?.proposal ? insertPreview(getContent(), insertTarget, fromModel(parsed.proposal)) : null;
   const fixHere = () => update(slot, () => ({ insertTarget: { kind: "at", anchor: anchorAt(getContent(), getCursor()) }, applyFailed: null }));
   const chapterIndex = chapters.findIndex((c) => c.id === chapterId);
-  const here = chapterIndex >= 0 ? chapterLabel(chapterIndex, chapters[chapterIndex].title) : "este capítulo";
+  const here = chapterIndex >= 0 ? chapterLabel(chapterIndex, chapters[chapterIndex].title, chapters[chapterIndex].reserved) : "este capítulo";
 
   // What "Abrir propuesta" shows, and its main action (the same as the panel's).
   const reader =
@@ -800,7 +800,11 @@ function AssistantPanel(props: Props) {
   // A scene reads the story up to the cursor, never beyond (docs/asistente-contexto.md).
   const storyChars =
     mode === "scene"
-      ? chapters.slice(0, Math.max(0, chapters.findIndex((c) => c.id === chapterId))).reduce((n, c) => n + c.chars, 0) + getCursor()
+      ? // The manuscript before this chapter (all of it, for a chapter in reserve: docs/capitulos-reserva.md).
+        chapters
+          .slice(0, Math.max(0, chapters.findIndex((c) => c.id === chapterId)))
+          .filter((c) => !c.reserved)
+          .reduce((n, c) => n + c.chars, 0) + getCursor()
       : 0;
   // The Asistente keeps literary decisions in front and the technical figures discreet; the
   // Consejero keeps its own layout.

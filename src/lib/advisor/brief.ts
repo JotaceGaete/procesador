@@ -1,5 +1,5 @@
 import "server-only";
-import { getMemory } from "../supabase";
+import { getScopedMemory } from "../supabase";
 import { HttpError } from "../http";
 import { nameMatcher } from "../ai/context";
 import { completeJson, InvalidOutput } from "../ai/structured";
@@ -28,7 +28,7 @@ export async function buildBrief(opts: {
     ? conv.cards.find((c) => c.id === opts.anchorId)
     : (conv.focus && conv.cards.find((c) => c.id === conv.focus!.id)) ?? lastProposal(conv.cards);
   if (!card) throw new HttpError(400, opts.anchorId ? "Esa propuesta no es de esta conversación." : "No hay ninguna propuesta que enviar.");
-  const memory = await getMemory(opts.novelId);
+  const memory = await getScopedMemory(opts.novelId);
   const known = { characters: memory.characters.map((c) => c.id), places: memory.places.map((p) => p.id) };
 
   const byName = <T extends { id: string; name: string; aliases: string }>(list: T[], names: string[], text: string) =>

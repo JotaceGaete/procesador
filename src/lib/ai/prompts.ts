@@ -129,7 +129,7 @@ function formatFact(
   ctx: {
     names: Map<string, string>;
     places: Map<string, string>;
-    chapters: { id: string; title: string }[];
+    chapters: { id: string; title: string; reserved?: boolean }[];
     currentIndex: number;
   },
 ): string {
@@ -137,7 +137,7 @@ function formatFact(
   const idx = f.chapter_id ? ctx.chapters.findIndex((c) => c.id === f.chapter_id) : -1;
   if (idx >= 0)
     meta.push(
-      chapterLabel(idx, ctx.chapters[idx].title) +
+      chapterLabel(idx, ctx.chapters[idx].title, ctx.chapters[idx].reserved) +
         (ctx.currentIndex >= 0 && idx > ctx.currentIndex ? ", posterior al capítulo actual" : ""),
     );
   if (f.story_time.trim()) meta.push(f.story_time.trim());
@@ -159,7 +159,7 @@ export interface MemorySections {
 export function memorySections(
   selected: SelectedMemory,
   all: Memory,
-  chapters: { id: string; title: string }[],
+  chapters: { id: string; title: string; reserved?: boolean }[],
   currentChapterId: string | null,
   time?: StoryTime | null,
 ): MemorySections {
@@ -190,11 +190,22 @@ export function memorySections(
   };
 }
 
+/**
+ * Said to the model when the open chapter is in reserve (docs/capitulos-reserva.md): the
+ * author wrote it for later and it isn't part of the manuscript yet.
+ */
+export const RESERVE_NOTE =
+  "El capítulo abierto está en reserva: el autor lo escribe para más adelante y todavía no forma parte del manuscrito. El manuscrito es su antecedente; su lugar exacto en la historia aún no está decidido, así que no lo trates como la continuación inmediata del último capítulo.";
+
+/** Told to the author with what the AI read, when the open chapter is in reserve. */
+export const RESERVE_NOTICE =
+  "Capítulo en reserva: la IA lee este capítulo y el manuscrito como antecedente, ningún otro capítulo en reserva. Nada de esta consulta se guarda en la memoria de la novela.";
+
 /** The narrative memory relevant to this request, as one readable block. */
 export function memoryBlock(
   selected: SelectedMemory,
   all: Memory,
-  chapters: { id: string; title: string }[],
+  chapters: { id: string; title: string; reserved?: boolean }[],
   currentChapterId: string | null,
   time?: StoryTime | null,
 ): string {

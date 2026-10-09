@@ -16,7 +16,7 @@ export const POST = handler(async (request) => {
   const title = typeof body.title === "string" && body.title.trim() ? body.title.trim().slice(0, 300) : "Novela sin título";
   const { data: novel, error } = await db().from("novels").insert({ title }).select("id").single();
   if (error) throw error;
-  const { error: chapterError } = await db().from("chapters").insert({ novel_id: novel.id, title: "Capítulo 1", position: 1 });
+  const { error: chapterError } = await db().from("chapters").insert({ novel_id: novel.id, title: "", position: 1 });
   if (chapterError) throw chapterError;
   return NextResponse.json(novel, { status: 201 });
 });

@@ -89,22 +89,6 @@ create table if not exists public.chapters (
 create index if not exists chapters_novel_position_idx on public.chapters(novel_id, position);
 -- Su trigger de updated_at es chapters_touch (touch_chapter: también sube la revisión), más abajo.
 select public.procesador_secure_table('public.chapters', false);
--- Capítulos en reserva (docs/capitulos-reserva.md): escritos para más adelante, fuera del
--- manuscrito. No se numeran, no se exportan y la IA no los lee salvo el que el autor tenga
--- abierto. position ordena dentro de cada grupo; el número visible es el orden del manuscrito
--- y no forma parte del título. La primera vez se quita del título el número que la app
--- guardaba al crear el capítulo («Capítulo 3» → vacío; «Capítulo 3: La manta» → «La manta»):
--- el título anterior sigue en las versiones del capítulo.
-do $$ begin
-  if not exists (select 1 from information_schema.columns
-                 where table_schema = 'public' and table_name = 'chapters' and column_name = 'reserved') then
-    alter table public.chapters add column reserved boolean not null default false;
-    update public.chapters
-    set title = btrim(regexp_replace(title, '^\s*[cC][aA][pP][iIíÍ][tT][uU][lL][oO]\s+[0-9]+\s*([:.,–—-]\s*)?', ''))
-    where title ~ '^\s*[cC][aA][pP][iIíÍ][tT][uU][lL][oO]\s+[0-9]+\s*([:.,–—-]|$)';
-  end if;
-end $$;
-create index if not exists chapters_novel_group_idx on public.chapters(novel_id, reserved, position);
 
 create table if not exists public.characters (
   id             uuid primary key default gen_random_uuid(),
@@ -485,9 +469,6 @@ create table if not exists public.chapter_versions (
 create index if not exists chapter_versions_chapter_idx on public.chapter_versions(chapter_id, created_at desc);
 create index if not exists chapter_versions_trash_idx on public.chapter_versions(novel_id, source_chapter_id) where chapter_id is null;
 select public.procesador_secure_table('public.chapter_versions', false);
--- El grupo del capítulo (docs/capitulos-reserva.md): recuperar de la papelera un capítulo en
--- reserva lo devuelve a la reserva, nunca al manuscrito.
-alter table public.chapter_versions add column if not exists reserved boolean not null default false;
 
 -- Cronología: el tiempo del relato como marcas ancladas a un punto del manuscrito. En esta
 -- versión, una por capítulo y al inicio (anchor {at:'chapter_start'}). when: {date:{year,
@@ -662,133 +643,28 @@ language sql stable set search_path = '' as $$
   order by n.updated_at desc
 $$;
 
--- Índice de capítulos sin traer el texto: el manuscrito en orden y después la reserva.
--- (Se borra antes de crearla porque añadir `reserved` cambió lo que devuelve.)
-do $$ begin
-  if exists (select 1 from pg_proc where proname = 'novel_outline' and pronamespace = 'public'::regnamespace
-             and pg_get_function_result(oid) not like '%reserved%') then
-    drop function public.novel_outline(uuid);
-  end if;
-end $$;
+-- Índice de capítulos sin traer el texto.
 create or replace function public.novel_outline(p_novel uuid)
-returns table (id uuid, title text, "position" integer, chars integer, words integer, updated_at timestamptz, reserved boolean)
-language plpgsql stable set search_path = '' as $$
-begin
-  return query
-  select c.id, c.title, c.position, length(c.content), public.word_count(c.content), c.updated_at, c.reserved
+returns table (id uuid, title text, "position" integer, chars integer, words integer, updated_at timestamptz)
+language sql stable set search_path = '' as $$
+  select c.id, c.title, c.position, length(c.content), public.word_count(c.content), c.updated_at
   from public.chapters c
   where c.novel_id = p_novel
-  order by c.reserved, c.position, c.created_at;
-end $$;
+  order by c.position, c.created_at
+$$;
 
--- Reordena el manuscrito en una transacción. Exige la lista completa de sus capítulos (los de
--- la reserva no cambian).
+-- Reordena en una transacción. Exige la lista completa de capítulos de esa novela.
 create or replace function public.reorder_chapters(p_novel uuid, p_ids uuid[])
 returns void language plpgsql set search_path = '' as $$
 begin
-  perform 1 from public.novels where id = p_novel for update;
-  if (select count(*) from public.chapters where novel_id = p_novel and not reserved) <> cardinality(p_ids)
-     or (select count(*) from public.chapters where novel_id = p_novel and not reserved and id = any(p_ids)) <> cardinality(p_ids)
+  if (select count(*) from public.chapters where novel_id = p_novel) <> cardinality(p_ids)
+     or (select count(*) from public.chapters where novel_id = p_novel and id = any(p_ids)) <> cardinality(p_ids)
      or (select count(distinct x) from unnest(p_ids) x) <> cardinality(p_ids) then
-    raise exception 'La lista de capítulos no coincide con el manuscrito' using errcode = '22023';
+    raise exception 'La lista de capítulos no coincide con la novela' using errcode = '22023';
   end if;
   update public.chapters c set position = o.ord
   from unnest(p_ids) with ordinality as o(id, ord)
   where c.id = o.id and c.novel_id = p_novel;
-end $$;
-
--- Capítulos en reserva (docs/capitulos-reserva.md). Las dos funciones bloquean la fila de la
--- novela: dos pestañas que reordenan a la vez se aplican una tras otra, sin duplicar ni dejar
--- huecos. Sólo cambian `reserved` y `position`: texto, título, imágenes, versiones y notas no
--- se tocan. Cada grupo queda numerado 1…n.
-
--- Un capítulo nuevo en la posición p_at (1 = el primero; null o más allá del final = al final)
--- del manuscrito o de la reserva. Devuelve su id.
-create or replace function public.create_chapter(p_novel uuid, p_title text, p_reserved boolean, p_at integer)
-returns uuid language plpgsql set search_path = '' as $$
-declare v_id uuid := gen_random_uuid(); v_n integer; v_at integer;
-begin
-  perform 1 from public.novels where id = p_novel for update;
-  if not found then
-    raise exception 'Novela no encontrada' using errcode = 'P0002';
-  end if;
-  select count(*) into v_n from public.chapters where novel_id = p_novel and reserved = p_reserved;
-  v_at := least(greatest(coalesce(p_at, v_n + 1), 1), v_n + 1);
-  update public.chapters c set position = case when o.ord >= v_at then o.ord + 1 else o.ord end
-  from (select id, row_number() over (order by position, created_at) as ord
-        from public.chapters where novel_id = p_novel and reserved = p_reserved) o
-  where c.id = o.id and c.position is distinct from (case when o.ord >= v_at then o.ord + 1 else o.ord end);
-  insert into public.chapters (id, novel_id, title, position, reserved)
-  values (v_id, p_novel, left(btrim(coalesce(p_title, '')), 300), v_at, p_reserved);
-  return v_id;
-end $$;
-
--- Mueve un capítulo a la posición p_at de un grupo: dentro del suyo (reordenar, flechas,
--- arrastrar) o al otro (a la reserva, al manuscrito). El manuscrito conserva siempre un
--- capítulo. Al cambiar de grupo se invalida lo derivado (la lectura del Consejero):
---   · su ficha (salvo la corregida por el autor, que la app no lee mientras esté en reserva);
---   · al ir a la reserva, también la ficha del capítulo que le seguía (se hizo con su resumen),
---     el resumen global que lo incluía y los cabos posibles que ya sólo venían de la reserva;
---   · al volver al manuscrito, las referencias de su ficha a cabos que ya no existen.
--- La app recalcula después dónde abre y cierra cada cabo (recomputeThreads).
-create or replace function public.move_chapter(p_chapter uuid, p_reserved boolean, p_at integer)
-returns void language plpgsql set search_path = '' as $$
-declare c record; v_ids uuid[]; v_at integer; v_next uuid;
-begin
-  select novel_id into c from public.chapters where id = p_chapter;
-  if c.novel_id is null then
-    raise exception 'Capítulo no encontrado' using errcode = 'P0002';
-  end if;
-  perform 1 from public.novels where id = c.novel_id for update;
-  -- Leído otra vez con la novela bloqueada: otra operación pudo moverlo o borrarlo.
-  select id, novel_id, reserved into c from public.chapters where id = p_chapter;
-  if c.id is null then
-    raise exception 'Capítulo no encontrado' using errcode = 'P0002';
-  end if;
-  if not c.reserved and p_reserved
-     and (select count(*) from public.chapters where novel_id = c.novel_id and not reserved) <= 1 then
-    raise exception 'El manuscrito necesita al menos un capítulo.' using errcode = '22023';
-  end if;
-  if not c.reserved and p_reserved then
-    select id into v_next from public.chapters
-    where novel_id = c.novel_id and not reserved
-      and (position, created_at) > (select position, created_at from public.chapters where id = p_chapter)
-    order by position, created_at limit 1;
-  end if;
-
-  select coalesce(array_agg(id order by position, created_at), '{}') into v_ids
-  from public.chapters where novel_id = c.novel_id and reserved = p_reserved and id <> p_chapter;
-  v_at := least(greatest(coalesce(p_at, cardinality(v_ids) + 1), 1), cardinality(v_ids) + 1);
-  v_ids := v_ids[1:v_at - 1] || p_chapter || v_ids[v_at:cardinality(v_ids)];
-  update public.chapters ch set position = o.ord, reserved = p_reserved
-  from unnest(v_ids) with ordinality as o(id, ord)
-  where ch.id = o.id and (ch.position is distinct from o.ord::integer or ch.reserved is distinct from p_reserved);
-  if c.reserved = p_reserved then
-    return;
-  end if;
-
-  -- El grupo que dejó, numerado otra vez.
-  update public.chapters ch set position = o.ord
-  from (select id, row_number() over (order by position, created_at) as ord
-        from public.chapters where novel_id = c.novel_id and reserved = c.reserved) o
-  where ch.id = o.id and ch.position is distinct from o.ord::integer;
-
-  delete from public.chapter_digests where chapter_id = p_chapter and not author_edited;
-  if p_reserved then
-    delete from public.chapter_digests where chapter_id = v_next and not author_edited;
-    delete from public.novel_digests where novel_id = c.novel_id and based_on ? p_chapter::text;
-    delete from public.story_threads t
-    where t.novel_id = c.novel_id and t.origin = 'advisor' and not t.confirmed
-      and not exists (select 1 from public.chapter_digests d join public.chapters ch on ch.id = d.chapter_id
-                      where d.novel_id = c.novel_id and not ch.reserved
-                        and d.threads @> jsonb_build_array(jsonb_build_object('thread', t.id::text)));
-  else
-    update public.chapter_digests d
-    set threads = coalesce((select jsonb_agg(x) from jsonb_array_elements(d.threads) x
-                            where exists (select 1 from public.story_threads t
-                                          where t.novel_id = c.novel_id and t.id::text = x ->> 'thread')), '[]'::jsonb)
-    where d.chapter_id = p_chapter;
-  end if;
 end $$;
 
 -- Guarda una versión de un capítulo: el texto indicado o, sin él, el guardado. Un texto vacío
@@ -800,7 +676,7 @@ create or replace function public.save_chapter_version(p_chapter uuid, p_reason 
 returns uuid language plpgsql set search_path = '' as $$
 declare c record; v_content text; v_last record; v_id uuid;
 begin
-  select id, novel_id, title, position, content, reserved into c from public.chapters where id = p_chapter;
+  select id, novel_id, title, position, content into c from public.chapters where id = p_chapter;
   if c.id is null then
     raise exception 'Capítulo no encontrado' using errcode = 'P0002';
   end if;
@@ -813,10 +689,9 @@ begin
   if p_reason not in ('manual', 'delete') and v_last.id is not null and v_last.content = v_content then
     return v_last.id;
   end if;
-  insert into public.chapter_versions (novel_id, chapter_id, source_chapter_id, title, position, content, words, reason, label,
-                                       reserved)
+  insert into public.chapter_versions (novel_id, chapter_id, source_chapter_id, title, position, content, words, reason, label)
   values (c.novel_id, c.id, c.id, c.title, c.position, v_content, public.word_count(v_content), p_reason,
-          left(btrim(coalesce(p_label, '')), 200), c.reserved)
+          left(btrim(coalesce(p_label, '')), 200))
   returning id into v_id;
   delete from public.chapter_versions where id in (
     select id from public.chapter_versions
@@ -826,8 +701,8 @@ begin
 end $$;
 
 -- Eliminar un capítulo: su texto pasa a la papelera (una versión 'delete') y el capítulo se
--- borra, en una transacción. Sus versiones quedan en la papelera (chapter_id null). El
--- manuscrito conserva siempre al menos un capítulo (los de la reserva no cuentan).
+-- borra, en una transacción. Sus versiones quedan en la papelera (chapter_id null). Una
+-- novela conserva siempre al menos un capítulo.
 create or replace function public.trash_chapter(p_chapter uuid)
 returns void language plpgsql set search_path = '' as $$
 declare v_novel uuid;
@@ -836,11 +711,10 @@ begin
   if v_novel is null then
     raise exception 'Capítulo no encontrado' using errcode = 'P0002';
   end if;
-  -- Dos eliminaciones simultáneas no pueden dejar el manuscrito sin capítulos.
+  -- Dos eliminaciones simultáneas no pueden dejar la novela sin capítulos.
   perform 1 from public.novels where id = v_novel for update;
-  if not (select reserved from public.chapters where id = p_chapter)
-     and (select count(*) from public.chapters where novel_id = v_novel and not reserved) <= 1 then
-    raise exception 'Una novela necesita al menos un capítulo en el manuscrito.' using errcode = '22023';
+  if (select count(*) from public.chapters where novel_id = v_novel) <= 1 then
+    raise exception 'Una novela necesita al menos un capítulo.' using errcode = '22023';
   end if;
   perform public.save_chapter_version(p_chapter, 'delete');
   delete from public.chapters where id = p_chapter;
@@ -869,24 +743,22 @@ begin
   order by t.created_at desc;
 end $$;
 
--- Recuperar un capítulo de la papelera: vuelve al final de su grupo (el manuscrito o la
--- reserva, docs/capitulos-reserva.md) con el título y el texto de su última versión, y con
--- todo su historial. Devuelve el id del capítulo.
+-- Recuperar un capítulo de la papelera: vuelve al final de la novela con el título y el texto
+-- de su última versión, y con todo su historial. Devuelve el id del capítulo.
 create or replace function public.restore_chapter(p_novel uuid, p_source uuid)
 returns uuid language plpgsql set search_path = '' as $$
 declare v record; v_id uuid := gen_random_uuid();
 begin
   perform 1 from public.novels where id = p_novel for update;
-  select title, content, reserved into v from public.chapter_versions
+  select title, content into v from public.chapter_versions
   where novel_id = p_novel and source_chapter_id = p_source and chapter_id is null
   order by created_at desc, id desc limit 1;
   if v.content is null then
     raise exception 'Ese capítulo ya no está en la papelera' using errcode = 'P0002';
   end if;
-  insert into public.chapters (id, novel_id, title, position, content, reserved)
+  insert into public.chapters (id, novel_id, title, position, content)
   values (v_id, p_novel, v.title,
-          coalesce((select max(position) from public.chapters where novel_id = p_novel and reserved = v.reserved), 0) + 1,
-          v.content, v.reserved);
+          coalesce((select max(position) from public.chapters where novel_id = p_novel), 0) + 1, v.content);
   update public.chapter_versions set chapter_id = v_id, source_chapter_id = v_id
   where novel_id = p_novel and source_chapter_id = p_source and chapter_id is null;
   return v_id;
@@ -1055,8 +927,8 @@ begin
   select coalesce(jsonb_object_agg(id, gen_random_uuid()), '{}') into m_place from public.places where novel_id = p_novel;
   select coalesce(jsonb_object_agg(id, gen_random_uuid()), '{}') into m_fact from public.facts where novel_id = p_novel;
 
-  insert into public.chapters (id, novel_id, title, position, content, reserved)
-  select (m_chap ->> id::text)::uuid, v_new, title, position, content, reserved from public.chapters where novel_id = p_novel;
+  insert into public.chapters (id, novel_id, title, position, content)
+  select (m_chap ->> id::text)::uuid, v_new, title, position, content from public.chapters where novel_id = p_novel;
 
   insert into public.characters (id, novel_id, name, aliases, age, role, description, background, personality,
     motivations, fears, contradictions, "values", voice, vocabulary, secrets, knows, unaware, arc, notes,
@@ -1212,8 +1084,6 @@ revoke execute on function public.word_count(text) from public, anon, authentica
 revoke execute on function public.library() from public, anon, authenticated;
 revoke execute on function public.novel_outline(uuid) from public, anon, authenticated;
 revoke execute on function public.reorder_chapters(uuid, uuid[]) from public, anon, authenticated;
-revoke execute on function public.create_chapter(uuid, text, boolean, integer) from public, anon, authenticated;
-revoke execute on function public.move_chapter(uuid, boolean, integer) from public, anon, authenticated;
 revoke execute on function public.duplicate_novel(uuid, text) from public, anon, authenticated;
 revoke execute on function public.character_image_insert() from public, anon, authenticated;
 revoke execute on function public.character_image_deleted() from public, anon, authenticated;
@@ -1233,7 +1103,6 @@ revoke execute on function public.chapter_trash(uuid) from public, anon, authent
 revoke execute on function public.restore_chapter(uuid, uuid) from public, anon, authenticated;
 grant execute on function public.word_count(text), public.library(), public.novel_outline(uuid),
   public.reorder_chapters(uuid, uuid[]), public.duplicate_novel(uuid, text),
-  public.create_chapter(uuid, text, boolean, integer), public.move_chapter(uuid, boolean, integer),
   public.set_primary_image(uuid), public.reorder_character_images(uuid, uuid[]),
   public.asset_in_use(uuid), public.delete_unused_assets(uuid[]), public.sweep_assets(uuid),
   public.finalize_asset(uuid, text, text, bigint, integer, integer, smallint, text, text, text),
