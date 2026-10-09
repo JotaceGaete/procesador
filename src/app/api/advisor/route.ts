@@ -7,7 +7,14 @@ import { splitAnswer, verifyObservations } from "@/lib/advisor/observations";
 import { extractJson } from "@/lib/ai/structured";
 import { getProvider } from "@/lib/ai/providers";
 import { recordUsage } from "@/lib/ai/usage";
-import { conversationContext, getConversation, saveExchange, setObservationStatus, type ConversationState } from "@/lib/advisor/conversations";
+import {
+  conversationContext,
+  conversationOutOfScope,
+  getConversation,
+  saveExchange,
+  setObservationStatus,
+  type ConversationState,
+} from "@/lib/advisor/conversations";
 import { assignLabels } from "@/lib/advisor/cards";
 import { buildBrief } from "@/lib/advisor/brief";
 import { decisionsIn, discardsIn } from "@/lib/advisor/converse";
@@ -29,12 +36,20 @@ export const POST = handler(async (request) => {
   if (!provider && !body.dryRun) throw new HttpError(400, "Ese proveedor de IA no está configurado.");
   const sel = body.selection as { start?: unknown; end?: unknown } | null;
   const novelId = String(body.novelId ?? "");
+  // The open chapter: what the Consejero may read besides the manuscript (docs/capitulos-reserva.md).
+  const openChapter = typeof body.chapterId === "string" && body.chapterId ? body.chapterId : null;
+  /** A conversation goes on only where everything it read may be read now. */
+  const inScope = async (id: string) => {
+    const why = await conversationOutOfScope(id, novelId, openChapter);
+    if (why) throw new HttpError(409, why);
+  };
   // «Enviar al Asistente»: the scene order from the conversation, for the author to review.
   // Nothing is stored and nothing reaches the manuscript.
   if (body.brief === true) {
     const id = typeof body.conversationId === "string" ? body.conversationId : "";
     if (!id) throw new HttpError(400, "Falta la conversación.");
     if ((await getConversation(id)).novel_id !== novelId) throw new HttpError(404, "Conversación no encontrada");
+    await inScope(id);
     if (!provider) throw new HttpError(400, "Ese proveedor de IA no está configurado.");
     const anchorId = typeof body.anchorId === "string" && body.anchorId ? body.anchorId : null;
     return NextResponse.json(await buildBrief({ novelId, conversationId: id, anchorId, provider: body.provider as ProviderId, signal: request.signal }));
@@ -47,6 +62,7 @@ export const POST = handler(async (request) => {
   if (conversationId) {
     const c = await getConversation(conversationId);
     if (c.novel_id !== novelId) throw new HttpError(404, "Conversación no encontrada");
+    await inScope(conversationId);
     conversation = await conversationContext({
       conversationId,
       novelId,
@@ -176,6 +192,7 @@ export const POST = handler(async (request) => {
               rounds: result.rounds,
               cards: labelsFor(items),
               mode: advice.mode,
+              chapter: advice.chapter,
             },
             anchor: advice.anchor,
             mode: advice.mode,

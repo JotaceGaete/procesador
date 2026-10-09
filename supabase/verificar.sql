@@ -22,6 +22,9 @@ with expected(kind, object) as (
     ('tabla', 'chapter_critiques'),
     -- Bloqueo de capítulos (docs/bloqueo-capitulos.md)
     ('columna', 'chapters.locked'), ('columna', 'chapters.locked_at'), ('función', 'chapter_guard_locked'),
+    -- Capítulos en reserva (docs/capitulos-reserva.md)
+    ('columna', 'chapters.reserved'), ('columna', 'chapter_versions.reserved'),
+    ('función', 'create_chapter'), ('función', 'move_chapter'),
     ('columna', 'novels.auto_digest'), ('columna', 'assets.orientation'), ('columna', 'chapters.revision'),
     ('columna', 'facts.status'), ('columna', 'chapter_digests.text_sketch'), ('columna', 'advisor_observations.position'),
     ('función', 'duplicate_novel'), ('función', 'sync_chapter_images'), ('función', 'replace_asset_uses'),
@@ -83,4 +86,17 @@ union all
 -- duplicate_novel debe copiar los datos del libro.
 select 'función', 'duplicate_novel', 'versión anterior a la exportación'
 where exists (select 1 from pg_proc where proname = 'duplicate_novel')
-  and not exists (select 1 from pg_proc where proname = 'duplicate_novel' and prosrc like '%coverAssetId%');
+  and not exists (select 1 from pg_proc where proname = 'duplicate_novel' and prosrc like '%coverAssetId%')
+union all
+-- El índice de capítulos debe decir a qué grupo pertenece cada uno (capítulos en reserva).
+select 'función', 'novel_outline', 'versión anterior a los capítulos en reserva'
+where exists (select 1 from pg_proc where proname = 'novel_outline')
+  and not exists (select 1 from pg_proc where proname = 'novel_outline' and pg_get_function_result(oid) like '%reserved%')
+union all
+select 'función', 'duplicate_novel', 'versión anterior a los capítulos en reserva'
+where exists (select 1 from pg_proc where proname = 'duplicate_novel')
+  and not exists (select 1 from pg_proc where proname = 'duplicate_novel' and prosrc like '%reserved%')
+union all
+select 'función', 'restore_chapter', 'versión anterior a los capítulos en reserva'
+where exists (select 1 from pg_proc where proname = 'restore_chapter')
+  and not exists (select 1 from pg_proc where proname = 'restore_chapter' and prosrc like '%reserved%');

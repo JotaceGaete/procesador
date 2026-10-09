@@ -33,7 +33,8 @@ export interface ExportFile {
 
 export interface ExportSource {
   novel: { id: string; title: string; book?: unknown };
-  chapters: { id: string; title: string; content: string }[];
+  /** Every chapter; those in reserve (docs/capitulos-reserva.md) are never part of the book. */
+  chapters: { id: string; title: string; content: string; reserved?: boolean }[];
   images: { manuscript: (ExportImage & { chapter_id: string | null })[]; files: ExportFile[] };
 }
 
@@ -94,7 +95,10 @@ export function bookModel(src: ExportSource): BookModel {
   const textWidthCm = (trim.width - meta.layout.margins.inside - meta.layout.margins.outside) / 10;
   let words = 0;
 
-  const chapters = src.chapters.map((c, i) => {
+  // Only the manuscript: chapters in reserve are not part of the book.
+  const book = src.chapters.filter((c) => !c.reserved);
+  const reservedIds = new Set(src.chapters.filter((c) => c.reserved).map((c) => c.id));
+  const chapters = book.map((c, i) => {
     const heading = chapterLabel(i, c.title);
     const own = chapterHeading(i, c.title).title;
     const out: BookBlock[] = [];
@@ -132,7 +136,13 @@ export function bookModel(src: ExportSource): BookModel {
     return { number: `Capítulo ${i + 1}`, title: own, heading, blocks: out };
   });
 
-  const unplaced = src.images.manuscript.filter((m) => !placed.has(m.id)).length;
+  const inReserve = src.images.manuscript.filter((m) => m.chapter_id && reservedIds.has(m.chapter_id)).length;
+  const unplaced = src.images.manuscript.filter((m) => !placed.has(m.id) && !(m.chapter_id && reservedIds.has(m.chapter_id))).length;
+  if (reservedIds.size)
+    checks.push({
+      level: "info",
+      message: `${reservedIds.size === 1 ? "1 capítulo en reserva no se exporta" : `${reservedIds.size} capítulos en reserva no se exportan`}${inReserve ? ` (ni ${inReserve === 1 ? "su imagen" : `sus ${inReserve} imágenes`})` : ""}.`,
+    });
   if (unplaced)
     checks.push({
       level: "info",

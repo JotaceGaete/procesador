@@ -56,11 +56,14 @@ export type GuideKey =
 export interface ChapterInfo {
   id: string;
   title: string;
+  /** Order inside its group (the manuscript or the reserve). The visible number is its index. */
   position: number;
   chars: number;
   words: number;
   /** Revisado y bloqueado (docs/bloqueo-capitulos.md): nothing changes its text or title until it is unlocked. */
   locked: boolean;
+  /** Capítulos en reserva (docs/capitulos-reserva.md): outside the manuscript, unnumbered, not exported. */
+  reserved: boolean;
 }
 
 export interface Chapter {
@@ -70,6 +73,7 @@ export interface Chapter {
   content: string;
   revision: number;
   locked: boolean;
+  reserved: boolean;
 }
 
 /** Why a version of a chapter was kept (docs/versiones.md). */
@@ -625,6 +629,10 @@ export interface AdvisorMessage {
     discarded?: string[];
     /** Advisor turn: the label of each card, in order (B2 is a version of B). */
     cards?: { label: string; from: string | null }[];
+    /** Advisor turn: the chapter it was asked from, and whether it was in reserve then (docs/capitulos-reserva.md). */
+    chapter?: { id: string; reserved: boolean };
+    /** Advisor turn: the chapters it read whole, at their revision then. */
+    basedOn?: Record<string, number>;
   } | null;
   created_at: string;
   observations: StoredObservation[];

@@ -185,18 +185,22 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
   const replaceRange = useCallback(
     (start: number, end: number, text: string, caret: "select" | "end" = "select") => {
       const el = textareaRef.current!;
+      const current = contentRef.current;
+      const result = current.slice(0, start) + text + current.slice(end);
       el.focus();
       el.setSelectionRange(start, end);
-      if (!document.execCommand("insertText", false, text)) {
-        const current = contentRef.current;
-        setContent(current.slice(0, start) + text + current.slice(end));
-      }
-      requestAnimationFrame(() => {
-        if (caret === "end") {
-          el.setSelectionRange(start + text.length, start + text.length);
-          reveal(start + text.length);
-        } else el.setSelectionRange(start, start + text.length);
+      if (!document.execCommand("insertText", false, text)) setContent(result);
+      // Selected at once and again after React's render, unless the text changed meanwhile.
+      const select = () => {
+        if (el.value !== result) return;
+        if (caret === "end") el.setSelectionRange(start + text.length, start + text.length);
+        else el.setSelectionRange(start, start + text.length);
         updateSelection();
+      };
+      select();
+      requestAnimationFrame(() => {
+        select();
+        if (caret === "end" && el.value === result) reveal(start + text.length);
       });
     },
     [updateSelection, reveal],
@@ -228,17 +232,22 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
   const italic = useCallback(() => {
     const el = textareaRef.current;
     if (!el || lockedRef.current) return;
-    const edit = toggleItalic(contentRef.current, el.selectionStart, el.selectionEnd);
+    const current = contentRef.current;
+    const edit = toggleItalic(current, el.selectionStart, el.selectionEnd);
+    const result = current.slice(0, edit.start) + edit.text + current.slice(edit.end);
     el.focus();
     el.setSelectionRange(edit.start, edit.end);
-    if (!document.execCommand("insertText", false, edit.text)) {
-      const current = contentRef.current;
-      setContent(current.slice(0, edit.start) + edit.text + current.slice(edit.end));
-    }
-    requestAnimationFrame(() => {
+    if (!document.execCommand("insertText", false, edit.text)) setContent(result);
+    // The result selected right away: a second Ctrl/⌘+I before the next frame must see it (it
+    // undoes the first instead of adding "**"). Again after React's render, unless the text
+    // changed meanwhile (then that selection would be stale).
+    const select = () => {
+      if (el.value !== result) return;
       el.setSelectionRange(...edit.select);
       updateSelection();
-    });
+    };
+    select();
+    requestAnimationFrame(select);
   }, [updateSelection]);
 
   const imageBlock = (id: string) =>

@@ -98,7 +98,7 @@ test("API: the backup carries the novel, its chapters and its memory", async () 
   const b = (await call(`/api/novels/${novel}/backup`)).data;
   assert.equal(b.format, "procesador-backup");
   assert.equal(b.novel.title, "Versiones");
-  assert.deepEqual(b.chapters.map((c) => c.title), ["Capítulo 1", "La huida"]);
+  assert.deepEqual(b.chapters.map((c) => c.title), ["", "La huida"]);
   assert.equal(b.memory.characters[0].name, "Elena");
   assert.deepEqual(b.images.files, []);
 });

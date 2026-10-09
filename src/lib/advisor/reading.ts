@@ -1,5 +1,5 @@
 import "server-only";
-import { db, getChapter, getMemory, getNovel } from "../supabase";
+import { db, getChapter, getScopedMemory, getNovel, inScope, scopeIds, type OpenChapter } from "../supabase";
 import { HttpError } from "../http";
 import { countWords, forModel, separatorsForModel } from "../manuscript";
 import { chapterLabel, estimateTokens } from "../ai/context";
@@ -33,35 +33,75 @@ interface ChapterRow {
   title: string;
   content: string;
   revision: number;
+  reserved: boolean;
 }
 
-export async function chapterRows(novelId: string): Promise<ChapterRow[]> {
+/** Every chapter (the manuscript, then the reserve). Only for bookkeeping that no model reads. */
+export async function allChapterRows(novelId: string): Promise<ChapterRow[]> {
   const { data, error } = await db()
     .from("chapters")
-    .select("id, title, content, revision")
+    .select("id, title, content, revision, reserved")
     .eq("novel_id", novelId)
     .order("position")
     .order("created_at");
   if (error) throw error;
-  return data;
+  const rows = data as ChapterRow[];
+  return [...rows.filter((c) => !c.reserved), ...rows.filter((c) => c.reserved)];
 }
 
-export async function digestRows(novelId: string): Promise<ChapterDigest[]> {
+/**
+ * The chapters the AI may read (docs/capitulos-reserva.md): the manuscript in order and, if
+ * `open` is a chapter in reserve the author asked about, that one at the end.
+ */
+export async function chapterRows(novelId: string, open?: OpenChapter): Promise<ChapterRow[]> {
+  return inScope(await allChapterRows(novelId), open);
+}
+
+async function allDigests(novelId: string): Promise<ChapterDigest[]> {
   const { data, error } = await db().from("chapter_digests").select("*").eq("novel_id", novelId);
   if (error) throw error;
   return data as ChapterDigest[];
 }
 
-export async function threadRows(novelId: string): Promise<StoryThread[]> {
+/** Digests of the chapters the AI may read (a digest kept for a chapter in reserve never travels). */
+export async function digestRows(novelId: string, open?: OpenChapter): Promise<ChapterDigest[]> {
+  const [digests, ids] = await Promise.all([allDigests(novelId), scopeIds(novelId, open)]);
+  return digests.filter((d) => ids.has(d.chapter_id));
+}
+
+async function allThreads(novelId: string): Promise<StoryThread[]> {
   const { data, error } = await db().from("story_threads").select("*").eq("novel_id", novelId).order("created_at");
   if (error) throw error;
   return data as StoryThread[];
 }
 
+/**
+ * The threads as the AI may read them: a possible thread (the Consejero's, unconfirmed) that
+ * no digest in scope mentions is left out, and chapter references outside the scope are
+ * cleared. The author's own and confirmed threads stay: they are the author's.
+ */
+export async function threadRows(novelId: string, open?: OpenChapter): Promise<StoryThread[]> {
+  const [threads, digests, ids] = await Promise.all([allThreads(novelId), digestRows(novelId, open), scopeIds(novelId, open)]);
+  const mentioned = new Set(digests.flatMap((d) => d.threads.map((t) => t.thread)));
+  const keep = (id: string | null) => (id && ids.has(id) ? id : null);
+  return threads
+    .filter((t) => t.origin !== "advisor" || t.confirmed || mentioned.has(t.id))
+    .map((t) => ({
+      ...t,
+      opened_chapter_id: keep(t.opened_chapter_id),
+      last_chapter_id: keep(t.last_chapter_id),
+      closed_chapter_id: keep(t.closed_chapter_id),
+    }));
+}
+
+/** The global summary, unless it was made with a chapter now in reserve (then it doesn't travel). */
 export async function novelDigestRow(novelId: string): Promise<NovelDigest | null> {
   const { data, error } = await db().from("novel_digests").select("*").eq("novel_id", novelId).maybeSingle();
   if (error) throw error;
-  return data as NovelDigest | null;
+  const global = data as NovelDigest | null;
+  if (!global) return null;
+  const ids = await scopeIds(novelId, null);
+  return Object.keys(global.based_on ?? {}).every((id) => ids.has(id)) ? global : null;
 }
 
 /** The chapter as the model reads it: image markers become their description. */
@@ -184,6 +224,12 @@ export async function digestChapter(opts: {
   force?: boolean;
 }): Promise<DigestOutcome> {
   const chapter = await getChapter(opts.chapterId);
+  // A chapter in reserve never feeds the reading of the novel (docs/capitulos-reserva.md):
+  // no digest, so no threads and no global summary come from it.
+  if (chapter.reserved) {
+    if (opts.auto) return { done: false, reason: "capítulo en reserva" };
+    throw new HttpError(409, "Este capítulo está en reserva: no se lee para la memoria de la novela hasta que lo incorpores al manuscrito.");
+  }
   const novel = await getNovel(chapter.novel_id);
   const { data: existing, error } = await db()
     .from("chapter_digests")
@@ -208,7 +254,7 @@ export async function digestChapter(opts: {
 
   const [chapters, memory, threads] = await Promise.all([
     chapterRows(novel.id),
-    getMemory(novel.id),
+    getScopedMemory(novel.id),
     threadRows(novel.id),
   ]);
   const index = chapters.findIndex((c) => c.id === chapter.id);
@@ -315,7 +361,8 @@ export async function editDigest(chapterId: string, patch: { summary?: string; n
  * mentions any more is removed.
  */
 export async function recomputeThreads(novelId: string) {
-  const [chapters, digests, threads] = await Promise.all([chapterRows(novelId), digestRows(novelId), threadRows(novelId)]);
+  // Over the manuscript: a chapter in reserve opens, advances or closes nothing.
+  const [chapters, digests, threads] = await Promise.all([chapterRows(novelId), digestRows(novelId), allThreads(novelId)]);
   const order = chapters.map((c) => c.id);
   const byChapter = new Map(digests.map((d) => [d.chapter_id, d]));
   for (const t of threads) {
@@ -346,7 +393,7 @@ export async function recomputeThreads(novelId: string) {
 
 /** Removes (or, with `into`, moves to another thread) every reference to a thread in the digests. */
 export async function rewriteThreadRefs(novelId: string, from: string, into: string | null) {
-  for (const d of await digestRows(novelId)) {
+  for (const d of await allDigests(novelId)) {
     if (!d.threads.some((t) => t.thread === from)) continue;
     const next: DigestThread[] = [];
     for (const t of d.threads) {

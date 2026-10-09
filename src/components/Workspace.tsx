@@ -142,7 +142,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
       label(id) {
         const list = chaptersRef.current;
         const i = list.findIndex((c) => c.id === id);
-        return i === -1 ? null : chapterLabel(i, list[i].title);
+        return i === -1 ? null : chapterLabel(i, list[i].title, list[i].reserved);
       },
     });
     if (!check.ok) throw new Error(check.message);
@@ -522,7 +522,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
     if (!id || lockBusy) return;
     const next = !lockedRef.current;
     const i = chaptersRef.current.findIndex((c) => c.id === id);
-    const name = i === -1 ? "este capítulo" : `«${chapterLabel(i, chaptersRef.current[i].title)}»`;
+    const name = i === -1 ? "este capítulo" : `«${chapterLabel(i, chaptersRef.current[i].title, chaptersRef.current[i].reserved)}»`;
     if (next) {
       if (editorRef.current && !(await editorRef.current.flush())) {
         setNotice("No se pudo guardar el texto, así que no se ha bloqueado. Vuelve a intentarlo.");
@@ -574,8 +574,14 @@ export default function Workspace({ novelId }: { novelId: string }) {
 
   const chapterIndex = chapters.findIndex((c) => c.id === chapter.id);
   const current = chapters[chapterIndex];
-  // Whole novel size for the "include manuscript" estimate: saved chapters plus the live one.
-  const novelChars = chapters.reduce((n, c) => n + (c.id === chapter.id ? stats.chars : c.chars), 0);
+  // Its number is its place in the manuscript; a chapter in reserve has none (docs/capitulos-reserva.md).
+  const reserved = current?.reserved === true;
+  const shown = (c: ChapterInfo) => chapterLabel(chapters.filter((x) => !x.reserved).indexOf(c), c.title, c.reserved);
+  // Whole novel size for the "include manuscript" estimate: what the AI may read (the manuscript,
+  // and this chapter if it is in reserve), saved chapters plus the live one.
+  const novelChars = chapters
+    .filter((c) => !c.reserved || c.id === chapter.id)
+    .reduce((n, c) => n + (c.id === chapter.id ? stats.chars : c.chars), 0);
   const showNav = navOpen && !focusMode;
   const showPanel = panelOpen && !focusMode;
 
@@ -644,7 +650,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
               onClick={() => toggle("navOpen", setNavOpen)}
               title="Capítulos"
             >
-              {current ? chapterLabel(chapterIndex, current.title) : ""}
+              {current ? shown(current) : ""}
             </button>
             <span className="spacer" />
             <span className="meta words">{stats.words.toLocaleString("es")} palabras</span>
@@ -733,7 +739,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
             onCaret={onCaret}
             onImageFiles={insertFiles}
             hidden={reading !== null}
-            heading={current ? chapterHeading(chapterIndex, current.title) : undefined}
+            heading={current ? chapterHeading(chapterIndex, current.title, reserved) : undefined}
             images={manuscriptImages}
             pending={pending}
           />
@@ -757,7 +763,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
         {reading !== null && (
           <ReadingView
             text={reading}
-            heading={current ? chapterHeading(chapterIndex, current.title) : undefined}
+            heading={current ? chapterHeading(chapterIndex, current.title, reserved) : undefined}
             images={manuscriptImages}
             pending={pending}
             onOpen={(id) => {
@@ -914,7 +920,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
       {modal === "critic" && (
         <CriticReport
           chapterId={chapter.id}
-          chapterTitle={current ? chapterLabel(chapterIndex, current.title) : chapter.title}
+          chapterTitle={current ? shown(current) : chapter.title}
           providers={loaded.providers}
           defaultProvider={loaded.defaultProvider}
           flush={flush}
@@ -925,7 +931,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
       {modal === "versions" && (
         <VersionsModal
           chapterId={chapter.id}
-          chapterTitle={current ? chapterLabel(chapterIndex, current.title) : chapter.title}
+          chapterTitle={current ? shown(current) : chapter.title}
           getContent={getContent}
           onRestore={restoreVersion}
           onClose={() => setModal(null)}

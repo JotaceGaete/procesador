@@ -8,3 +8,6 @@ actual actualiza cualquier base existente sin errores y sin tocar sus datos.
   al final del archivo que fallaban si se ejecutaba sólo una parte.
 - `schema-critico.sql`: Crítico Literario, fase 1 (commit 5359c10), la base de producción antes
   del bloqueo de capítulos.
+- `actualizar-bloqueo-pr12.sql` y `actualizar-reserva-pr13.sql`: las migraciones por separado de
+  los PR #12 y #13, sustituidas por `supabase/actualizar-bloqueo-reserva.sql`. Sirven para
+  comprobar que la conjunta también funciona si alguien ya aplicó una de ellas.

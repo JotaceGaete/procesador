@@ -39,7 +39,8 @@ export default function AdvisorSaved(p: {
   }, [load, loadThreads]);
 
   const index = new Map(p.chapters.map((c, i) => [c.id, i]));
-  const label = (id: string) => (index.has(id) ? chapterLabel(index.get(id)!, p.chapters[index.get(id)!].title) : "capítulo eliminado");
+  const label = (id: string) =>
+    index.has(id) ? chapterLabel(index.get(id)!, p.chapters[index.get(id)!].title, p.chapters[index.get(id)!].reserved) : "capítulo eliminado";
 
   return (
     <div className="saved-observations">

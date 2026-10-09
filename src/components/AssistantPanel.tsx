@@ -489,7 +489,7 @@ function AssistantPanel(props: Props) {
       update(`${req.section}:${req.mode}`, () => ({
         notice: {
           kind: "error",
-          message: `Esta propuesta fue preparada para ${i === -1 ? "un capítulo que ya no existe" : `«${chapterLabel(i, chapters[i].title)}»`}. Vuelve a ese capítulo para pedir otra versión, o pide una nueva aquí.`,
+          message: `Esta propuesta fue preparada para ${i === -1 ? "un capítulo que ya no existe" : `«${chapterLabel(i, chapters[i].title, chapters[i].reserved)}»`}. Vuelve a ese capítulo para pedir otra versión, o pide una nueva aquí.`,
         },
       }));
       return;
@@ -757,7 +757,7 @@ function AssistantPanel(props: Props) {
   // that counts runs again when applying (Workspace), on the identifiers, not on this view.
   const origin = last?.chapterId ?? chapterId;
   const originIndex = chapters.findIndex((c) => c.id === origin);
-  const originLabel = originIndex >= 0 ? chapterLabel(originIndex, chapters[originIndex].title) : null;
+  const originLabel = originIndex >= 0 ? chapterLabel(originIndex, chapters[originIndex].title, chapters[originIndex].reserved) : null;
   const elsewhere = Boolean(last && last.section === "assistant" && origin !== chapterId);
   const applyBlocked = elsewhere || locked;
   const insertion =
@@ -765,7 +765,7 @@ function AssistantPanel(props: Props) {
   // The cursor of another chapter is no place for this proposal.
   const fixHere = () => !elsewhere && update(slot, () => ({ insertTarget: { kind: "at", anchor: anchorAt(getContent(), getCursor()) }, applyFailed: null }));
   const chapterIndex = chapters.findIndex((c) => c.id === chapterId);
-  const here = chapterIndex >= 0 ? chapterLabel(chapterIndex, chapters[chapterIndex].title) : "este capítulo";
+  const here = chapterIndex >= 0 ? chapterLabel(chapterIndex, chapters[chapterIndex].title, chapters[chapterIndex].reserved) : "este capítulo";
 
   // What "Abrir propuesta" shows, and its main action (the same as the panel's).
   const reader =
@@ -837,7 +837,11 @@ function AssistantPanel(props: Props) {
   // A scene reads the story up to the cursor, never beyond (docs/asistente-contexto.md).
   const storyChars =
     mode === "scene"
-      ? chapters.slice(0, Math.max(0, chapters.findIndex((c) => c.id === chapterId))).reduce((n, c) => n + c.chars, 0) + getCursor()
+      ? // The manuscript before this chapter (all of it, for a chapter in reserve: docs/capitulos-reserva.md).
+        chapters
+          .slice(0, Math.max(0, chapters.findIndex((c) => c.id === chapterId)))
+          .filter((c) => !c.reserved)
+          .reduce((n, c) => n + c.chars, 0) + getCursor()
       : 0;
   // The Asistente keeps literary decisions in front and the technical figures discreet; the
   // Consejero keeps its own layout.

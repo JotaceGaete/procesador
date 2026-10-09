@@ -144,7 +144,7 @@ test("chapters: reorder and rename", async () => {
   const { chapters } = await api(`/api/novels/${novelA}`);
   assert.deepEqual(
     chapters.map((c) => c.title),
-    ["Capítulo 2", "La llegada"],
+    ["", "La llegada"],
   );
 });
 

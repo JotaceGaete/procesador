@@ -42,7 +42,8 @@ petición de un capítulo con el texto de otro).
 ## Persistencia y servidor
 
 - `chapters.locked` (falso por defecto) y `chapters.locked_at`. `novel_outline` devuelve el
-  candado para el índice. Migración: `supabase/actualizar-bloqueo.sql` (o `schema.sql` completo).
+  candado para el índice. Migración: `supabase/actualizar-bloqueo-reserva.sql`, conjunta con la reserva
+  (docs/integracion-bloqueo-reserva.md), o `schema.sql` completo.
 - `PATCH /api/chapters/:id { locked }` bloquea o desbloquea; es una petición propia: nunca se
   desbloquea y se escribe texto a la vez.
 - Guardar texto o título de un capítulo bloqueado responde **423**, también desde una pestaña

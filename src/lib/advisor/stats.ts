@@ -281,12 +281,14 @@ export interface MapChapter {
   id: string;
   title: string;
   words: number;
+  /** The open chapter, in reserve (docs/capitulos-reserva.md): listed after the manuscript, unnumbered. */
+  reserved?: boolean;
   /** Ids of the characters and places mentioned, most mentioned first. */
   characters: string[];
   places: string[];
 }
 
-export function novelMap(chapters: StatsChapter[], characters: Presence[], places: Presence[]): MapChapter[] {
+export function novelMap(chapters: (StatsChapter & { reserved?: boolean })[], characters: Presence[], places: Presence[]): MapChapter[] {
   const present = (list: Presence[], i: number) =>
     list
       .filter((p) => p.counts[i] > 0)
@@ -296,6 +298,7 @@ export function novelMap(chapters: StatsChapter[], characters: Presence[], place
     id: c.id,
     title: c.title,
     words: countWords(c.content),
+    reserved: c.reserved === true,
     characters: present(characters, i),
     places: present(places, i),
   }));

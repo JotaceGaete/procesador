@@ -163,7 +163,8 @@ export default function AdvisorConsult(p: Props) {
   }, [loadList, loadThreads, open, p.novelId]);
 
   const index = new Map(p.chapters.map((c, i) => [c.id, i]));
-  const label = (id: string) => (index.has(id) ? chapterLabel(index.get(id)!, p.chapters[index.get(id)!].title) : "capítulo desconocido");
+  const label = (id: string) =>
+    index.has(id) ? chapterLabel(index.get(id)!, p.chapters[index.get(id)!].title, p.chapters[index.get(id)!].reserved) : "capítulo desconocido";
 
   function body(ask: Ask, using: ProviderId | null) {
     return {
@@ -368,7 +369,7 @@ export default function AdvisorConsult(p: Props) {
       const res = await fetch("/api/advisor", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brief: true, novelId: p.novelId, conversationId, anchorId, provider: p.provider }),
+        body: JSON.stringify({ brief: true, novelId: p.novelId, chapterId: p.chapterId, conversationId, anchorId, provider: p.provider }),
       });
       if (res.status === 401) window.location.href = "/login";
       const json = await res.json();

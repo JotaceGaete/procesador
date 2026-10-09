@@ -1,5 +1,5 @@
 import "server-only";
-import { assertId, db, getChapter, getMemory, getNovel } from "../supabase";
+import { assertId, db, getChapter, getNovel, getScopedMemory } from "../supabase";
 import { HttpError } from "../http";
 import { chapterLabel, estimateTokens, nameMatcher } from "../ai/context";
 import { confirmTokens } from "../ai/models";
@@ -40,12 +40,14 @@ export async function buildCriticRequest(chapterId: string) {
   const chapter = await getChapter(chapterId);
   const novel = await getNovel(chapter.novel_id);
   if (!chapter.content.trim()) throw new HttpError(400, "El capítulo está vacío: no hay nada que evaluar.");
+  // The manuscript as background and, if this chapter is in reserve, only this one of the
+  // reserve (docs/capitulos-reserva.md). Evaluating writes nothing to the novel's reading.
   const [chapters, digests, global, threads, memory] = await Promise.all([
-    chapterRows(novel.id),
-    digestRows(novel.id),
+    chapterRows(novel.id, chapter.id),
+    digestRows(novel.id, chapter.id),
     novelDigestRow(novel.id),
-    threadRows(novel.id),
-    getMemory(novel.id),
+    threadRows(novel.id, chapter.id),
+    getScopedMemory(novel.id, chapter.id),
   ]);
   const index = chapters.findIndex((c) => c.id === chapter.id);
   const before = chapters.slice(0, Math.max(0, index));
@@ -71,13 +73,14 @@ export async function buildCriticRequest(chapterId: string) {
     earlier.push({ label, summary: d.summary, quotes, outdated });
   }
 
-  const prev = before.at(-1);
+  // A chapter in reserve has no place yet: the end of the manuscript is not what precedes it.
+  const prev = chapter.reserved ? undefined : before.at(-1);
   const previousEnding = prev?.content.trim()
     ? { label: chapterLabel(before.length - 1, prev.title), text: (await readableText(novel.id, prev.content)).slice(-PREVIOUS_ENDING_CHARS) }
     : null;
   const people = memory.characters.filter((c) => nameMatcher(c)?.test(chapter.content)).slice(0, MAX_CHARACTERS);
   const input: CriticPromptInput = {
-    label: chapterLabel(index, chapter.title),
+    label: chapterLabel(index, chapter.title, chapter.reserved),
     text: await readableText(novel.id, chapter.content),
     guide: compileGuide(novel),
     novelSummary: global?.summary ?? null,

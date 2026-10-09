@@ -17,7 +17,7 @@ export const GET = handler<Ctx>(async (_request, { params }) => {
   let chapters = await getOutline(novel.id);
   if (!chapters.length) {
     // A novel always has at least one chapter.
-    const { error } = await db().from("chapters").insert({ novel_id: novel.id, title: "Capítulo 1", position: 1 });
+    const { error } = await db().from("chapters").insert({ novel_id: novel.id, title: "", position: 1 });
     if (error) throw error;
     chapters = await getOutline(novel.id);
   }

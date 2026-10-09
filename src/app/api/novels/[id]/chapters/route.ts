@@ -1,24 +1,30 @@
 import { NextResponse } from "next/server";
 import { handler } from "@/lib/auth";
 import { db, getNovel, getOutline } from "@/lib/supabase";
-import { HttpError, readJson } from "@/lib/http";
+import { HttpError, readJson, groupPosition as position } from "@/lib/http";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-/** New chapter at the end. */
+/**
+ * New chapter, in the manuscript or in the reserve (docs/capitulos-reserva.md), at position
+ * `at` of its group (1 = first; none = at the end). Its title is the author's only: the
+ * number is its place in the manuscript and is never stored.
+ */
 export const POST = handler<Ctx>(async (request, { params }) => {
   const novel = await getNovel((await params).id);
   const body = await readJson(request);
-  const outline = await getOutline(novel.id);
-  const position = Math.max(0, ...outline.map((c) => c.position)) + 1;
-  const title =
-    typeof body.title === "string" && body.title.trim() ? body.title.trim().slice(0, 300) : `Capítulo ${outline.length + 1}`;
-  const { data, error } = await db().from("chapters").insert({ novel_id: novel.id, title, position }).select("id").single();
+  const title = typeof body.title === "string" ? body.title.trim().slice(0, 300) : "";
+  const { data: id, error } = await db().rpc("create_chapter", {
+    p_novel: novel.id,
+    p_title: title,
+    p_reserved: body.reserved === true,
+    p_at: position(body.at),
+  });
   if (error) throw error;
-  return NextResponse.json({ id: data.id, chapters: await getOutline(novel.id) }, { status: 201 });
+  return NextResponse.json({ id, chapters: await getOutline(novel.id) }, { status: 201 });
 });
 
-/** New order: the complete list of chapter ids. Positions change, revisions don't. */
+/** New order of the manuscript: the complete list of its chapter ids. Positions change, revisions don't. */
 export const PUT = handler<Ctx>(async (request, { params }) => {
   const novel = await getNovel((await params).id);
   const { ids } = await readJson(request);

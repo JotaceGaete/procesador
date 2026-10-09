@@ -87,7 +87,7 @@ test("api: a locked chapter refuses every change (423): text, title, trash, AI c
 
   const after = await chapter(ch1);
   assert.equal(after.content, UNO);
-  assert.equal(after.title, "Capítulo 1");
+  assert.equal(after.title, "", "unchanged: the number is shown, not stored (docs/capitulos-reserva.md)");
   assert.equal(after.revision, revision);
   assert.equal(after.locked, true);
 
