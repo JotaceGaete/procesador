@@ -60,6 +60,8 @@ export const maxDuration = 300;
 
 const MAX_SELECTION_CHARS = 30_000;
 const MAX_ARGUMENT_CHARS = 10_000;
+/** «Revisar escena»: the changes the author approved, from the Consejero or their own. */
+const MAX_NOTES_CHARS = 8_000;
 const SCENE_BEFORE_CHARS = 6000;
 const SCENE_AFTER_CHARS = 1500;
 const PREVIOUS_CHAPTER_CHARS = 3000;
@@ -154,9 +156,14 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
     ),
   };
   // Continuidad (no AI): the Memoria and each character's age at this point of the story.
-  const continuityBase = (): Pick<ContinuityInput, "characters" | "places" | "ages"> => ({
+  const continuityBase = (): Pick<ContinuityInput, "characters" | "places" | "ages" | "relationships"> => ({
     characters: memory.characters,
     places: memory.places,
+    relationships: memory.relationships.flatMap((r) => {
+      const from = memory.characters.find((c) => c.id === r.from_id);
+      const to = memory.characters.find((c) => c.id === r.to_id);
+      return from && to ? [{ from, to, kind: r.kind }] : [];
+    }),
     ages: memory.characters.flatMap((c) => {
       const a = chron.marks.length ? chron.result.ages.get(c.id)?.[chapterIndex] : null;
       return a ? [{ name: c.name, aliases: c.aliases, min: a.min, max: a.max, approx: a.approx }] : [];
@@ -375,6 +382,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
         providerNote: SCENE_PROVIDER_NOTES[body.provider as ProviderId] ?? null,
         draft,
         brief,
+        confirmedChange: body.confirmChange === true,
       }),
       continuity: (output) => {
         const chosen = memory.places.find((p) => placeIds.includes(p.id)) ?? null;
@@ -413,7 +421,8 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
   let selected: SelectedMemory;
   let passages: string | null = null;
   let passageList: { name: string; text: string }[] = [];
-  if (action.id === "consistencia") {
+  if (action.id === "consistencia" || action.id === "revisar") {
+    // Revisar escena keeps what the scene established: who knows whom, places, facts.
     selected = selectMemory(memory, base);
   } else if (action.id === "personaje" || action.id === "evolucion") {
     selected = selectMemory(memory, { ...base, focus: true });
@@ -491,6 +500,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       passages,
       images: protectedSelection.ids.length,
       timeWarnings,
+      notes: action.id === "revisar" && typeof body.notes === "string" ? body.notes.slice(0, MAX_NOTES_CHARS) : null,
     }),
     signal,
     // A rewrite keeps what the fragment established (clothes, names, ages); analyses are not checked.

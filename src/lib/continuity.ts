@@ -9,10 +9,12 @@
  *   clothes  a garment that changes colour, or a different garment where one was described
  *   place    the scene is set in one place of the Memoria and the proposal sets it in another
  *   age      «Claudia, de veinte años» when the chronology says 25 at this point
+ *   relation the proposal makes a stranger of someone the text or the Memoria already ties
+ *            to another character («un desconocido», «no lo conocía»)
  */
 
 export interface ContinuityWarning {
-  kind: "nombre" | "ropa" | "lugar" | "edad";
+  kind: "nombre" | "ropa" | "lugar" | "edad" | "relacion";
   message: string;
 }
 
@@ -29,6 +31,8 @@ export interface ContinuityInput {
   place?: { name: string; aliases: string } | null;
   /** Each character's age at this point of the story (Cronología), when known. */
   ages?: { name: string; aliases: string; min: number; max: number; approx: boolean }[];
+  /** The Memoria's relationships between characters, by name. */
+  relationships?: { from: { name: string; aliases: string }; to: { name: string; aliases: string }; kind: string }[];
 }
 
 const MAX_PER_KIND = 2;
@@ -165,6 +169,31 @@ function checkPlace(i: ContinuityInput): ContinuityWarning[] {
 }
 
 // ---------------------------------------------------------------------------
+// Relations: an acquaintance turned into a stranger
+// ---------------------------------------------------------------------------
+
+const STRANGER_RE =
+  /(^|[^\p{L}])(desconocid[oa]s?|un extra[ñn]o|una extra[ñn]a|no (lo|la|le) conoc[ií]a|nunca (lo|la) hab[ií]a visto|no sab[ií]a qui[eé]n era)([^\p{L}]|$)/iu;
+const RECOGNITION_RE = /(^|[^\p{L}])(reconoc\p{L}*|lo conoc[ií]a|la conoc[ií]a|se conoc[ií]an)([^\p{L}]|$)/iu;
+
+function checkRelations(i: ContinuityInput): ContinuityWarning[] {
+  const m = i.proposal.match(STRANGER_RE);
+  if (!m || STRANGER_RE.test(i.before)) return [];
+  const said = m[2];
+  const tie = (i.relationships ?? []).find((r) => mentions(i.proposal, r.from) && mentions(i.proposal, r.to));
+  if (tie)
+    return [
+      {
+        kind: "relacion",
+        message: `La propuesta presenta a alguien como desconocido («${said}»), pero en la Memoria ${tie.from.name} y ${tie.to.name} tienen una relación (${tie.kind}). Revisa si cambia lo establecido.`,
+      },
+    ];
+  if (RECOGNITION_RE.test(i.before))
+    return [{ kind: "relacion", message: `La propuesta presenta a alguien como desconocido («${said}»), pero en el texto original los personajes se reconocen o se conocen.` }];
+  return [];
+}
+
+// ---------------------------------------------------------------------------
 // Ages
 // ---------------------------------------------------------------------------
 
@@ -212,5 +241,5 @@ function checkAges(i: ContinuityInput): ContinuityWarning[] {
 /** Every warning, at most two of each kind. */
 export function checkContinuity(i: ContinuityInput): ContinuityWarning[] {
   if (!i.proposal.trim()) return [];
-  return [...checkNames(i), ...checkClothes(i), ...checkPlace(i), ...checkAges(i)];
+  return [...checkNames(i), ...checkClothes(i), ...checkPlace(i), ...checkAges(i), ...checkRelations(i)];
 }

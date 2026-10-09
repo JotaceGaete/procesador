@@ -180,7 +180,7 @@ test("panel: the Asistente writes, the Consejero analyses; the three analyses mo
   await panel.waitFor();
   assert.equal(await panel.getAttribute("aria-label"), "Asistente");
   const actionNames = () => panel.locator(".actions button").allInnerTexts();
-  assert.deepEqual(await actionNames(), ["Redacción", "Diálogo", "Expandir", "Acortar"]);
+  assert.deepEqual(await actionNames(), ["Redacción", "Diálogo", "Expandir", "Acortar", "Revisar escena"]);
   assert.ok(await panel.getByRole("button", { name: "Escribir escena" }).isVisible());
 
   await page.locator(".topbar .link", { hasText: "Consejero" }).click();

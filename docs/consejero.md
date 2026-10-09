@@ -809,3 +809,95 @@ opciones* siguen dando varias, diciendo cuál recomienda.
 Coste: ≈300 tokens más de instrucciones por consulta (Analizar 1.384 → 1.684; Conversar
 1.292 → 1.598), en el prefijo que se reutiliza de la caché; un turno medio de Conversar en la
 medición pasa de ≈14.100 a ≈14.400 tokens de entrada. Ninguna llamada nueva.
+
+## Revisar escena y libertad creativa («La manta»)
+
+Caso que lo motivó: el autor pidió hacer «más atractiva» una escena escrita (Pola reconoce a
+don Eduardo en el bus, él le ofrece su manta, ella lo invita a compartirla). La respuesta
+terminó en otra escena: Eduardo como desconocido, una parada de carretera, el baño, las
+monedas y una complicación para sentarlos juntos. No era un fallo del modelo sino del flujo:
+no había forma de *revisar* una escena escrita. El planificador no reconocía el pedido, en
+Conversar se ignoraba la selección y se leían los últimos 8.000 caracteres, el Consejero sólo
+podía proponer acontecimientos, el encargo para el Asistente no llevaba el texto original y el
+Asistente escribía «igualmente» lo que contradijera la Memoria.
+
+**Revisar escena** (acción `revisar`, sin cambios de base de datos):
+
+- El planificador la reconoce («mejora esta escena», «más atractiva/interesante/intensa»,
+  «¿qué le falta?», «púlela», «¿cómo ves esta escena?»), en los dos modos. Es un tema nuevo: no
+  hereda la propuesta en curso, salvo que el autor nombre una tarjeta y no hable de la escena.
+- Lee la selección **entera**, con su entorno, la Memoria de quienes aparecen (relaciones y
+  hechos) y las fichas. La selección se usa ahora en Conversar y Analizar para toda acción
+  salvo *Cómo continúo*, *Caminos*, *Cabos* y *Repeticiones*; la casilla «Sobre la selección»
+  se ve también en Conversar.
+- Responde en este orden: **lo que funciona** (con citas), la intención, un **veredicto** que
+  puede ser «la escena funciona; no la cambiaría», los **problemas reales** (como mucho cinco,
+  con cita y un cambio puntual) y, aparte, las **preferencias** marcadas como gusto. No propone
+  acontecimientos para «animar» la escena; si de verdad hace falta uno, uno solo y diciendo qué
+  cambia. Las observaciones son sólo los problemas reales (`problem`, `pacing`, `repetition`,
+  `contradiction`): no hay tipos nuevos en `advisor_observations`.
+- **Aplicar con el Asistente** lleva la revisión a *Editar → Revisar escena* sobre la misma
+  escena (la vuelve a seleccionar si hace falta), como «Cambios que quieres», editables. El
+  Asistente aplica esos y sólo esos, conserva hechos, relaciones, símbolos, progresión y la
+  intensidad de una escena íntima, y puede no proponer nada. Nunca pasa por el modo *escena*:
+  la escena del autor no se sustituye por otra.
+- **Juicio comparativo** (`/api/novels/[id]/compare`, `src/lib/advisor/compare.ts`): cuando la
+  reescritura de *Revisar escena* termina, el modelo del Consejero compara las dos versiones con
+  siete criterios (tensión emocional, subtexto, ritmo, naturalidad, caracterización,
+  continuidad, fuerza del desenlace), dice qué pierde la propuesta y qué cambia de lo
+  establecido. Es **una recomendación**: el panel la muestra junto a la comparación y
+  «Reemplazar selección» sigue disponible aunque diga que el original es mejor. No se guarda.
+- **Continuidad sin IA**: `checkContinuity` avisa (`relacion`) cuando una propuesta presenta
+  como desconocido a alguien que el texto original reconoce o que la Memoria relaciona con otro
+  personaje de la escena.
+
+**El autor decide** (`AUTHOR_AUTHORITY`, `src/lib/ai/principles.ts`): la Memoria y la
+continuidad detectan contradicciones, no impiden decisiones. Si el argumento de una escena
+contradice un hecho establecido, el Asistente ya no la escribe en silencio con un aviso: responde
+sólo con el `<aviso>`, y el panel ofrece «Escribir igualmente: cambio ese hecho», que repite la
+petición con `confirmChange` y la escribe según el argumento.
+
+**Ficción para adultos** (`src/lib/ai/principles.ts`): Procesador no tiene moderación propia;
+sólo muestra las negativas del proveedor. Lo que faltaba era que el principio de ficción adulta
+llegara más allá del Asistente:
+
+- Asistente (`ADULT_FICTION`, en editar y escribir): además de no suavizar ni moralizar, una
+  escena erótica o explícita entre adultos conserva la intensidad pedida y no se convierte en
+  insinuación ni en elipsis no pedida; una relación infiel o clandestina no se castiga.
+- Consejero, Analizar y Conversar, y el juicio comparativo (`ADVISOR_ADULT_FICTION`): juzga las
+  escenas íntimas o violentas por su oficio (credibilidad, intensidad, progresión, lenguaje,
+  consentimiento dentro de la ficción, función narrativa); puede decir que están mal escritas,
+  nunca recomendar suavizarlas por ser explícitas, ni volver villano o víctima a un personaje
+  para justificarlo. La respetabilidad moral no es un criterio literario.
+- Fichas de capítulo, resumen global y encargo (`ADULT_SUMMARY`): describen sin eufemismos. El
+  encargo no inventa límites de tono o contenido («con delicadeza») ni cambia relaciones que el
+  autor no decidió cambiar. El resumen de la conversación conserva las decisiones crudas tal
+  como se dijeron.
+
+`CRAFT` suma: entender qué funciona antes de proponer y poder concluir que una escena funciona;
+más acontecimientos no es más interés; problema real frente a preferencia; una casualidad ya
+escrita es canon y no se «arregla» con complicaciones; decir expresamente cuándo una propuesta
+cambia un hecho, una relación, un símbolo o la progresión.
+
+Coste en instrucciones (≈3,5 caracteres por token): Analizar 1.683 → 2.315 tokens y Conversar
+1.597 → 2.260, en el prefijo en caché; fichas +58, resumen global +58, encargo +152, resumen de
+conversación +40. El juicio comparativo es una llamada nueva (≈700 tokens de instrucciones más
+las dos versiones), sólo tras una reescritura de *Revisar escena*.
+
+Pruebas: `tests/unit/consejero-revision.test.ts` y `tests/e2e/revisar-escena.test.mjs` (la
+escena en medio de un capítulo de ≈24.000 caracteres, la revisión, el traspaso al Asistente,
+el aviso de continuidad, el juicio comparativo y la contradicción confirmada). Son pruebas
+deterministas con el modelo simulado: comprueban qué recibe el modelo y qué hace el panel, no
+la calidad de la respuesta de un modelo real.
+
+Límites conocidos:
+
+- Lo que el modelo real hace con estas instrucciones sólo se comprueba con las dos versiones
+  completas de «La manta» y un proveedor real (pendiente).
+- La edad sólo viaja explícita cuando la ficha o la Cronología la dicen; el encargo no la lleva.
+- Las negativas del proveedor no se pueden evitar desde Procesador; el contexto de ficción
+  adulta reduce las falsas negativas, no las elimina.
+- El aviso `relacion` es una heurística por palabras («desconocido», «no lo conocía»): puede
+  no ver un cambio dicho de otra forma.
+- En móvil, «Aplicar con el Asistente», si tiene que volver a seleccionar la escena, cierra el
+  panel como «Ir»; al abrirlo, *Revisar escena* está lista con los cambios.

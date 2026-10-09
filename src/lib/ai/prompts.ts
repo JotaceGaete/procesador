@@ -2,12 +2,13 @@ import type { Character, EditAction, Fact, Memory, Place, Relationship, SceneLen
 import { SCENE_LENGTHS, type ProviderId } from "../types";
 import { countWords } from "../manuscript";
 import { chapterLabel, type SelectedMemory } from "./context";
+import { ADULT_FICTION, AUTHOR_AUTHORITY } from "./principles";
 
 // ---------------------------------------------------------------------------
 // Shared principles: what "good writing" means here, for both modes.
 // ---------------------------------------------------------------------------
 
-const LITERARY_PRINCIPLES = `- Es ficción para adultos. Los personajes pueden ser crueles, violentos, sexuales, mezquinos o contradictorios, y usar lenguaje vulgar o desagradable. Eso es caracterización: no lo suavices, no moralices, no añadas advertencias ni hagas a nadie más simpático o redimible de lo que es.
+const LITERARY_PRINCIPLES = `${ADULT_FICTION}
 - Sigue la Guía Maestra de la novela: sus decisiones (narrador, persona, tiempo verbal, tono, estilo, lenguaje, regionalismos) mandan sobre tus preferencias.
 - Nada de prosa genérica de IA: no añadas metáforas, adjetivos, explicaciones emocionales ni dramatismo para que el texto "parezca literario". Nada de tríadas decorativas, frases solemnes de cierre, "un escalofrío recorrió…", ni nombrar emociones que la escena ya muestra.
 - Respeta los silencios, la ambigüedad, las frases secas, la crudeza, los regionalismos y la puntuación del autor (raya de diálogo) cuando son parte de la obra.
@@ -59,7 +60,10 @@ ${LITERARY_PRINCIPLES}
 
 ${TEXT_FORMAT}
 
-Formato de respuesta: la escena completa dentro de <escena></escena>, solo prosa, sin títulos ni comentarios. Si el argumento contradice algo de la memoria narrativa (por ejemplo, un personaje que ya murió), escribe igualmente lo que pide el argumento y añade después de la escena una sola línea dentro de <aviso></aviso> señalando la contradicción. No añadas nada más.`;
+${AUTHOR_AUTHORITY}
+Si el argumento contradice un hecho establecido en el manuscrito o en la memoria narrativa (un personaje que ya murió, dos personajes que se conocen y el argumento los hace desconocidos, un lugar o una relación distintos), no escribas la escena: responde sólo con una línea dentro de <aviso></aviso> que diga qué hecho contradice y cómo, para que el autor confirme. Si la tarea dice que el autor ya confirmó el cambio, escribe la escena según el argumento, sin aviso.
+
+Formato de respuesta: la escena completa dentro de <escena></escena>, solo prosa, sin títulos ni comentarios. No añadas nada más.`;
 
 // ---------------------------------------------------------------------------
 // Memory formatting
@@ -230,6 +234,14 @@ Conserva todos los hechos, la intención y la voz; no cambies lo que ocurre.
 Explica en una o dos líneas qué quitaste.
 ${REWRITE_RULES}`,
 
+  revisar: () => `Revisa <seleccion> como un editor exigente que respeta la obra: es una escena del autor, no un borrador tuyo. Léela entera antes de juzgar.
+1. **Lo que funciona:** en dos a cuatro puntos, con cita exacta, qué sostiene la escena (tensión, subtexto, un objeto o símbolo, la progresión emocional, la voz, lo que un personaje calla). Eso no se toca.
+2. **Intención:** en una frase, qué busca la escena en el lector.
+3. **Cambios:** si el autor indicó cambios en <cambios_pedidos>, aplica esos y sólo esos. Si no indicó ninguno, aplica sólo los problemas reales (máximo 5), cada uno con la cita exacta, el problema y el efecto que buscas; una preferencia de estilo no es un problema.
+Conserva todos los hechos, el orden de lo que ocurre, los personajes, sus relaciones (quién conoce a quién), los objetos y símbolos y la progresión emocional. No añadas acontecimientos, incidentes, personajes ni complicaciones: más acontecimientos no es más interés. No suavices ni moralices; si la escena es íntima o sexual, conserva su intensidad y su grado de explicitud.
+Si la escena ya funciona, dilo con claridad («La escena funciona; no la cambiaría») y no incluyas <reescritura>.
+${REWRITE_RULES}`,
+
   consistencia:
     () => `Verifica la continuidad de <seleccion> contra la memoria narrativa (personajes, relaciones, lugares, hechos) y los pasajes anteriores incluidos: datos, fechas, lugares, quién sabe qué, relaciones, comportamientos.
 Que alguien haga algo cruel, inmoral o contradictorio no es una inconsistencia si encaja con quien es.
@@ -275,6 +287,8 @@ export function editPrompt(opts: {
   images?: number;
   /** Cronología: warnings about the people involved, computed by Procesador. */
   timeWarnings?: string[];
+  /** «Revisar escena»: the changes the author approved (from the Consejero or their own). */
+  notes?: string | null;
 }): string {
   const parts: string[] = [];
   if (opts.passages) parts.push(`Pasajes anteriores relevantes:\n<pasajes>\n${opts.passages}\n</pasajes>`);
@@ -292,6 +306,10 @@ export function editPrompt(opts: {
       .filter(Boolean)
       .join("\n"),
   );
+  if (opts.action === "revisar" && opts.notes?.trim())
+    parts.push(
+      `Cambios que el autor pidió para esta escena (los aprobó él; no hagas otros):\n<cambios_pedidos>\n${opts.notes.trim()}\n</cambios_pedidos>`,
+    );
   parts.push(`Tarea: ${EDIT_TASKS[opts.action](opts.character)}`);
   if (opts.images) {
     parts.push(
@@ -327,6 +345,8 @@ export function scenePrompt(opts: {
   draft?: string | null;
   /** «Enviar al Asistente»: the author's decisions, limits and discards from the Consejero. */
   brief?: string | null;
+  /** The author confirmed, after an <aviso>, that the argument changes an established fact. */
+  confirmedChange?: boolean;
 }): string {
   const extent = sceneExtent(opts.length);
   const parts: string[] = [];
@@ -363,6 +383,10 @@ export function scenePrompt(opts: {
   if (opts.brief?.trim())
     parts.push(
       `Encargo del Consejero: lo que el autor decidió para esta escena al pensarla con su consejero. Tiene la misma autoridad que el argumento: cumple sus decisiones y restricciones, y que no ocurra nada de lo descartado.\n<encargo_del_consejero>\n${opts.brief.trim()}\n</encargo_del_consejero>`,
+    );
+  if (opts.confirmedChange)
+    parts.push(
+      "El autor ya confirmó el cambio: sabe que el argumento contradice algo establecido en el manuscrito o en la memoria y quiere cambiarlo. Escribe la escena según el argumento, sin aviso.",
     );
   parts.push(`Extensión: ${extent.target}.`);
   if (opts.draft) {

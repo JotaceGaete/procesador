@@ -280,7 +280,7 @@ export const CHARACTER_SECTIONS: {
 
 export const CHARACTER_KEYS = CHARACTER_SECTIONS.flatMap((s) => s.fields.map((f) => f.key)) as (keyof Character)[];
 
-export type EditAction = "redaccion" | "dialogo" | "expandir" | "acortar" | "consistencia" | "personaje" | "evolucion";
+export type EditAction = "revisar" | "redaccion" | "dialogo" | "expandir" | "acortar" | "consistencia" | "personaje" | "evolucion";
 
 /**
  * Where each action lives (docs/consejero.md): the Asistente writes with the author
@@ -299,6 +299,7 @@ export const EDIT_ACTIONS: {
   { id: "dialogo", label: "Diálogo", character: "optional", rewrites: true, section: "assistant" },
   { id: "expandir", label: "Expandir", character: "optional", rewrites: true, section: "assistant" },
   { id: "acortar", label: "Acortar", character: "optional", rewrites: true, section: "assistant" },
+  { id: "revisar", label: "Revisar escena", character: "optional", rewrites: true, section: "assistant" },
   { id: "consistencia", label: "Consistencia", character: "optional", rewrites: false, section: "advisor" },
   { id: "personaje", label: "Personaje", character: "required", rewrites: false, section: "advisor" },
   { id: "evolucion", label: "Evolución", character: "required", rewrites: false, section: "advisor" },
@@ -515,6 +516,8 @@ export type AdvisorAction =
   | "cabos"
   | "coherencia"
   | "personajes"
+  // Revisar escena: read a written scene whole, say what works, never replace it.
+  | "revisar"
   // Consejero creativo (phase 1): think with the author; never write for the manuscript.
   | "caminos"
   | "consecuencias"
@@ -538,6 +541,7 @@ export const ADVISOR_ACTIONS: { id: AdvisorAction; label: string; hint: string; 
   { id: "giro", label: "Necesito un giro", hint: "Giros posibles construidos con elementos reales de la novela", group: "crear" },
   { id: "tension", label: "Subir tensión", hint: "Cómo aumentar la tensión con lo que ya está en juego", group: "crear" },
   { id: "consecuencias", label: "¿Qué pasa si…?", hint: "Escribe una posibilidad y el Consejero analiza sus consecuencias", group: "crear", ask: "¿Qué pasa si " },
+  { id: "revisar", label: "Revisar escena", hint: "Lee entera la escena seleccionada: qué funciona, qué es un problema real y qué es gusto. No la reescribe ni la sustituye", group: "revisar" },
   { id: "analizar", label: "Analizar capítulo", hint: "Qué funciona y qué no en el capítulo abierto", group: "revisar" },
   { id: "repeticiones", label: "Repeticiones", hint: "Expresiones, imágenes o situaciones que se repiten", group: "revisar" },
   { id: "coherencia", label: "Coherencia", hint: "Contradicciones y revelaciones a destiempo", group: "revisar" },

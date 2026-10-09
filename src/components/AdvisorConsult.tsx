@@ -45,6 +45,8 @@ interface Props {
   onSendToAssistant(text: string): void;
   /** «Enviar al Asistente» from Conversar: the scene order the author reviewed. */
   onSendBrief(b: SceneBrief): void;
+  /** «Revisar escena»: the review goes to the Asistente (Editar) as the changes to apply to that scene. */
+  onSendReview?(r: { notes: string; start: number; end: number }): void;
   memory: Memory;
   /** Saves the open chapter, so what an observation relied on is the saved revision. */
   flush(): Promise<boolean>;
@@ -98,6 +100,8 @@ export default function AdvisorConsult(p: Props) {
   const [progress, setProgress] = useState<string | null>(null);
   const [last, setLast] = useState<(Ask & { provider: ProviderId }) | null>(null);
   const [plan, setPlan] = useState<{ label: string; detail: string; mode?: AdvisorMode } | null>(null);
+  // «Revisar escena»: the last review, to take to the Asistente (Editar) over the same scene.
+  const [reviewed, setReviewed] = useState<{ notes: string; start: number; end: number } | null>(null);
   // Conversar (a companion; the default) or Analizar (the full evaluation), remembered per novel.
   const [mode, setModeState] = useState<AdvisorMode>("conversar");
   useEffect(() => setModeState(readPref(`advisorMode:${p.novelId}`) === "analizar" ? "analizar" : "conversar"), [p.novelId]);
@@ -206,6 +210,10 @@ export default function AdvisorConsult(p: Props) {
     setMaterial(null);
     let pause: { tokens: number; requests: unknown[]; items: string[] } | null = null;
     let savedTo: string | null = null;
+    let planned = "";
+    let answer = "";
+    const range = ask.useSelection && p.selection && p.selection.end > p.selection.start ? { start: p.selection.start, end: p.selection.end } : null;
+    setReviewed(null);
     try {
       await p.flush();
       // What it would read, and which chapters it would like read first.
@@ -247,14 +255,22 @@ export default function AdvisorConsult(p: Props) {
         for (const line of lines) {
           if (!line.trim()) continue;
           const e = JSON.parse(line) as AssistEvent;
-          if (e.type === "text") setText((t) => t + e.text);
-          else if (e.type === "reset") setText("");
+          if (e.type === "text") {
+            answer += e.text;
+            setText((t) => t + e.text);
+          } else if (e.type === "reset") {
+            answer = "";
+            setText("");
+          }
           else if (e.type === "reading")
             setRounds((r) => [...r, `${e.round ? `Ronda ${e.round}` : "Aprobado"}: ${e.items.join(" · ")}`]);
           else if (e.type === "material") setMaterial({ items: e.items, rounds: e.rounds });
           else if (e.type === "confirm") pause = e;
           else if (e.type === "context") setParts(e.parts);
-          else if (e.type === "plan") setPlan({ label: e.label, detail: e.detail, mode: e.mode });
+          else if (e.type === "plan") {
+            planned = e.action;
+            setPlan({ label: e.label, detail: e.detail, mode: e.mode });
+          }
           else if (e.type === "usage") setUsage(e);
           else if (e.type === "observations") {
             setCards(e.items);
@@ -281,6 +297,7 @@ export default function AdvisorConsult(p: Props) {
       setNotice("Lectura profunda detenida: no se leyó más material. Puedes preguntar sin lectura profunda.");
       return;
     }
+    if (planned === "revisar" && range && visible(answer).trim()) setReviewed({ notes: visible(answer).trim(), ...range });
     // Stored: it now belongs to the conversation's history, where its cards can be acted on.
     if (savedTo) {
       setStored(true);
@@ -442,6 +459,16 @@ export default function AdvisorConsult(p: Props) {
       
       ));
 
+  const reviewOffer = reviewed && !running && p.onSendReview && (
+    <p className="review-offer small" data-origin="revisar escena: llevar al Asistente">
+      <button type="button" className="link strong" onClick={() => p.onSendReview!(reviewed)}>
+        Aplicar con el Asistente
+      </button>{" "}
+      <span className="muted">
+        Abre «Revisar escena» en Editar sobre la misma escena, con esta revisión como los cambios que quieres (puedes editarlos). Verás la propuesta junto a tu texto antes de reemplazar nada.
+      </span>
+    </p>
+  );
   return (
     <div className={`consult${conversing ? " conversing" : ""}`}>
       <div className="conversation-bar">
@@ -598,10 +625,10 @@ export default function AdvisorConsult(p: Props) {
         </p>
       </div>
       )}
-      {!conversing && p.selection && (
+      {p.selection && (
         <label className="check small">
           <input type="checkbox" checked={useSelection} onChange={(e) => setUseSelection(e.target.checked)} />
-          <span>Sobre la selección (Analizar, Coherencia y Subir tensión)</span>
+          <span>Sobre la selección (la lee entera)</span>
         </label>
       )}
       {!conversing && (
@@ -689,6 +716,7 @@ export default function AdvisorConsult(p: Props) {
         </div>
       )}
       {conversing && liveResult}
+      {conversing && reviewOffer}
       <form
         className="ask"
         onSubmit={(e) => {
@@ -740,6 +768,7 @@ export default function AdvisorConsult(p: Props) {
       {!p.provider && <p className="error">No hay proveedor de IA configurado.</p>}
 
       {!conversing && liveResult}
+      {!conversing && reviewOffer}
       {last && !running && others.length > 0 && (
         <p className="retry-with muted small">
           Probar con{" "}
