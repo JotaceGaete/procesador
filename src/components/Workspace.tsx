@@ -14,10 +14,10 @@ import type {
   Novel,
   ProviderId,
 } from "@/lib/types";
-import { api, readPref, writePref } from "@/lib/client";
+import { api, ApiError, readPref, writePref } from "@/lib/client";
 import { chapterLabel } from "@/lib/ai/context";
 import type { SaveState } from "./useAutosave";
-import ChapterEditor, { type EditorHandle, type Selection } from "./ChapterEditor";
+import ChapterEditor, { type EditorHandle, type SaveActions, type Selection } from "./ChapterEditor";
 import VisualEditor from "./VisualEditor";
 import ChapterNav from "./ChapterNav";
 import { TrashModal, VersionsModal } from "./Versions";
@@ -31,6 +31,7 @@ import { addManuscriptImage, rejectReason, replaceImage } from "@/lib/upload";
 import { imageAt, imageIds } from "@/lib/manuscript";
 import { chapterHeading } from "@/lib/presentation";
 import { resolveAnchor, type InsertTarget } from "@/lib/placement";
+import { checkTarget, type ApplyAction } from "@/lib/chapter-lock";
 
 interface Loaded {
   novel: Novel;
@@ -49,7 +50,11 @@ const SAVE_LABELS: Record<SaveState, string> = {
   saving: "Guardando…",
   error: "No se pudo guardar · reintentando",
   conflict: "Cambió en otro lugar",
+  locked: "No se guardó: el capítulo está bloqueado",
 };
+
+/** What the author is told when something tries to change a locked chapter. */
+const LOCKED_NOTICE = "Este capítulo está revisado y bloqueado. Desbloquéalo (🔒) para modificarlo.";
 
 export default function Workspace({ novelId }: { novelId: string }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -86,10 +91,11 @@ export default function Workspace({ novelId }: { novelId: string }) {
 
   const [selection, setSelection] = useState<Selection | null>(null);
   const [stats, setStats] = useState({ words: 0, chars: 0 });
-  const [save, setSave] = useState<{ state: SaveState; retry(): void; overwrite(): void }>({
+  const [save, setSave] = useState<{ state: SaveState } & SaveActions>({
     state: "saved",
     retry() {},
     overwrite() {},
+    resume() {},
   });
 
   const [navOpen, setNavOpen] = useState(false);
@@ -116,6 +122,37 @@ export default function Workspace({ novelId }: { novelId: string }) {
     null,
   );
   const editorRef = useRef<EditorHandle>(null);
+  // Bloqueo de capítulos (docs/bloqueo-capitulos.md). The chapter list carries each chapter's
+  // lock; these refs are what the checks read at the moment of applying, never a stale render.
+  const locked = Boolean(chapter && chapters.find((c) => c.id === chapter.id)?.locked);
+  const chapterIdRef = useRef<string | null>(null);
+  chapterIdRef.current = chapter?.id ?? null;
+  const lockedRef = useRef(locked);
+  lockedRef.current = locked;
+  const chaptersRef = useRef(chapters);
+  chaptersRef.current = chapters;
+  /** Stops (throws) when a proposal of `chapterId` can't be applied now: another chapter is open, or it is locked. */
+  const assertTarget = useCallback((chapterId: string, action: ApplyAction) => {
+    const check = checkTarget({
+      proposalChapterId: chapterId,
+      openChapterId: chapterIdRef.current,
+      editorChapterId: editorRef.current?.getChapterId() ?? null,
+      locked: lockedRef.current,
+      action,
+      label(id) {
+        const list = chaptersRef.current;
+        const i = list.findIndex((c) => c.id === id);
+        return i === -1 ? null : chapterLabel(i, list[i].title);
+      },
+    });
+    if (!check.ok) throw new Error(check.message);
+  }, []);
+  /** Tells the author the chapter is locked when something tried to change it; true if it is. */
+  const refuseIfLocked = useCallback(() => {
+    if (!lockedRef.current) return false;
+    setNotice(LOCKED_NOTICE);
+    return true;
+  }, []);
 
   const openChapter = useCallback(async (id: string) => {
     const data = await api<Chapter>(`/api/chapters/${id}`);
@@ -123,6 +160,8 @@ export default function Workspace({ novelId }: { novelId: string }) {
     setActiveImage(null);
     setReading(null);
     setChapter(data);
+    // The lock as the server has it now (another tab or device may have changed it).
+    setChapters((list) => list.map((c) => (c.id === id && c.locked !== data.locked ? { ...c, locked: data.locked } : c)));
     writePref(`chapter:${data.novel_id}`, id);
   }, []);
 
@@ -267,8 +306,12 @@ export default function Workspace({ novelId }: { novelId: string }) {
   }, [save, focusMode, modal]);
 
   const onSaveState = useCallback(
-    (state: SaveState, actions: { retry(): void; overwrite(): void }) => {
+    (state: SaveState, actions: SaveActions) => {
       if (state === "pending" && currentId) edited.current.add(currentId);
+      // The server refused a save because the chapter is locked (in another tab or device):
+      // this tab shows it locked too, with the unsaved text still on screen.
+      if (state === "locked" && currentId)
+        setChapters((list) => list.map((c) => (c.id === currentId ? { ...c, locked: true } : c)));
       setSave({ state, ...actions });
     },
     [currentId],
@@ -312,30 +355,40 @@ export default function Workspace({ novelId }: { novelId: string }) {
    * Keeps the text as it is now as a version (docs/versiones.md) before something replaces it.
    * The text is taken right away, so what follows can change the editor at once.
    */
-  const keepVersion = useCallback(
-    (reason: "ai" | "restore") => {
-      const content = editorRef.current?.getContent();
-      if (!chapter || content === undefined) return Promise.resolve();
-      return api(`/api/chapters/${chapter.id}/versions`, { method: "POST", json: { reason, content } });
-    },
-    [chapter],
-  );
+  const keepVersion = useCallback((chapterId: string, reason: "ai" | "restore") => {
+    const content = editorRef.current?.getContent();
+    if (content === undefined) return Promise.resolve();
+    // The server refuses it (423) if the chapter is locked: then nothing is applied.
+    return api(`/api/chapters/${chapterId}/versions`, { method: "POST", json: { reason, content } });
+  }, []);
   /**
    * Applying a proposal of the Asistente (docs/asistente-contexto.md, «Comparar antes de
    * aplicar»): the current text is kept as a version first, and only then does the manuscript
    * change. If the copy can't be saved, nothing is applied (the panel keeps the proposal).
    */
-  const keepBeforeAI = useCallback(async () => {
-    try {
-      await keepVersion("ai");
-    } catch {
-      throw new Error("No se pudo guardar una copia del texto actual, así que no se ha aplicado nada. Vuelve a intentarlo.");
-    }
-  }, [keepVersion]);
+  const keepBeforeAI = useCallback(
+    async (chapterId: string) => {
+      try {
+        await keepVersion(chapterId, "ai");
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 423) {
+          setChapters((list) => list.map((c) => (c.id === chapterId ? { ...c, locked: true } : c)));
+          throw new Error(`${e.message} No se ha aplicado nada.`);
+        }
+        throw new Error("No se pudo guardar una copia del texto actual, así que no se ha aplicado nada. Vuelve a intentarlo.");
+      }
+    },
+    [keepVersion],
+  );
   /** Versiones → Restaurar: the current text becomes a version first; if that fails, nothing changes. */
   const restoreVersion = useCallback(
     async (text: string) => {
-      await keepVersion("restore");
+      const id = chapterIdRef.current;
+      if (!id || lockedRef.current) throw new Error(LOCKED_NOTICE);
+      await keepVersion(id, "restore");
+      // Still the same chapter, still unlocked, after the copy was saved.
+      if (chapterIdRef.current !== id || editorRef.current?.getChapterId() !== id || lockedRef.current)
+        throw new Error("El capítulo cambió mientras se guardaba la copia. No se ha restaurado nada.");
       setModal(null);
       setReading(null);
       editorRef.current?.replaceAll(text);
@@ -359,12 +412,20 @@ export default function Workspace({ novelId }: { novelId: string }) {
       return false;
     }
   };
+  /**
+   * Proposals of the Asistente belong to the chapter they were written for (docs/bloqueo-
+   * capitulos.md): the chapter open, the editor's chapter and the lock are checked right before
+   * the copy is kept, and again right after (the author may have switched chapter meanwhile).
+   * Never applied to another chapter, never to a locked one.
+   */
   const applyRewrite = useCallback(
-    async (original: Selection, text: string) => {
-      await keepBeforeAI();
+    async (chapterId: string, original: Selection, text: string) => {
+      assertTarget(chapterId, "replace");
+      await keepBeforeAI(chapterId);
+      assertTarget(chapterId, "replace");
       return afterApply(attempt(() => editorRef.current?.applyRewrite(original, text)), "Reemplazado en el manuscrito.");
     },
-    [afterApply, keepBeforeAI],
+    [afterApply, keepBeforeAI, assertTarget],
   );
   /**
    * A scene of the Asistente, where the panel says (docs/asistente-contexto.md §11): the
@@ -372,8 +433,10 @@ export default function Workspace({ novelId }: { novelId: string }) {
    * after the copy is saved. If that place is gone, nothing is inserted.
    */
   const insertScene = useCallback(
-    async (text: string, target: InsertTarget) => {
-      await keepBeforeAI();
+    async (chapterId: string, text: string, target: InsertTarget) => {
+      assertTarget(chapterId, "insert");
+      await keepBeforeAI(chapterId);
+      assertTarget(chapterId, "insert");
       if (target.kind === "end")
         return afterApply(attempt(() => editorRef.current?.insertAtEnd(text)), "Escena insertada al final del capítulo.");
       const at = resolveAnchor(editorRef.current?.getContent() ?? "", target.anchor);
@@ -381,7 +444,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
         throw new Error("El texto alrededor del lugar fijado cambió y ya no se encuentra. Fíjalo de nuevo o inserta al final.");
       return afterApply(attempt(() => editorRef.current?.insertAt(at, text)), "Escena insertada en el lugar fijado.");
     },
-    [afterApply, keepBeforeAI],
+    [afterApply, keepBeforeAI, assertTarget],
   );
   const clearSelection = useCallback(() => editorRef.current?.clearSelection(), []);
 
@@ -391,6 +454,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
    */
   const insertFiles = useCallback(
     async (files: File[]) => {
+      if (refuseIfLocked()) return;
       const ok = files.filter((f) => {
         const reason = rejectReason(f);
         if (reason) setNotice(`${f.name}: ${reason}`);
@@ -419,12 +483,16 @@ export default function Workspace({ novelId }: { novelId: string }) {
         }
       }
     },
-    [novelId, upsertImage],
+    [novelId, upsertImage, refuseIfLocked],
   );
 
   /** A file the novel already has (from a gallery): a new image of the book, same file, not copied. */
   const insertFromAsset = useCallback(
     async (assetId: string) => {
+      if (refuseIfLocked()) {
+        setModal(null);
+        return;
+      }
       try {
         const img = await api<ManuscriptImage>(`/api/novels/${novelId}/manuscript-images`, {
           method: "POST",
@@ -440,8 +508,39 @@ export default function Workspace({ novelId }: { novelId: string }) {
         setNotice((e as Error).message);
       }
     },
-    [novelId, upsertImage],
+    [novelId, upsertImage, refuseIfLocked],
   );
+
+  /**
+   * The discreet lock in the top bar. Locking saves first (what is locked is what is on the
+   * server); unlocking is always the author's explicit choice, confirmed, and then saves whatever
+   * a lock refused in this tab.
+   */
+  const [lockBusy, setLockBusy] = useState(false);
+  const toggleLock = useCallback(async () => {
+    const id = chapterIdRef.current;
+    if (!id || lockBusy) return;
+    const next = !lockedRef.current;
+    const i = chaptersRef.current.findIndex((c) => c.id === id);
+    const name = i === -1 ? "este capítulo" : `«${chapterLabel(i, chaptersRef.current[i].title)}»`;
+    if (next) {
+      if (editorRef.current && !(await editorRef.current.flush())) {
+        setNotice("No se pudo guardar el texto, así que no se ha bloqueado. Vuelve a intentarlo.");
+        return;
+      }
+    } else if (!confirm(`¿Desbloquear ${name} para volver a editarlo?`)) return;
+    setLockBusy(true);
+    try {
+      const res = await api<{ locked: boolean }>(`/api/chapters/${id}`, { method: "PATCH", json: { locked: next } });
+      setChapters((list) => list.map((c) => (c.id === id ? { ...c, locked: res.locked } : c)));
+      setNotice("");
+      if (!res.locked) save.resume();
+    } catch (e) {
+      setNotice((e as Error).message);
+    } finally {
+      setLockBusy(false);
+    }
+  }, [lockBusy, save]);
 
   const refreshManuscriptImages = useCallback(
     () => api<ManuscriptImage[]>(`/api/novels/${novelId}/manuscript-images`).then(setManuscriptImages).catch(() => {}),
@@ -549,6 +648,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
             </button>
             <span className="spacer" />
             <span className="meta words">{stats.words.toLocaleString("es")} palabras</span>
+            <LockToggle locked={locked} busy={lockBusy} onToggle={() => void toggleLock()} />
             <SaveStatus state={save.state} onRetry={save.retry} onOverwrite={save.overwrite} />
             {/* Formato (docs/formato-texto.md). The text keeps the focus, and with it the selection. */}
             <span className="format-actions">
@@ -556,7 +656,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
                 className="link format"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => editorRef.current?.toggleItalic()}
-                disabled={reading !== null}
+                disabled={reading !== null || locked}
                 title="Cursiva (Ctrl/⌘+I): *así*"
                 aria-label="Cursiva"
               >
@@ -566,7 +666,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
                 className="link format"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => editorRef.current?.insertSeparator()}
-                disabled={reading !== null}
+                disabled={reading !== null || locked}
                 title="Separador de escena"
                 aria-label="Separador de escena"
               >
@@ -625,6 +725,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
             ref={editorRef}
             chapterId={chapter.id}
             initial={{ content: chapter.content, revision: chapter.revision }}
+            locked={locked}
             focusMode={focusMode}
             onSelection={setSelection}
             onStats={setStats}
@@ -642,12 +743,14 @@ export default function Workspace({ novelId }: { novelId: string }) {
             ref={editorRef}
             chapterId={chapter.id}
             initial={{ content: chapter.content, revision: chapter.revision }}
+            locked={locked}
             focusMode={focusMode}
             onSelection={setSelection}
             onStats={setStats}
             onSaveState={onSaveState}
             onCaret={onCaret}
             onImageFiles={insertFiles}
+            onLockedEdit={refuseIfLocked}
             hidden={reading !== null}
           />
         )}
@@ -706,20 +809,24 @@ export default function Workspace({ novelId }: { novelId: string }) {
               ];
             })()}
             onPatch={async (fields) => {
+              if (lockedRef.current) throw new Error(LOCKED_NOTICE);
               upsertImage(await api<ManuscriptImage>(`/api/manuscript-images/${activeImage}`, { method: "PATCH", json: fields }));
             }}
             onReplace={async (scope, file) => {
+              if (lockedRef.current) throw new Error(LOCKED_NOTICE);
               const r = await replaceImage({ novelId, target: "manuscript", imageId: activeImage, scope, file, onProgress: () => {} });
               setAll(r);
               return r.notice;
             }}
             onDuplicate={async () => {
+              if (lockedRef.current) throw new Error(LOCKED_NOTICE);
               const copy = await api<ManuscriptImage>(`/api/manuscript-images/${activeImage}/duplicate`, { method: "POST" });
               upsertImage(copy);
               editorRef.current?.insertImageAfter(activeImage, copy.id);
             }}
-            onRemove={() => editorRef.current?.removeImage(activeImage)}
+            onRemove={() => !refuseIfLocked() && editorRef.current?.removeImage(activeImage)}
             onDelete={async () => {
+              if (lockedRef.current) throw new Error(LOCKED_NOTICE);
               await api(`/api/manuscript-images/${activeImage}`, { method: "DELETE" });
               const id = activeImage;
               editorRef.current?.removeImage(id);
@@ -743,6 +850,8 @@ export default function Workspace({ novelId }: { novelId: string }) {
         onClose={() => toggle("panelOpen", setPanelOpen)}
         novelId={novel.id}
         chapterId={chapter.id}
+        locked={locked}
+        onOpenChapter={(id) => void switchChapter(id)}
         memory={memory}
         providers={loaded.providers}
         defaultProvider={loaded.defaultProvider}
@@ -781,6 +890,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
           }}
           onInsertExisting={(id) => {
             setModal(null);
+            if (refuseIfLocked()) return;
             setReading(null);
             editorRef.current?.insertImages([id]);
             showCard(id);
@@ -863,6 +973,24 @@ export default function Workspace({ novelId }: { novelId: string }) {
         />
       )}
     </div>
+  );
+}
+
+/** The chapter's lock in the top bar: open (🔓) while it is being edited, closed (🔒) once revisado. */
+function LockToggle({ locked, busy, onToggle }: { locked: boolean; busy: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      className={`link lock-toggle${locked ? " on" : ""}`}
+      onClick={onToggle}
+      disabled={busy}
+      aria-pressed={locked}
+      aria-label={locked ? "Capítulo revisado y bloqueado. Desbloquear" : "Marcar como revisado y bloquear"}
+      title={locked ? "Revisado y bloqueado: se puede leer, seleccionar y consultar, pero no modificar. Pulsa para desbloquear." : "Marcar como revisado y bloquear"}
+    >
+      <span aria-hidden="true">{locked ? "🔒" : "🔓"}</span>
+      {locked && <span className="lock-label"> Revisado</span>}
+    </button>
   );
 }
 

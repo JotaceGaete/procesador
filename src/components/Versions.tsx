@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { VERSION_REASONS, type ChapterVersion, type TrashEntry } from "@/lib/types";
+import { VERSION_REASONS, type ChapterInfo, type ChapterVersion, type TrashEntry } from "@/lib/types";
 import { api } from "@/lib/client";
 import { diffStats, diffText } from "@/lib/diff";
 import { chapterLabel } from "@/lib/ai/context";
@@ -167,7 +167,7 @@ export function TrashModal({
   onClose,
 }: {
   novelId: string;
-  onRestored(id: string, chapters: { id: string; title: string; position: number; chars: number; words: number }[]): void;
+  onRestored(id: string, chapters: ChapterInfo[]): void;
   onClose(): void;
 }) {
   const [list, setList] = useState<TrashEntry[] | null>(null);

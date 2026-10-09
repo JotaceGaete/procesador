@@ -14,6 +14,8 @@ export interface Selection {
 }
 
 export interface EditorHandle {
+  /** The chapter this editor writes to: checked right before anything is applied (docs/bloqueo-capitulos.md). */
+  getChapterId(): string;
   getContent(): string;
   getCursor(): number;
   /** Replaces the original fragment with the proposal (undoable with Ctrl/⌘+Z). */
@@ -51,13 +53,27 @@ export interface EditorHandle {
   flush(): Promise<boolean>;
 }
 
+export interface SaveActions {
+  retry(): void;
+  overwrite(): void;
+  /** After unlocking: saves what a lock refused. */
+  resume(): void;
+}
+
 interface Props {
   chapterId: string;
   initial: { content: string; revision: number };
+  /**
+   * Revisado y bloqueado (docs/bloqueo-capitulos.md): the text can be read, selected and copied,
+   * and nothing changes it (typing, pasting, the Asistente, images, format, undo).
+   */
+  locked: boolean;
+  /** Something tried to change the text while it is locked (typing on it, for instance). */
+  onLockedEdit?(): void;
   focusMode: boolean;
   onSelection(sel: Selection | null): void;
   onStats(stats: { words: number; chars: number }): void;
-  onSaveState(state: SaveState, actions: { retry(): void; overwrite(): void }): void;
+  onSaveState(state: SaveState, actions: SaveActions): void;
   /** Cursor position after every move or edit, with the current text. */
   onCaret?(position: number, text: string): void;
   /** Image files pasted or dropped on the text. */
@@ -70,17 +86,19 @@ const SAVE_POSITION_MS = 600;
 
 /** One chapter's text. Remounted for each chapter (key = chapter id). */
 const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(props, ref) {
-  const { chapterId, initial, focusMode, onSelection, onStats, onSaveState, onCaret, onImageFiles, hidden } = props;
+  const { chapterId, initial, locked, onLockedEdit, focusMode, onSelection, onStats, onSaveState, onCaret, onImageFiles, hidden } = props;
   const [content, setContent] = useState(initial.content);
+  const lockedRef = useRef(locked);
+  lockedRef.current = locked;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef(content);
   const cursorRef = useRef(0);
   contentRef.current = content;
 
   const autosave = useAutosave(`/api/chapters/${chapterId}`, content, initial);
-  const { state, save, overwrite, flush } = autosave;
+  const { state, save, overwrite, flush, resume } = autosave;
 
-  useEffect(() => onSaveState(state, { retry: save, overwrite }), [state, save, overwrite, onSaveState]);
+  useEffect(() => onSaveState(state, { retry: save, overwrite, resume }), [state, save, overwrite, resume, onSaveState]);
 
   // Counting words in a long chapter on every keystroke is noticeable: do it once typing pauses.
   const firstCount = useRef(true);
@@ -209,7 +227,7 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
   /** Cursiva on the current selection (or at the cursor): one undoable edit, the result selected. */
   const italic = useCallback(() => {
     const el = textareaRef.current;
-    if (!el) return;
+    if (!el || lockedRef.current) return;
     const edit = toggleItalic(contentRef.current, el.selectionStart, el.selectionEnd);
     el.focus();
     el.setSelectionRange(edit.start, edit.end);
@@ -253,10 +271,12 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
   useImperativeHandle(
     ref,
     () => ({
+      getChapterId: () => chapterId,
       getContent: () => contentRef.current,
       getCursor: () => cursorRef.current,
       flush,
       applyRewrite(original, rewrite) {
+        if (lockedRef.current) return false;
         const current = contentRef.current;
         let start = original.start;
         if (current.slice(start, original.end) !== original.text) {
@@ -272,24 +292,24 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
         return true;
       },
       insertAtCursor(text) {
-        if (!textareaRef.current) return false;
+        if (!textareaRef.current || lockedRef.current) return false;
         insertParagraphs(text, cursorRef.current, "end");
         return true;
       },
       insertAt(position, text) {
-        if (!textareaRef.current) return false;
+        if (!textareaRef.current || lockedRef.current) return false;
         insertParagraphs(text, position, "end");
         return true;
       },
       insertAtEnd(text) {
-        if (!textareaRef.current) return false;
+        if (!textareaRef.current || lockedRef.current) return false;
         const place = placeAtEnd(contentRef.current, text);
         replaceRange(place.start, place.end, place.text, "end");
         return true;
       },
       undo() {
         const el = textareaRef.current;
-        if (!el) return;
+        if (!el || lockedRef.current) return;
         el.focus();
         document.execCommand("undo");
         updateSelection();
@@ -297,7 +317,7 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
       toggleItalic: italic,
       replaceAll(text) {
         const el = textareaRef.current;
-        if (!el) return;
+        if (!el || lockedRef.current) return;
         replaceRange(0, contentRef.current.length, text, "end");
         requestAnimationFrame(() => {
           el.setSelectionRange(0, 0);
@@ -306,21 +326,23 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
         });
       },
       insertSeparator() {
+        if (lockedRef.current) return;
         insertParagraphs(SEPARATOR, textareaRef.current?.selectionEnd ?? cursorRef.current, "end");
       },
       insertImages(ids) {
-        if (!ids.length) return;
+        if (!ids.length || lockedRef.current) return;
         // The textarea keeps its selection while something else has the focus (a panel, a button).
         insertParagraphs(ids.map(marker).join("\n\n"), textareaRef.current?.selectionEnd ?? cursorRef.current);
       },
       insertImageAfter(existingId, id) {
+        if (lockedRef.current) return;
         const block = imageBlock(existingId);
         if (block) replaceRange(block.end, block.end, `\n\n${marker(id)}`);
         else insertParagraphs(marker(id), cursorRef.current);
       },
       removeImage(id) {
         const block = imageBlock(id);
-        if (!block) return;
+        if (!block || lockedRef.current) return;
         const text = contentRef.current;
         // Take the line and one of the blank lines around it, so paragraphs stay tidy.
         let start = block.start;
@@ -375,7 +397,7 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
         updateSelection();
       },
     }),
-    [flush, replaceRange, updateSelection, insertParagraphs, italic],
+    [chapterId, flush, replaceRange, updateSelection, insertParagraphs, italic],
   );
 
   return (
@@ -384,14 +406,21 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
       className={`editor${focusMode ? " focused" : ""}`}
       value={content}
       onChange={(e) => {
+        if (lockedRef.current) return;
         setContent(e.target.value);
         updateSelection();
       }}
+      readOnly={locked}
+      data-locked={locked || undefined}
       onSelect={updateSelection}
       onMouseUp={updateSelection}
       onKeyUp={updateSelection}
       onBlur={savePosition}
       onKeyDown={(e) => {
+        if (locked && !e.ctrlKey && !e.metaKey && (e.key.length === 1 || ["Backspace", "Delete", "Enter"].includes(e.key))) {
+          onLockedEdit?.();
+          return;
+        }
         if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "i") {
           e.preventDefault();
           italic();
@@ -399,6 +428,11 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
       }}
       hidden={hidden}
       onPaste={(e) => {
+        if (locked) {
+          e.preventDefault();
+          onLockedEdit?.();
+          return;
+        }
         const files = imageFiles(e.clipboardData?.files);
         if (!files.length || !onImageFiles) return;
         e.preventDefault();
@@ -408,6 +442,10 @@ const ChapterEditor = forwardRef<EditorHandle, Props>(function ChapterEditor(pro
         if (onImageFiles && [...e.dataTransfer.types].includes("Files")) e.preventDefault();
       }}
       onDrop={(e) => {
+        if (locked) {
+          e.preventDefault();
+          return;
+        }
         const files = imageFiles(e.dataTransfer?.files);
         if (!files.length || !onImageFiles) return;
         e.preventDefault();

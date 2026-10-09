@@ -10,6 +10,7 @@ import {
 } from "./assets-server";
 import type { CharacterImage, ManuscriptImage } from "./types";
 import { imageIds, marker } from "./manuscript";
+import { assertImageChapterUnlocked } from "./chapter-lock-server";
 
 /**
  * Uses of a file (docs/archivos.md): a character's gallery and the manuscript.
@@ -173,6 +174,7 @@ async function replaceFile(use: Extract<Use, { kind: "replace" }>, assetId: stri
   const { data: image, error } = await db().from(table).select("novel_id").eq("id", use.id).maybeSingle();
   if (error) throw error;
   if (!image) throw new HttpError(404, "Imagen no encontrada");
+  if (use.target === "manuscript") await assertImageChapterUnlocked(use.id);
   const { data: previous, error: rpcError } = await db().rpc("replace_asset_uses", {
     p_kind: use.target,
     p_use: use.id,

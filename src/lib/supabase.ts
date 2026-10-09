@@ -45,7 +45,7 @@ export async function getOutline(novelId: string): Promise<ChapterInfo[]> {
 export async function getChapter(id: string): Promise<Chapter> {
   const { data, error } = await db()
     .from("chapters")
-    .select("id, novel_id, title, content, revision")
+    .select("id, novel_id, title, content, revision, locked")
     .eq("id", assertId(id, "Capítulo"))
     .maybeSingle();
   if (error) throw error;

@@ -28,15 +28,17 @@ import { fragmentFromText, layout, offsetToPos, posToOffset, schema, toContent, 
 import type { ManuscriptImage } from "@/lib/types";
 import { useAutosave, type SaveState } from "./useAutosave";
 import { pendingLabel, type Pending } from "./ManuscriptImages";
-import type { EditorHandle, Selection } from "./ChapterEditor";
+import type { EditorHandle, SaveActions, Selection } from "./ChapterEditor";
 
 interface Props {
   chapterId: string;
   initial: { content: string; revision: number };
+  /** Revisado y bloqueado (docs/bloqueo-capitulos.md): readable and selectable, never changed. */
+  locked: boolean;
   focusMode: boolean;
   onSelection(sel: Selection | null): void;
   onStats(stats: { words: number; chars: number }): void;
-  onSaveState(state: SaveState, actions: { retry(): void; overwrite(): void }): void;
+  onSaveState(state: SaveState, actions: SaveActions): void;
   onCaret?(position: number, text: string): void;
   onImageFiles?(files: File[]): void;
   hidden?: boolean;
@@ -127,6 +129,14 @@ class ImageView implements NodeView {
   }
 }
 
+/**
+ * A locked chapter (docs/bloqueo-capitulos.md) refuses every change of its document, whatever
+ * sends it: typing, pasting, dropping, undo, or a method of the handle. Selections still pass.
+ */
+function lockGuard(isLocked: () => boolean) {
+  return new Plugin({ filterTransaction: (tr) => !tr.docChanged || !isLocked() });
+}
+
 /** The empty chapter's invitation to write. */
 const placeholder = new Plugin({
   props: {
@@ -161,8 +171,10 @@ function withParagraphs(content: string, position: number, text: string) {
 }
 
 const VisualEditor = forwardRef<EditorHandle, Props>(function VisualEditor(props, ref) {
-  const { chapterId, initial, focusMode, onSelection, onStats, onSaveState, onCaret, onImageFiles, hidden, heading, images, pending } = props;
+  const { chapterId, initial, locked, focusMode, onSelection, onStats, onSaveState, onCaret, onImageFiles, hidden, heading, images, pending } = props;
   const [content, setContent] = useState(initial.content);
+  const lockedRef = useRef(locked);
+  lockedRef.current = locked;
   const scrollRef = useRef<HTMLDivElement>(null);
   const mountRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -171,8 +183,8 @@ const VisualEditor = forwardRef<EditorHandle, Props>(function VisualEditor(props
   callbacks.current = { onSelection, onCaret, onImageFiles };
 
   const autosave = useAutosave(`/api/chapters/${chapterId}`, content, initial);
-  const { state, save, overwrite, flush: flushSave } = autosave;
-  useEffect(() => onSaveState(state, { retry: save, overwrite }), [state, save, overwrite, onSaveState]);
+  const { state, save, overwrite, flush: flushSave, resume } = autosave;
+  useEffect(() => onSaveState(state, { retry: save, overwrite, resume }), [state, save, overwrite, resume, onSaveState]);
 
   const firstCount = useRef(true);
   useEffect(() => {
@@ -251,8 +263,10 @@ const VisualEditor = forwardRef<EditorHandle, Props>(function VisualEditor(props
           keymap(baseKeymap),
           gapCursor(),
           placeholder,
+          lockGuard(() => lockedRef.current),
         ],
       }),
+      editable: () => !lockedRef.current,
       nodeViews: { image: (node) => new ImageView(node, store) },
       attributes: { class: "visual-text", spellcheck: "true", "aria-label": "Texto del capítulo", "aria-multiline": "true", role: "textbox" },
       // Typing with an image or a scene break selected never replaces it (as in the plain editor,
@@ -281,12 +295,14 @@ const VisualEditor = forwardRef<EditorHandle, Props>(function VisualEditor(props
       },
       clipboardTextSerializer: proseOf,
       handlePaste: (_v, e) => {
+        if (lockedRef.current) return true;
         const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/"));
         if (!files.length || !callbacks.current.onImageFiles) return false;
         callbacks.current.onImageFiles(files);
         return true;
       },
       handleDrop: (_v, e) => {
+        if (lockedRef.current) return true;
         const files = [...((e as DragEvent).dataTransfer?.files ?? [])].filter((f) => f.type.startsWith("image/"));
         if (!files.length || !callbacks.current.onImageFiles) return false;
         callbacks.current.onImageFiles(files);
@@ -317,6 +333,11 @@ const VisualEditor = forwardRef<EditorHandle, Props>(function VisualEditor(props
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one view per chapter (remounted by key)
   }, []);
+
+  // Locking or unlocking: the view asks `editable` again (contenteditable on or off).
+  useEffect(() => {
+    viewRef.current?.setProps({});
+  }, [locked]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -352,7 +373,7 @@ const VisualEditor = forwardRef<EditorHandle, Props>(function VisualEditor(props
   const applyContent = useCallback(
     (next: string, select: [number, number]) => {
       const view = viewRef.current;
-      if (!view) return false;
+      if (!view || lockedRef.current) return false;
       const target = toDoc(next);
       const current = view.state.doc;
       let tr = view.state.tr;
@@ -391,7 +412,7 @@ const VisualEditor = forwardRef<EditorHandle, Props>(function VisualEditor(props
   /** Inserts blocks at the selection; the cursor goes after them (a new paragraph if none follows). */
   const insertBlocks = useCallback((nodes: PMNode[], selectFirst: boolean) => {
     const view = viewRef.current;
-    if (!view || !nodes.length) return;
+    if (!view || !nodes.length || lockedRef.current) return;
     const tr = view.state.tr.replaceSelection(new Slice(Fragment.from(nodes), 0, 0));
     const after = tr.selection.$to;
     if (selectFirst) {
@@ -414,6 +435,7 @@ const VisualEditor = forwardRef<EditorHandle, Props>(function VisualEditor(props
   useImperativeHandle(
     ref,
     () => ({
+      getChapterId: () => chapterId,
       getContent,
       getCursor: () => (viewRef.current ? posToOffset(doc(), viewRef.current.state.selection.head) : 0),
       async flush() {
@@ -423,6 +445,7 @@ const VisualEditor = forwardRef<EditorHandle, Props>(function VisualEditor(props
         return flushSave();
       },
       applyRewrite(original, rewrite) {
+        if (lockedRef.current) return false;
         const current = getContent();
         let start = original.start;
         if (current.slice(start, original.end) !== original.text) {
@@ -438,7 +461,7 @@ const VisualEditor = forwardRef<EditorHandle, Props>(function VisualEditor(props
         return applyContent(current.slice(0, start) + rewrite + current.slice(end), [at, at]);
       },
       insertAtCursor(text) {
-        if (!viewRef.current) return false;
+        if (!viewRef.current || lockedRef.current) return false;
         const r = withParagraphs(getContent(), posToOffset(doc(), viewRef.current.state.selection.head), text);
         return applyContent(r.text, [r.end, r.end]);
       },
@@ -454,7 +477,7 @@ const VisualEditor = forwardRef<EditorHandle, Props>(function VisualEditor(props
       },
       undo() {
         const view = viewRef.current;
-        if (!view) return;
+        if (!view || lockedRef.current) return;
         undo(view.state, view.dispatch);
         view.focus();
       },
@@ -472,7 +495,7 @@ const VisualEditor = forwardRef<EditorHandle, Props>(function VisualEditor(props
       insertImageAfter(existingId, id) {
         const view = viewRef.current;
         const at = findImage(existingId);
-        if (!view) return;
+        if (!view || lockedRef.current) return;
         if (!at) return insertBlocks([schema.nodes.image.create({ id })], true);
         const pos = at.pos + at.node.nodeSize;
         const tr = view.state.tr.insert(pos, schema.nodes.image.create({ id }));
@@ -481,12 +504,12 @@ const VisualEditor = forwardRef<EditorHandle, Props>(function VisualEditor(props
       removeImage(id) {
         const view = viewRef.current;
         const at = findImage(id);
-        if (!view || !at) return;
+        if (!view || !at || lockedRef.current) return;
         view.dispatch(view.state.tr.delete(at.pos, at.pos + at.node.nodeSize));
       },
       toggleItalic() {
         const view = viewRef.current;
-        if (!view) return;
+        if (!view || lockedRef.current) return;
         toggleMark(schema.marks.italic)(view.state, view.dispatch);
         view.focus();
       },
@@ -527,11 +550,11 @@ const VisualEditor = forwardRef<EditorHandle, Props>(function VisualEditor(props
         return true;
       },
     }),
-    [getContent, flushSave, applyContent, insertBlocks, selectOffsets],
+    [chapterId, getContent, flushSave, applyContent, insertBlocks, selectOffsets],
   );
 
   return (
-    <div ref={scrollRef} className={`reading visual-editor${focusMode ? " focused" : ""}`} hidden={hidden} data-editor="visual">
+    <div ref={scrollRef} className={`reading visual-editor${focusMode ? " focused" : ""}`} hidden={hidden} data-editor="visual" data-locked={locked || undefined}>
       {heading && (
         <header className="reading-chapter" contentEditable={false}>
           <div className="reading-number">{heading.number}</div>

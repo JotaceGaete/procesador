@@ -20,6 +20,8 @@ with expected(kind, object) as (
     ('columna', 'novels.plot'),
     -- Crítico Literario (docs/critico.md)
     ('tabla', 'chapter_critiques'),
+    -- Bloqueo de capítulos (docs/bloqueo-capitulos.md)
+    ('columna', 'chapters.locked'), ('columna', 'chapters.locked_at'), ('función', 'chapter_guard_locked'),
     ('columna', 'novels.auto_digest'), ('columna', 'assets.orientation'), ('columna', 'chapters.revision'),
     ('columna', 'facts.status'), ('columna', 'chapter_digests.text_sketch'), ('columna', 'advisor_observations.position'),
     ('función', 'duplicate_novel'), ('función', 'sync_chapter_images'), ('función', 'replace_asset_uses'),
@@ -52,6 +54,21 @@ union all
 select 'restricción', 'ai_usage.purpose', 'sin el propósito critic'
 where to_regclass('public.ai_usage') is not null
   and not exists (select 1 from pg_constraint where conname = 'ai_usage_purpose_check' and pg_get_constraintdef(oid) like '%critic%')
+union all
+-- El candado de los capítulos lo hace cumplir la base.
+select 'trigger', 'chapters_guard_locked', 'falta'
+where to_regclass('public.chapters') is not null
+  and not exists (select 1 from pg_trigger where tgname = 'chapters_guard_locked')
+union all
+-- La papelera no acepta un capítulo bloqueado.
+select 'función', 'trash_chapter', 'versión anterior al bloqueo de capítulos'
+where exists (select 1 from pg_proc where proname = 'trash_chapter')
+  and not exists (select 1 from pg_proc where proname = 'trash_chapter' and prosrc like '%locked%')
+union all
+-- El índice de capítulos muestra el candado.
+select 'función', 'novel_outline', 'versión anterior al bloqueo de capítulos'
+where exists (select 1 from pg_proc where proname = 'novel_outline')
+  and not exists (select 1 from pg_proc where proname = 'novel_outline' and prosrc like '%locked%')
 union all
 -- La copia automática de versiones mientras se escribe.
 select 'trigger', 'chapters_version', 'falta'

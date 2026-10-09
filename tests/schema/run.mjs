@@ -20,11 +20,13 @@ const SCHEMA = read("supabase/schema.sql");
 const MIGRATION = read("supabase/actualizar-consejero.sql");
 const PLOT_MIGRATION = read("supabase/actualizar-argumento.sql");
 const CRITIC_MIGRATION = read("supabase/actualizar-critico.sql");
+const LOCK_MIGRATION = read("supabase/actualizar-bloqueo.sql");
 const VERIFY = read("supabase/verificar.sql");
 const OLD = {
   "2b": read("tests/schema/fixtures/schema-2b.sql"),
   fase1: read("tests/schema/fixtures/schema-fase1.sql"),
   fase4: read("tests/schema/fixtures/schema-fase4.sql"),
+  critico: read("tests/schema/fixtures/schema-critico.sql"),
 };
 const TABLES = [
   "novels", "chapters", "characters", "relationships", "places", "facts", "fact_characters", "assets",
@@ -34,7 +36,7 @@ const TABLES = [
 ];
 /** What only schema.sql brings (versions and trash), not actualizar-consejero.sql. */
 const AFTER_CONSEJERO =
-  /chapter_versions|save_chapter_version|trash_chapter|chapter_trash|restore_chapter|chapter_version_auto|chapters_version|time_marks|novels\.calendar|dismissed_warnings|age_anchor|age_approx|characters\.death|anterior a la cronología|novels\.book|anterior a la exportación|novels\.plot|chapter_critiques|ai_usage\.purpose/;
+  /chapter_versions|save_chapter_version|trash_chapter|chapter_trash|restore_chapter|chapter_version_auto|chapters_version|time_marks|novels\.calendar|dismissed_warnings|age_anchor|age_approx|characters\.death|anterior a la cronología|novels\.book|anterior a la exportación|novels\.plot|chapter_critiques|ai_usage\.purpose|chapters\.locked|chapter_guard_locked|chapters_guard_locked|anterior al bloqueo/;
 
 let bin, dir, port;
 
@@ -468,4 +470,128 @@ test("crítico literario: actualizar-critico.sql adds chapter_critiques and the 
     assertComplete(db);
     assertDataKept(db, fp);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Bloqueo de capítulos (docs/bloqueo-capitulos.md)
+// ---------------------------------------------------------------------------
+
+const CH1 = "22222222-2222-4222-8222-222222222221";
+const CH2 = "22222222-2222-4222-8222-222222222222";
+const NOVEL = "11111111-1111-4111-8111-111111111111";
+
+test("bloqueo: actualizar-bloqueo.sql over the production base (Crítico), twice, both ways, keeps every text and leaves every chapter unlocked", () => {
+  for (const mode of ["editor", "psql"]) {
+    const db = newDb();
+    must(db, OLD.critico, "psql");
+    must(db, DATA, "psql");
+    assert.equal(must(db, "select count(*) from information_schema.columns where table_name = 'chapters' and column_name = 'locked'"), "0", "the base before");
+    const fp = fingerprint(db);
+    const texts = must(db, "select string_agg(id || ':' || revision || ':' || content, '|' order by id) from chapters");
+    must(db, LOCK_MIGRATION, mode);
+    must(db, LOCK_MIGRATION, mode);
+    assertComplete(db);
+    assertDataKept(db, fp);
+    assert.equal(must(db, "select string_agg(id || ':' || revision || ':' || content, '|' order by id) from chapters"), texts, "same texts, same revisions");
+    assert.equal(must(db, "select count(*) from chapters where locked or locked_at is not null"), "0", "existing chapters stay unlocked");
+    assert.equal(must(db, `select string_agg(locked::text, ',') from public.novel_outline('${NOVEL}')`), "false,false");
+    // schema.sql over it is still a no-op for its data.
+    must(db, SCHEMA);
+    assertComplete(db);
+    assertDataKept(db, fp);
+  }
+});
+
+test("bloqueo: schema.sql completo over the production base adds the lock without touching texts", () => {
+  const db = newDb();
+  must(db, OLD.critico, "psql");
+  must(db, DATA, "psql");
+  const fp = fingerprint(db);
+  must(db, SCHEMA);
+  must(db, SCHEMA, "psql");
+  assertComplete(db);
+  assertDataKept(db, fp);
+  assert.equal(must(db, "select count(*) from chapters where locked"), "0");
+});
+
+test("bloqueo: the database refuses any change of a locked chapter's text or title, wherever it comes from", () => {
+  const db = newDb();
+  must(db, SCHEMA);
+  must(db, DATA, "psql");
+  const before = must(db, `select title || '|' || content || '|' || revision from chapters where id = '${CH1}'`);
+  const versions = must(db, `select count(*) from chapter_versions where chapter_id = '${CH1}'`);
+  must(db, `update chapters set locked = true, locked_at = now() where id = '${CH1}'`);
+  assert.equal(must(db, `select title || '|' || content || '|' || revision from chapters where id = '${CH1}'`), before, "locking changes nothing else (not even the revision)");
+
+  for (const sql of [
+    `update chapters set content = 'Otro texto' where id = '${CH1}'`,
+    `update chapters set content = content || ' más' where id = '${CH1}'`,
+    `update chapters set content = '' where id = '${CH1}'`,
+    `update chapters set title = 'Otro título' where id = '${CH1}'`,
+    // Unlocking and writing at once: never.
+    `update chapters set locked = false, content = 'Colado al desbloquear' where id = '${CH1}'`,
+    // A bulk update (an old or stray statement) can't touch it either.
+    `update chapters set content = 'Todo igual' where novel_id = '${NOVEL}'`,
+  ]) {
+    const r = run(db, sql);
+    assert.ok(!r.ok, `refused: ${sql}`);
+    assert.match(r.error, /bloqueado/);
+  }
+  assert.equal(must(db, `select title || '|' || content || '|' || revision from chapters where id = '${CH1}'`), before, "intact");
+  assert.equal(must(db, `select content from chapters where id = '${CH2}'`), "Texto del dos.", "the bulk update changed nothing at all (one statement)");
+  assert.equal(must(db, `select count(*) from chapter_versions where chapter_id = '${CH1}'`), versions, "no version from a refused change");
+
+  // The error code the server turns into 423.
+  assert.equal(run(db, `do $$ begin update public.chapters set content = 'x' where id = '${CH1}'; exception when sqlstate 'P0423' then null; end $$;`).ok, true, "SQLSTATE P0423");
+
+  // What doesn't change the text is allowed: its place in the novel, an identical write.
+  must(db, `update chapters set position = 5 where id = '${CH1}'`);
+  must(db, `update chapters set content = content, title = title where id = '${CH1}'`);
+  // Other chapters are still editable.
+  must(db, `update chapters set content = 'Texto del dos, editado.' where id = '${CH2}'`);
+
+  // Unlocking is its own statement; then it is editable again.
+  must(db, `update chapters set locked = false, locked_at = null where id = '${CH1}'`);
+  must(db, `update chapters set content = 'Ya editable.' where id = '${CH1}'`);
+  assert.equal(must(db, `select content from chapters where id = '${CH1}'`), "Ya editable.");
+});
+
+test("bloqueo: a locked chapter can't go to the trash, but the novel can still be duplicated and deleted", () => {
+  const db = newDb();
+  must(db, SCHEMA);
+  must(db, DATA, "psql");
+  must(db, `update chapters set locked = true where id = '${CH1}'`);
+  const r = run(db, `select public.trash_chapter('${CH1}')`);
+  assert.ok(!r.ok);
+  assert.match(r.error, /bloqueado/);
+  assert.equal(must(db, `select count(*) from chapters where id = '${CH1}'`), "1");
+  assert.equal(must(db, "select count(*) from chapter_versions where reason = 'delete'"), "0", "nothing kept for a refused delete");
+  must(db, `select public.trash_chapter('${CH2}')`); // an unlocked one still goes
+
+  // Duplicating rewrites image markers in the copy: the lock is not copied, so nothing blocks it.
+  must(db, `update chapters set locked = false where id = '${CH1}'`);
+  const img = must(db, "select id from manuscript_images limit 1");
+  must(db, `update chapters set content = 'Antes [[imagen:${img}]] después' where id = '${CH1}'`);
+  must(db, `update chapters set locked = true where id = '${CH1}'`);
+  const copy = JSON.parse(must(db, `select public.duplicate_novel('${NOVEL}', 'Copia')`)).id;
+  assert.ok(copy);
+  assert.equal(must(db, `select count(*) from chapters where novel_id = '${copy}' and locked`), "0", "the copy starts unlocked");
+  assert.doesNotMatch(must(db, `select content from chapters where novel_id = '${copy}'`), new RegExp(img), "its own image");
+  assert.equal(must(db, `select content from chapters where id = '${CH1}'`), `Antes [[imagen:${img}]] después`, "the original, intact");
+
+  // Deleting the whole novel (an explicit, confirmed action) is not blocked by its locks.
+  must(db, `delete from novels where id = '${NOVEL}'`);
+  assert.equal(must(db, `select count(*) from chapters where novel_id = '${NOVEL}'`), "0");
+});
+
+test("bloqueo: concurrent sessions: a save that lost the race against the lock is refused", () => {
+  const db = newDb();
+  must(db, SCHEMA);
+  must(db, DATA, "psql");
+  // The server's own save: only if unlocked and at the revision the tab saw.
+  const rev = must(db, `select revision from chapters where id = '${CH1}'`);
+  must(db, `update chapters set locked = true where id = '${CH1}'`);
+  const out = must(db, `update chapters set content = 'Guardado tardío' where id = '${CH1}' and locked = false and revision = ${rev} returning id`);
+  assert.equal(out, "", "no row");
+  assert.notEqual(must(db, `select content from chapters where id = '${CH1}'`), "Guardado tardío");
 });

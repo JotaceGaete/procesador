@@ -54,6 +54,10 @@ interface Props {
   onClose(): void;
   novelId: string;
   chapterId: string;
+  /** The open chapter is revisado y bloqueado (docs/bloqueo-capitulos.md): proposals wait, nothing is applied. */
+  locked: boolean;
+  /** Goes back to another chapter (the one a proposal was written for). */
+  onOpenChapter(id: string): void;
   memory: Memory;
   providers: ProviderId[];
   defaultProvider: ProviderId | null;
@@ -63,10 +67,11 @@ interface Props {
   getCursor(): number;
   /**
    * Both keep the current text as a version first, then apply; true when the text reached the
-   * manuscript. They throw (and change nothing) when the version can't be saved.
+   * manuscript. They throw (and change nothing) when the version can't be saved, when the open
+   * chapter is not `chapterId` (the one the proposal was written for) or when it is locked.
    */
-  onApply(original: Selection, rewrite: string): Promise<boolean>;
-  onInsert(text: string, target: InsertTarget): Promise<boolean>;
+  onApply(chapterId: string, original: Selection, rewrite: string): Promise<boolean>;
+  onInsert(chapterId: string, text: string, target: InsertTarget): Promise<boolean>;
   onClearSelection(): void;
 }
 
@@ -97,6 +102,8 @@ interface Result {
 
 /** What a run was asked, so "Otra versión" and "Probar con…" repeat it exactly. */
 interface Request {
+  /** The chapter it was asked for: its proposal is applied there or nowhere (docs/bloqueo-capitulos.md). */
+  chapterId: string;
   section: AIPanelSection;
   mode: Mode;
   action: EditAction;
@@ -233,6 +240,8 @@ function AssistantPanel(props: Props) {
     onClose,
     novelId,
     chapterId,
+    locked,
+    onOpenChapter,
     memory,
     providers,
     defaultProvider,
@@ -381,6 +390,7 @@ function AssistantPanel(props: Props) {
     if (mode === "scene") {
       if (!argument.trim()) return null;
       return {
+        chapterId,
         section,
         mode,
         action,
@@ -401,6 +411,7 @@ function AssistantPanel(props: Props) {
     }
     if (!selection) return null;
     return {
+      chapterId,
       section,
       mode,
       action,
@@ -471,6 +482,18 @@ function AssistantPanel(props: Props) {
     if (size > confirmTokens && !confirm(`Esta consulta enviará unos ${formatTokens(size)} tokens de contexto. ¿Continuar?`))
       return;
 
+    // "Otra versión" or "Probar con…" of a proposal written for another chapter: it would mix that
+    // chapter's request with this chapter's text. Asked again from its own chapter, or anew here.
+    if (req.chapterId !== chapterId) {
+      const i = chapters.findIndex((c) => c.id === req.chapterId);
+      update(`${req.section}:${req.mode}`, () => ({
+        notice: {
+          kind: "error",
+          message: `Esta propuesta fue preparada para ${i === -1 ? "un capítulo que ya no existe" : `«${chapterLabel(i, chapters[i].title)}»`}. Vuelve a ese capítulo para pedir otra versión, o pide una nueva aquí.`,
+        },
+      }));
+      return;
+    }
     // A scene: written for the chapter's end as it is now, or for the fixed position (fixed now
     // the first time; a repeat keeps it, wherever the cursor went meanwhile).
     const content = getContent();
@@ -729,8 +752,18 @@ function AssistantPanel(props: Props) {
   }, [sceneReady]);
   // The destination shown is the one used: the cursor moving never changes it (§11).
   const insertTarget = result?.insertTarget ?? ({ kind: "end" } as InsertTarget);
-  const insertion = sceneReady && parsed?.proposal ? insertPreview(getContent(), insertTarget, fromModel(parsed.proposal)) : null;
-  const fixHere = () => update(slot, () => ({ insertTarget: { kind: "at", anchor: anchorAt(getContent(), getCursor()) }, applyFailed: null }));
+  // A proposal belongs to the chapter it was written for (docs/bloqueo-capitulos.md): shown in
+  // another chapter it says so, offers to go back, and its Insertar / Reemplazar wait. The check
+  // that counts runs again when applying (Workspace), on the identifiers, not on this view.
+  const origin = last?.chapterId ?? chapterId;
+  const originIndex = chapters.findIndex((c) => c.id === origin);
+  const originLabel = originIndex >= 0 ? chapterLabel(originIndex, chapters[originIndex].title) : null;
+  const elsewhere = Boolean(last && last.section === "assistant" && origin !== chapterId);
+  const applyBlocked = elsewhere || locked;
+  const insertion =
+    sceneReady && parsed?.proposal && !elsewhere ? insertPreview(getContent(), insertTarget, fromModel(parsed.proposal)) : null;
+  // The cursor of another chapter is no place for this proposal.
+  const fixHere = () => !elsewhere && update(slot, () => ({ insertTarget: { kind: "at", anchor: anchorAt(getContent(), getCursor()) }, applyFailed: null }));
   const chapterIndex = chapters.findIndex((c) => c.id === chapterId);
   const here = chapterIndex >= 0 ? chapterLabel(chapterIndex, chapters[chapterIndex].title) : "este capítulo";
 
@@ -745,14 +778,14 @@ function AssistantPanel(props: Props) {
             changes: rewrite.ops,
             original: last.target.text,
             primary: applying ? "Guardando una copia…" : "Reemplazar selección",
-            primaryDisabled: applying,
+            primaryDisabled: applying || applyBlocked,
             notice: null as string | null,
             onPrimary: () => {
               if (rewrite.restored.missing.length) {
                 setReaderOpen(false);
                 return update(slot, () => ({ lostImages: rewrite.restored }));
               }
-              accept(() => onApply(last.target!, rewrite.restored.text));
+              accept(() => onApply(last.chapterId, last.target!, rewrite.restored.text));
             },
           }
         : sceneReady
@@ -763,9 +796,13 @@ function AssistantPanel(props: Props) {
               changes: undefined,
               original: undefined,
               primary: applying ? "Guardando una copia…" : insertTarget.kind === "end" ? "Insertar al final" : "Insertar en el cursor",
-              primaryDisabled: applying || !insertion,
-              notice: insertion ? null : "El texto alrededor del lugar fijado cambió y ya no se encuentra. Fíjalo de nuevo en el cursor o inserta al final.",
-              onPrimary: () => accept(() => onInsert(fromModel(parsed.proposal!), insertTarget)),
+              primaryDisabled: applying || !insertion || applyBlocked,
+              notice: elsewhere
+                ? null
+                : insertion
+                  ? null
+                  : "El texto alrededor del lugar fijado cambió y ya no se encuentra. Fíjalo de nuevo en el cursor o inserta al final.",
+              onPrimary: () => accept(() => onInsert(last.chapterId, fromModel(parsed.proposal!), insertTarget)),
             }
           : null
       : null;
@@ -1284,7 +1321,7 @@ function AssistantPanel(props: Props) {
                       : ", entre estos párrafos. Es la posición fijada al elegirla: mover el cursor no la cambia."}
                 </span>
               </p>
-              {!insertion ? (
+              {elsewhere ? null : !insertion ? (
                 <p className="notice" role="alert">
                   El texto alrededor del lugar fijado cambió y ya no se encuentra. Fíjalo de nuevo en el cursor o inserta al final.
                 </p>
@@ -1378,16 +1415,33 @@ function AssistantPanel(props: Props) {
             />
           )}
 
+          {!runningHere && applyBlocked && parsed.proposal && (
+            <p className="notice target-guard" role="alert" data-reason={elsewhere ? "other-chapter" : "locked"}>
+              {elsewhere ? (
+                <>
+                  Esta propuesta fue preparada para {originLabel ? `«${originLabel}»` : "un capítulo que ya no existe"}, pero ahora
+                  estás en «{here}». No se aplicará aquí.{" "}
+                  {originLabel && (
+                    <button type="button" className="link strong" onClick={() => onOpenChapter(origin)}>
+                      Volver a «{originLabel}»
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>«{here}» está revisado y bloqueado. Desbloquéalo (🔒) si quieres aplicar la propuesta.</>
+              )}
+            </p>
+          )}
           {!runningHere && (
             <div className="compare-actions">
               {rewrite && last.target && (
                 <button
                   className="btn primary"
-                  disabled={applying}
+                  disabled={applying || applyBlocked}
                   onClick={() => {
                     // The model saw [IMAGEN n] and `* * *`: the real markers are back in `restored`.
                     if (rewrite.restored.missing.length) return update(slot, () => ({ lostImages: rewrite.restored }));
-                    accept(() => onApply(last.target!, rewrite.restored.text));
+                    accept(() => onApply(last.chapterId, last.target!, rewrite.restored.text));
                   }}
                 >
                   {applying ? "Guardando una copia…" : "Reemplazar selección"}
@@ -1396,8 +1450,8 @@ function AssistantPanel(props: Props) {
               {sceneReady && parsed.proposal && (
                 <button
                   className="btn primary"
-                  disabled={applying || !insertion}
-                  onClick={() => accept(() => onInsert(fromModel(parsed.proposal!), insertTarget))}
+                  disabled={applying || !insertion || applyBlocked}
+                  onClick={() => accept(() => onInsert(last.chapterId, fromModel(parsed.proposal!), insertTarget))}
                 >
                   {applying ? "Guardando una copia…" : insertTarget.kind === "end" ? "Insertar al final" : "Insertar en el cursor"}
                 </button>
@@ -1405,7 +1459,7 @@ function AssistantPanel(props: Props) {
               {sceneReady && parsed.proposal && insertTarget.kind === "end" && (
                 <button
                   className="btn ghost"
-                  disabled={applying}
+                  disabled={applying || applyBlocked}
                   onClick={fixHere}
                   title="Muestra dónde está ahora el cursor y fija allí la escena; después se confirma"
                 >
@@ -1455,8 +1509,8 @@ function AssistantPanel(props: Props) {
               <div className="compare-actions">
                 <button
                   className="btn"
-                  disabled={applying}
-                  onClick={() => accept(() => onApply(last.target!, appendImages(lostImages.text, lostImages.missing)))}
+                  disabled={applying || applyBlocked}
+                  onClick={() => accept(() => onApply(last.chapterId, last.target!, appendImages(lostImages.text, lostImages.missing)))}
                 >
                   Aplicar y colocar la imagen al final
                 </button>

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/client";
 
-export type SaveState = "saved" | "pending" | "saving" | "error" | "conflict";
+export type SaveState = "saved" | "pending" | "saving" | "error" | "conflict" | "locked";
 
 const DEBOUNCE_MS = 1000;
 const RETRY_MS = 5000;
@@ -25,6 +25,7 @@ export function useAutosave(endpoint: string, content: string, initial: { conten
   const revisionRef = useRef(initial.revision);
   const inFlight = useRef<Promise<void> | null>(null);
   const blocked = useRef(false);
+  const lockedOut = useRef(false);
   contentRef.current = content;
 
   const save = useCallback(
@@ -49,6 +50,12 @@ export function useAutosave(endpoint: string, content: string, initial: { conten
           if (e instanceof ApiError && e.status === 409) {
             blocked.current = true;
             setState("conflict");
+          } else if (e instanceof ApiError && e.status === 423) {
+            // Locked (docs/bloqueo-capitulos.md), perhaps in another tab: the text stays here,
+            // unsaved, and nothing is retried until the author unlocks it (resume).
+            blocked.current = true;
+            lockedOut.current = true;
+            setState("locked");
           } else {
             setState("error");
           }
@@ -111,6 +118,15 @@ export function useAutosave(endpoint: string, content: string, initial: { conten
     await save();
   }, [endpoint, save]);
 
+  /** After unlocking: saves what was refused while the chapter was locked (with the usual revision check). */
+  const resume = useCallback(async () => {
+    if (!lockedOut.current) return;
+    lockedOut.current = false;
+    blocked.current = false;
+    setState(contentRef.current === savedRef.current ? "saved" : "pending");
+    await save();
+  }, [save]);
+
   /**
    * Saves now and waits. Resolves true only when everything is on the server
    * (used before switching chapter or leaving the novel).
@@ -125,5 +141,5 @@ export function useAutosave(endpoint: string, content: string, initial: { conten
     return contentRef.current === savedRef.current && !blocked.current;
   }, [save]);
 
-  return { state, save, overwrite, flush };
+  return { state, save, overwrite, flush, resume };
 }

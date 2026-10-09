@@ -148,6 +148,11 @@ export default function ChapterNav({
             ) : (
               <>
                 <button className="chapter-name" onClick={() => onSelect(c.id)} aria-current={c.id === currentId}>
+                  {c.locked && (
+                    <span className="chapter-lock" role="img" aria-label="Revisado y bloqueado" title="Revisado y bloqueado">
+                      🔒{" "}
+                    </span>
+                  )}
                   {chapterLabel(i, c.title)}
                   <span className="muted small"> · {c.words.toLocaleString("es")}</span>
                 </button>
@@ -163,17 +168,20 @@ export default function ChapterNav({
                   >
                     ↓
                   </button>
-                  <button
-                    className="link"
-                    onClick={() => {
-                      setDraft(c.title);
-                      setRenaming(c.id);
-                    }}
-                    aria-label="Renombrar"
-                  >
-                    Renombrar
-                  </button>
-                  {chapters.length > 1 && (
+                  {/* A locked chapter keeps its title and can't go to the trash until it is unlocked. */}
+                  {!c.locked && (
+                    <button
+                      className="link"
+                      onClick={() => {
+                        setDraft(c.title);
+                        setRenaming(c.id);
+                      }}
+                      aria-label="Renombrar"
+                    >
+                      Renombrar
+                    </button>
+                  )}
+                  {chapters.length > 1 && !c.locked && (
                     <button className="link danger" disabled={busy} onClick={() => remove(c, i)} aria-label="Eliminar">
                       Eliminar
                     </button>

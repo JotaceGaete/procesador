@@ -233,6 +233,26 @@ input:focus,
 .save.conflict .link {
   text-decoration: underline;
 }
+.save.locked {
+  color: var(--danger);
+}
+
+/* Bloqueo de capítulos (docs/bloqueo-capitulos.md): a discreet lock next to the save state. The
+   open lock is faint; the closed one reads «Revisado». */
+.topbar .lock-toggle {
+  color: var(--muted);
+  opacity: 0.75;
+}
+.topbar .lock-toggle.on {
+  color: var(--text);
+  opacity: 1;
+}
+.topbar .lock-toggle:disabled {
+  opacity: 0.4;
+}
+.chapter-lock {
+  font-size: 0.85em;
+}
 
 .focus .topbar {
   opacity: 0;
@@ -3071,7 +3091,10 @@ details.group > p {
   input:not([type="checkbox"]):not([type="radio"]),
   select,
   textarea,
-  [contenteditable="true"] {
+  [contenteditable="true"],
+  /* A locked chapter's visual editor is not editable: same size as when it is, so locking never
+     changes the text's size. */
+  .visual-text[contenteditable="false"] {
     font-size: max(16px, 1em);
   }
   /* The workspace must not gain a desktop-sized intrinsic width when a

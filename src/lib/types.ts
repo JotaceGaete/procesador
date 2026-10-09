@@ -59,6 +59,8 @@ export interface ChapterInfo {
   position: number;
   chars: number;
   words: number;
+  /** Revisado y bloqueado (docs/bloqueo-capitulos.md): nothing changes its text or title until it is unlocked. */
+  locked: boolean;
 }
 
 export interface Chapter {
@@ -67,6 +69,7 @@ export interface Chapter {
   title: string;
   content: string;
   revision: number;
+  locked: boolean;
 }
 
 /** Why a version of a chapter was kept (docs/versiones.md). */

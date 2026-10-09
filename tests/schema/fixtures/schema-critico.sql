@@ -89,7 +89,6 @@ create table if not exists public.chapters (
 create index if not exists chapters_novel_position_idx on public.chapters(novel_id, position);
 -- Su trigger de updated_at es chapters_touch (touch_chapter: también sube la revisión), más abajo.
 select public.procesador_secure_table('public.chapters', false);
--- Su candado (locked, locked_at: bloqueo de capítulos) se añade junto a novel_outline, más abajo.
 
 create table if not exists public.characters (
   id             uuid primary key default gen_random_uuid(),
@@ -554,15 +553,6 @@ begin
   return new;
 end $$;
 
-create or replace function public.chapter_guard_locked() returns trigger
-language plpgsql set search_path = '' as $$
-begin
-  if old.locked and (new.content is distinct from old.content or new.title is distinct from old.title) then
-    raise exception 'Este capítulo está bloqueado. Desbloquéalo para modificarlo.' using errcode = 'P0423';
-  end if;
-  return new;
-end $$;
-
 -- Copia automática mientras se escribe: el texto anterior a un guardado, si el capítulo no
 -- tiene ninguna versión de los últimos 30 minutos. Así siempre hay un punto al que volver
 -- de cada media hora de trabajo, sin depender del navegador.
@@ -623,13 +613,6 @@ drop trigger if exists chapters_touch on public.chapters;
 create trigger chapters_touch before update on public.chapters
   for each row execute function public.touch_chapter();
 
--- Un capítulo bloqueado no cambia de texto ni de título. Desbloquear es otra sentencia que sólo
--- cambia `locked`: nunca se desbloquea y se escribe a la vez. Corre antes que chapters_touch
--- (los triggers BEFORE van por orden alfabético). El servidor responde 423 con este código.
-drop trigger if exists chapters_guard_locked on public.chapters;
-create trigger chapters_guard_locked before update on public.chapters
-  for each row execute function public.chapter_guard_locked();
-
 drop trigger if exists chapters_version on public.chapters;
 create trigger chapters_version after update of content on public.chapters
   for each row execute function public.chapter_version_auto();
@@ -660,21 +643,11 @@ language sql stable set search_path = '' as $$
   order by n.updated_at desc
 $$;
 
--- Bloqueo de capítulos (docs/bloqueo-capitulos.md): un capítulo revisado no se modifica hasta que
--- el autor lo desbloquea. Los existentes quedan desbloqueados. Mientras está bloqueado, la base
--- rechaza cualquier cambio de su texto o su título (trigger chapters_guard_locked), venga de
--- donde venga, y no se puede enviar a la papelera. (Aquí, junto a la primera función que lo lee:
--- así también existe si se ejecuta el archivo desde la sección de triggers.)
-alter table public.chapters add column if not exists locked boolean not null default false;
-alter table public.chapters add column if not exists locked_at timestamptz;
-
--- Índice de capítulos sin traer el texto, con su candado. (Se borra antes de crearla porque
--- `locked` cambió lo que devuelve; los permisos se vuelven a dar al final del archivo.)
-drop function if exists public.novel_outline(uuid);
-create function public.novel_outline(p_novel uuid)
-returns table (id uuid, title text, "position" integer, chars integer, words integer, updated_at timestamptz, locked boolean)
+-- Índice de capítulos sin traer el texto.
+create or replace function public.novel_outline(p_novel uuid)
+returns table (id uuid, title text, "position" integer, chars integer, words integer, updated_at timestamptz)
 language sql stable set search_path = '' as $$
-  select c.id, c.title, c.position, length(c.content), public.word_count(c.content), c.updated_at, c.locked
+  select c.id, c.title, c.position, length(c.content), public.word_count(c.content), c.updated_at
   from public.chapters c
   where c.novel_id = p_novel
   order by c.position, c.created_at
@@ -737,9 +710,6 @@ begin
   select novel_id into v_novel from public.chapters where id = p_chapter;
   if v_novel is null then
     raise exception 'Capítulo no encontrado' using errcode = 'P0002';
-  end if;
-  if (select locked from public.chapters where id = p_chapter) then
-    raise exception 'Este capítulo está bloqueado. Desbloquéalo para eliminarlo.' using errcode = 'P0423';
   end if;
   -- Dos eliminaciones simultáneas no pueden dejar la novela sin capítulos.
   perform 1 from public.novels where id = v_novel for update;
@@ -1127,7 +1097,6 @@ revoke execute on function public.finalize_asset(uuid, text, text, bigint, integ
 revoke execute on function public.replace_asset_uses(text, uuid, uuid, boolean) from public, anon, authenticated;
 revoke execute on function public.sync_chapter_images(uuid, uuid[]) from public, anon, authenticated;
 revoke execute on function public.chapter_version_auto() from public, anon, authenticated;
-revoke execute on function public.chapter_guard_locked() from public, anon, authenticated;
 revoke execute on function public.save_chapter_version(uuid, text, text, text) from public, anon, authenticated;
 revoke execute on function public.trash_chapter(uuid) from public, anon, authenticated;
 revoke execute on function public.chapter_trash(uuid) from public, anon, authenticated;

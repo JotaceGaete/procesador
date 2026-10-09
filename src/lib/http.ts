@@ -19,6 +19,8 @@ export function errorResponse(error: unknown) {
   if (pg?.code === "22023") return NextResponse.json({ error: pg.message }, { status: 400 });
   // A function's own "not found" (raise … using errcode = 'P0002').
   if (pg?.code === "P0002") return NextResponse.json({ error: pg.message }, { status: 404 });
+  // A locked chapter (docs/bloqueo-capitulos.md): the database refused to change it.
+  if (pg?.code === "P0423") return NextResponse.json({ error: pg.message, locked: true }, { status: 423 });
   const message = error instanceof Error ? error.message : typeof pg?.message === "string" ? pg.message : "Error desconocido";
   console.error("[api]", message);
   return NextResponse.json({ error: message }, { status: 500 });
