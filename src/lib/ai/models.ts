@@ -2,21 +2,25 @@ import type { AIRole, ProviderId } from "../types";
 
 /**
  * Model per provider and role (docs/consejero.md): writing (Asistente), advice
- * (Consejero) and a cheaper one for analysis and summaries. Each is configured on
- * its own; until it is, a role uses the writing model.
+ * (Consejero), a cheaper one for analysis and summaries, and the Crítico Literario's
+ * (docs/critico.md). Each is configured on its own; until it is, a role uses the writing
+ * model, except the Crítico, which uses the Consejero's.
  *
- *   ANTHROPIC_MODEL           ANTHROPIC_MODEL_ADVISE    ANTHROPIC_MODEL_DIGEST
- *   OPENAI_MODEL              OPENAI_MODEL_ADVISE       OPENAI_MODEL_DIGEST
- *   XAI_MODEL                 XAI_MODEL_ADVISE          XAI_MODEL_DIGEST
+ *   ANTHROPIC_MODEL    ANTHROPIC_MODEL_ADVISE    ANTHROPIC_MODEL_DIGEST    ANTHROPIC_MODEL_CRITIC
+ *   OPENAI_MODEL       OPENAI_MODEL_ADVISE       OPENAI_MODEL_DIGEST       OPENAI_MODEL_CRITIC
+ *   XAI_MODEL          XAI_MODEL_ADVISE          XAI_MODEL_DIGEST          XAI_MODEL_CRITIC
  */
 
 const PREFIX: Record<ProviderId, string> = { anthropic: "ANTHROPIC", openai: "OPENAI", xai: "XAI" };
 const DEFAULT_MODEL: Record<ProviderId, string> = { anthropic: "claude-opus-5-5", openai: "gpt-5.5", xai: "grok-4" };
-const ROLE_SUFFIX: Record<AIRole, string> = { write: "", advise: "_ADVISE", digest: "_DIGEST" };
+const ROLE_SUFFIX: Record<AIRole, string> = { write: "", advise: "_ADVISE", digest: "_DIGEST", critic: "_CRITIC" };
 
 export function modelFor(provider: ProviderId, role: AIRole = "write"): string {
   const base = process.env[`${PREFIX[provider]}_MODEL`] || DEFAULT_MODEL[provider];
-  return (role !== "write" && process.env[`${PREFIX[provider]}_MODEL${ROLE_SUFFIX[role]}`]) || base;
+  const own = role !== "write" && process.env[`${PREFIX[provider]}_MODEL${ROLE_SUFFIX[role]}`];
+  if (own) return own;
+  // A judgement, not a summary: without a model of its own, the Crítico uses the Consejero's.
+  return role === "critic" ? modelFor(provider, "advise") : base;
 }
 
 /**

@@ -1,7 +1,7 @@
 import { db } from "../supabase";
 import type { ProviderId, Usage } from "../types";
 
-export type UsagePurpose = "assist" | "advise" | "digest";
+export type UsagePurpose = "assist" | "advise" | "digest" | "critic";
 
 /** One row per AI request. A failure to log never breaks the answer the author is reading. */
 export async function recordUsage(novelId: string, purpose: UsagePurpose, provider: ProviderId, u: Usage) {

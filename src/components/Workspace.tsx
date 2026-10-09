@@ -21,6 +21,7 @@ import ChapterEditor, { type EditorHandle, type Selection } from "./ChapterEdito
 import VisualEditor from "./VisualEditor";
 import ChapterNav from "./ChapterNav";
 import { TrashModal, VersionsModal } from "./Versions";
+import CriticReport from "./CriticReport";
 import { ChronologyModal } from "./Chronology";
 import NovelModal from "./NovelModal";
 import MemoryModal from "./MemoryModal";
@@ -111,7 +112,9 @@ export default function Workspace({ novelId }: { novelId: string }) {
     const chosen = asked === "visual" || asked === "texto" ? asked : pref === "visual" || pref === "texto" ? pref : null;
     return chosen !== "texto";
   });
-  const [modal, setModal] = useState<"novel" | "plot" | "memory" | "images" | "versions" | "trash" | "chronology" | null>(null);
+  const [modal, setModal] = useState<"novel" | "plot" | "memory" | "images" | "versions" | "trash" | "chronology" | "critic" | null>(
+    null,
+  );
   const editorRef = useRef<EditorHandle>(null);
 
   const openChapter = useCallback(async (id: string) => {
@@ -604,6 +607,13 @@ export default function Workspace({ novelId }: { novelId: string }) {
             >
               Consejero
             </button>
+            <button
+              className={`link${modal === "critic" ? " on" : ""}`}
+              onClick={() => setModal("critic")}
+              title="Evaluar el capítulo: juzga, no cambia el texto"
+            >
+              Crítico
+            </button>
             <button className="link focus-toggle" onClick={() => setFocusMode((f) => !f)} title="Ctrl/⌘ + .  ·  Esc para salir">
               {focusMode ? "Salir" : "Concentración"}
             </button>
@@ -788,6 +798,17 @@ export default function Workspace({ novelId }: { novelId: string }) {
             setModal(null);
             insertFiles(files);
           }}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal === "critic" && (
+        <CriticReport
+          chapterId={chapter.id}
+          chapterTitle={current ? chapterLabel(chapterIndex, current.title) : chapter.title}
+          providers={loaded.providers}
+          defaultProvider={loaded.defaultProvider}
+          flush={flush}
+          onGoTo={goTo}
           onClose={() => setModal(null)}
         />
       )}

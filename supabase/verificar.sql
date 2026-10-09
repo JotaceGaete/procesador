@@ -18,6 +18,8 @@ with expected(kind, object) as (
     ('columna', 'novels.book'),
     -- Argumento general (docs/consejero.md)
     ('columna', 'novels.plot'),
+    -- Crítico Literario (docs/critico.md)
+    ('tabla', 'chapter_critiques'),
     ('columna', 'novels.auto_digest'), ('columna', 'assets.orientation'), ('columna', 'chapters.revision'),
     ('columna', 'facts.status'), ('columna', 'chapter_digests.text_sketch'), ('columna', 'advisor_observations.position'),
     ('función', 'duplicate_novel'), ('función', 'sync_chapter_images'), ('función', 'replace_asset_uses'),
@@ -45,6 +47,11 @@ union all
 select 'función', 'duplicate_novel', 'versión anterior a la fase 2'
 where exists (select 1 from pg_proc where proname = 'duplicate_novel')
   and not exists (select 1 from pg_proc where proname = 'duplicate_novel' and prosrc like '%auto_digest%')
+union all
+-- ai_usage debe admitir el uso del Crítico Literario.
+select 'restricción', 'ai_usage.purpose', 'sin el propósito critic'
+where to_regclass('public.ai_usage') is not null
+  and not exists (select 1 from pg_constraint where conname = 'ai_usage_purpose_check' and pg_get_constraintdef(oid) like '%critic%')
 union all
 -- La copia automática de versiones mientras se escribe.
 select 'trigger', 'chapters_version', 'falta'
