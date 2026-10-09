@@ -280,12 +280,13 @@ select public.procesador_secure_table('public.manuscript_images', true);
 
 -- Registro de uso de la IA (docs/consejero.md): una fila por consulta, con los tokens que
 -- informó el proveedor y su costo estimado (null si no hay precios configurados).
--- purpose: 'assist' (Asistente), 'advise' (Consejero), 'digest' (resúmenes de capítulo).
+-- purpose: 'assist' (Asistente), 'advise' (Consejero), 'digest' (resúmenes de capítulo),
+-- 'critic' (Crítico Literario).
 -- No se copia al duplicar una novela.
 create table if not exists public.ai_usage (
   id             uuid primary key default gen_random_uuid(),
   novel_id       uuid not null references public.novels(id) on delete cascade,
-  purpose        text not null check (purpose in ('assist', 'advise', 'digest')),
+  purpose        text not null check (purpose in ('assist', 'advise', 'digest', 'critic')),
   provider       text not null,
   model          text not null,
   input_tokens   integer not null default 0 check (input_tokens >= 0),
@@ -489,6 +490,53 @@ create table if not exists public.time_marks (
 create unique index if not exists time_marks_one_per_chapter on public.time_marks(chapter_id) where (anchor ->> 'at') = 'chapter_start';
 create index if not exists time_marks_novel_idx on public.time_marks(novel_id);
 select public.procesador_secure_table('public.time_marks', true);
+
+-- Crítico Literario (docs/critico.md): el juicio de un capítulo terminado. Un informe por
+-- evaluación, que no se edita (otra evaluación es otra fila); el autor sólo añade su
+-- respuesta. source_revision y text_sketch dicen sobre qué versión del capítulo se hizo. No
+-- guarda texto del manuscrito salvo citas breves, verificadas contra él. No se copia al
+-- duplicar una novela (es el historial de esa novela) y se borra con el capítulo.
+--   scores          [{ criterion, score (1–10, un decimal; null = no aplica), rationale, refs: [{ quote, verified }], impression }]
+--   experience      { effects: [...], summary, stretches: [{ effect, note, quote, verified }] }
+--   strengths, weaknesses  [{ text, quote, verified }]
+--   contradictions  [{ description, quote, quoteVerified, sourceQuote, sourceChapter, sourceVerified, confirmed, affects }]
+--   context         qué leyó y el uso: { parts, missingDigests, staleDigests, input, cached, output, costUsd }
+create table if not exists public.chapter_critiques (
+  id               uuid primary key default gen_random_uuid(),
+  novel_id         uuid not null references public.novels(id) on delete cascade,
+  chapter_id       uuid not null,
+  source_revision  integer not null,
+  text_sketch      jsonb not null default '{"n": 0, "h": []}'::jsonb,
+  chapter_kind     text not null default '',
+  scores           jsonb not null default '[]'::jsonb,
+  average          numeric(3, 1) not null,
+  overall_score    numeric(3, 1) not null check (overall_score between 1 and 10),
+  verdict          text not null check (verdict in ('excelente', 'solido', 'irregular', 'no_funciona')),
+  verdict_text     text not null default '',
+  experience       jsonb not null default '{}'::jsonb,
+  strengths        jsonb not null default '[]'::jsonb,
+  weaknesses       jsonb not null default '[]'::jsonb,
+  contradictions   jsonb not null default '[]'::jsonb,
+  context          jsonb not null default '{}'::jsonb,
+  provider         text not null,
+  model            text not null default '',
+  author_response  text check (author_response in ('agree', 'disagree')),
+  author_note      text not null default '' check (length(author_note) <= 2000),
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  foreign key (chapter_id, novel_id) references public.chapters(id, novel_id) on delete cascade
+);
+create index if not exists chapter_critiques_chapter_idx on public.chapter_critiques(chapter_id, created_at desc);
+create index if not exists chapter_critiques_novel_idx on public.chapter_critiques(novel_id);
+select public.procesador_secure_table('public.chapter_critiques', true);
+-- Una base anterior al Crítico tiene ai_usage sin el propósito 'critic'.
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'ai_usage_purpose_check'
+                 and pg_get_constraintdef(oid) like '%critic%') then
+    alter table public.ai_usage drop constraint if exists ai_usage_purpose_check;
+    alter table public.ai_usage add constraint ai_usage_purpose_check check (purpose in ('assist', 'advise', 'digest', 'critic'));
+  end if;
+end $$;
 
 -- ---------------------------------------------------------------------------
 -- Triggers
@@ -1022,7 +1070,7 @@ begin
   from unnest(array['novels', 'chapters', 'characters', 'relationships', 'places', 'facts', 'fact_characters',
                     'assets', 'character_images', 'manuscript_images', 'ai_usage', 'story_threads',
                     'chapter_digests', 'novel_digests', 'advisor_conversations', 'advisor_messages',
-                    'advisor_observations', 'chapter_versions', 'time_marks']) as t
+                    'advisor_observations', 'chapter_versions', 'time_marks', 'chapter_critiques']) as t
   where to_regclass('public.' || t) is null
      or not (select relrowsecurity from pg_class where oid = to_regclass('public.' || t));
   if v_missing is not null then

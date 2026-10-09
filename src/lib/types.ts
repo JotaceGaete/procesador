@@ -306,7 +306,7 @@ export const EDIT_ACTIONS: {
 ];
 
 /** Which model a request uses: each is configured separately (docs/consejero.md). */
-export type AIRole = "write" | "advise" | "digest";
+export type AIRole = "write" | "advise" | "digest" | "critic";
 
 /** One piece of what was sent to the model, shown to the author ("Leí: …"). */
 export interface ContextPart {

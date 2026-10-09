@@ -19,6 +19,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
 const SCHEMA = read("supabase/schema.sql");
 const MIGRATION = read("supabase/actualizar-consejero.sql");
 const PLOT_MIGRATION = read("supabase/actualizar-argumento.sql");
+const CRITIC_MIGRATION = read("supabase/actualizar-critico.sql");
 const VERIFY = read("supabase/verificar.sql");
 const OLD = {
   "2b": read("tests/schema/fixtures/schema-2b.sql"),
@@ -29,10 +30,11 @@ const TABLES = [
   "novels", "chapters", "characters", "relationships", "places", "facts", "fact_characters", "assets",
   "character_images", "manuscript_images", "ai_usage", "story_threads", "chapter_digests", "novel_digests",
   "advisor_conversations", "advisor_messages", "advisor_observations", "chapter_versions", "time_marks",
+  "chapter_critiques",
 ];
 /** What only schema.sql brings (versions and trash), not actualizar-consejero.sql. */
 const AFTER_CONSEJERO =
-  /chapter_versions|save_chapter_version|trash_chapter|chapter_trash|restore_chapter|chapter_version_auto|chapters_version|time_marks|novels\.calendar|dismissed_warnings|age_anchor|age_approx|characters\.death|anterior a la cronología|novels\.book|anterior a la exportación|novels\.plot/;
+  /chapter_versions|save_chapter_version|trash_chapter|chapter_trash|restore_chapter|chapter_version_auto|chapters_version|time_marks|novels\.calendar|dismissed_warnings|age_anchor|age_approx|characters\.death|anterior a la cronología|novels\.book|anterior a la exportación|novels\.plot|chapter_critiques|ai_usage\.purpose/;
 
 let bin, dir, port;
 
@@ -435,5 +437,35 @@ test("argumento general: actualizar-argumento.sql adds novels.plot (empty), twic
     assert.equal(must(db, "select is_nullable || ' ' || data_type from information_schema.columns where table_name = 'novels' and column_name = 'plot'"), "NO text");
     if (before.novels) assert.ok(must(db, "select public.duplicate_novel('11111111-1111-4111-8111-111111111111', 'Copia')"));
     assert.ok(!run(db, "update novels set plot = null").ok, "never null");
+  }
+});
+
+test("crítico literario: actualizar-critico.sql adds chapter_critiques and the 'critic' usage, twice, without touching data", () => {
+  // schema.sql as it was before the Crítico: without its block, its table in the final check, nor 'critic' in ai_usage.
+  const start = SCHEMA.indexOf("-- Crítico Literario (docs/critico.md)");
+  const end = SCHEMA.indexOf("end $$;", start) + "end $$;".length;
+  const before = SCHEMA.slice(0, start) + SCHEMA.slice(end);
+  const old = before
+    .replace(", 'chapter_critiques']) as t", "]) as t")
+    .replace("check (purpose in ('assist', 'advise', 'digest', 'critic'))", "check (purpose in ('assist', 'advise', 'digest'))");
+  const code = old.replace(/--[^\n]*/g, "");
+  assert.ok(start > 0 && !code.includes("chapter_critiques") && !code.includes("'critic'"), "the old schema has no trace of the Crítico");
+  for (const state of ["completamente actualizada (fases 2–4, con los bucles antiguos)", "vacía (instalación nueva)"]) {
+    const db = newDb();
+    STATES[state](db);
+    must(db, old);
+    const critic = "select count(*) from pg_constraint where conname = 'ai_usage_purpose_check' and pg_get_constraintdef(oid) like '%critic%'";
+    assert.equal(must(db, critic), "0", "the base before has no 'critic' usage");
+    const fp = fingerprint(db);
+    must(db, CRITIC_MIGRATION);
+    must(db, CRITIC_MIGRATION, "psql");
+    assertComplete(db);
+    assertDataKept(db, fp);
+    assert.equal(must(db, "select count(*) from pg_trigger where tgname = 'chapter_critiques_touch'"), "1");
+    assert.equal(must(db, critic), "1");
+    // And schema.sql over it is still a no-op for its data.
+    must(db, SCHEMA);
+    assertComplete(db);
+    assertDataKept(db, fp);
   }
 });

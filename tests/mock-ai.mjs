@@ -40,6 +40,69 @@ const editReply = (body) =>
   body.includes("REESCRIBE-DESCONOCIDO") ? EDIT_STRANGER : body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : body.includes("MANTEN-FORMATO") ? EDIT_FORMAT : EDIT;
 
 /**
+ * The Crítico Literario's report (docs/critico.md), built from the request so its quotes are
+ * real: the first words of the chapter's sentences. Hooks in the evaluated chapter:
+ *   "MEDIOCRE"              low scores, «no funciona todavía», «aburre»
+ *   "SIN-DIALOGO"           dialogue «no aplica» (null)
+ *   "CITA-FALSA"            the score of «prosa» quotes something that is not in the text
+ *   "CRITICO-ROTO"          the first answer is not JSON (the retry is fine)
+ *   "CITA-LARGA"            the first answer quotes 400 characters (a rewrite): sent back
+ *   "CONTRADICCION-FICHA"   a contradiction only a digest suggests, that lowers «funcion»; on
+ *                           the retry it stays, without lowering anything
+ *   "CONTRADICCION-TERCA"   the same, also on the retry (it is marked, not hidden)
+ *   "CONTRADICCION-REAL"    a contradiction with the end of the previous chapter, quoted literally
+ */
+function criticReply(user) {
+  const retry = user.includes("no era válida");
+  const text = (user.match(/<capitulo-evaluado titulo="[^"]*">\n([\s\S]*?)\n<\/capitulo-evaluado>/) ?? [])[1] ?? "";
+  if (text.includes("CRITICO-ROTO") && !retry) return "Esto no es JSON.";
+  const sentences = text.split(/(?<=[.!?])\s+/).filter((x) => x.split(/\s+/).length >= 3);
+  const q = (i) => (sentences[i % Math.max(1, sentences.length)] ?? text).split(/\s+/).slice(0, 6).join(" ").replace(/[.,;:!?]+$/, "");
+  const low = text.includes("MEDIOCRE");
+  const keys = ["interes", "emocion", "tension", "dialogos", "ritmo", "atmosfera", "continuar", "prosa", "funcion"];
+  const scores = keys.map((criterion, i) => ({
+    criterion,
+    score: criterion === "dialogos" && text.includes("SIN-DIALOGO") ? null : low ? 3.5 + (i % 3) * 0.5 : 7.5 + (i % 4) * 0.4,
+    rationale: low ? `Flojo en ${criterion}: la atención decae.` : `Bien resuelto en ${criterion}.`,
+    quotes: [criterion === "prosa" && text.includes("CITA-FALSA") ? "una frase que el capítulo nunca dijo" : q(i)],
+  }));
+  const contradictions = [];
+  const stubborn = text.includes("CONTRADICCION-TERCA");
+  if (text.includes("CONTRADICCION-FICHA") || stubborn)
+    contradictions.push({
+      description: "Según la ficha, Elena ya conocía el puerto",
+      quote: q(0),
+      source_chapter: 1,
+      source_quote: "Elena conocía el puerto desde niña",
+      affects: retry && !stubborn ? [] : ["funcion"],
+    });
+  if (text.includes("CONTRADICCION-REAL")) {
+    const prev = (user.match(/<final-del-capitulo-anterior capitulo="[^"]*">\n([\s\S]*?)\n<\/final-del-capitulo-anterior>/) ?? [])[1] ?? "";
+    contradictions.push({ description: "El capítulo anterior decía otra cosa", quote: q(0), source_chapter: 2, source_quote: prev.split(/\s+/).slice(0, 6).join(" "), affects: ["funcion"] });
+  }
+  if (text.includes("CITA-LARGA") && !retry) scores[0].quotes = ["x".repeat(400)];
+  const overall = low ? 4.2 : 8.1;
+  return JSON.stringify({
+    chapter_kind: low ? "Capítulo de transición, plano" : "Capítulo íntimo y lento, construido sobre el silencio",
+    experience: {
+      stretches: [
+        { effect: low ? "aburre" : "engancha", note: "El comienzo.", quote: q(0) },
+        { effect: low ? "decae" : "emociona", note: "Después.", quote: q(1) },
+      ],
+      effects: low ? ["aburre"] : ["emociona", "entretiene"],
+      summary: low ? "El capítulo aburre: pierde interés desde el segundo tramo." : "El capítulo emociona y entretiene de principio a fin.",
+    },
+    scores,
+    overall_score: overall,
+    strengths: [{ text: "Lo mejor: el comienzo", quote: q(0) }],
+    weaknesses: [{ text: "Lo más débil: el segundo tramo", quote: q(1) }],
+    contradictions,
+    verdict: low ? "no_funciona" : "solido",
+    verdict_text: low ? "No funciona todavía: es mediocre y aburrido." : "Sólido: funciona, con reparos menores.",
+  });
+}
+
+/**
  * The Consejero's reading (structured JSON). Built from the request itself, so quotes are
  * real: the first words of the chapter. Hooks in the chapter text:
  *   "CABO: <título>"      opens a thread (or advances it if it exists)
@@ -49,6 +112,7 @@ const editReply = (body) =>
  *   "JSON-SIEMPRE-ROTO"   never valid
  */
 function readingReply(system, user) {
+  if (system.includes("<critico-literario>")) return criticReply(user);
   // Juicio comparativo: a proposal that turns an acquaintance into a stranger is worse.
   if (system.includes("<juicio-comparativo>")) {
     const proposal = (user.match(/<propuesta>\n([\s\S]*?)\n<\/propuesta>/) ?? [])[1] ?? "";
