@@ -365,7 +365,7 @@ test("panel: discreet quick actions; «¿Cómo continúo?» → Camino A, B, C; 
     "Subir tensión",
     "¿Qué pasa si…?",
   ]);
-  assert.deepEqual(await rowsOf.nth(1).locator("button").allInnerTexts(), ["Analizar capítulo", "Repeticiones", "Coherencia", "Personajes"]);
+  assert.deepEqual(await rowsOf.nth(1).locator("button").allInnerTexts(), ["Revisar escena", "Analizar capítulo", "Repeticiones", "Coherencia", "Personajes"]);
   assert.deepEqual(await rowsOf.locator(".quick-label").allInnerTexts(), ["PENSAR JUNTOS", "REVISAR"]);
   assert.equal(await quick.locator("button.btn").count(), 0, "links, not big buttons");
   assert.equal(await quick.getByRole("button", { name: "Personajes desaprovechados" }).count(), 0, "phase 3");

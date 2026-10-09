@@ -48,6 +48,8 @@ const CONVERSE_OUTPUT_TOKENS = 3000;
 /** Analytic actions: in Conversar, asking for one of them makes that turn an Analizar turn. */
 const ANALYTIC: AdvisorAction[] = ["analizar", "repeticiones", "coherencia", "cabos", "personajes"];
 const chars = (tokens: number) => Math.round(tokens * 3.5);
+/** Actions about how to go on from the end, or about the whole novel: a selection doesn't narrow them. */
+const SELECTION_BLIND: AdvisorAction[] = ["seguir", "caminos", "cabos", "repeticiones"];
 
 /** Input budgets in tokens, per level (orientative, docs §4). */
 type Data = "presence" | "repetitions" | "threads" | "secrets";
@@ -61,6 +63,8 @@ const RECIPES: Record<AdvisorAction, { focus: "chapter" | "tail" | "none"; diges
   giro: { focus: "tail", digests: 5000, passages: 2500, data: ["presence", "threads", "secrets"] },
   oportunidades: { focus: "chapter", digests: 5000, passages: 2500, data: ["presence", "threads", "secrets"] },
   tension: { focus: "chapter", digests: 3000, passages: 1500, data: ["threads", "secrets"] },
+  // The scene read whole (the selection, or the chapter), with who knows whom and what happened.
+  revisar: { focus: "chapter", digests: 2500, passages: 2000, data: [] },
   conversar: { focus: "tail", digests: 2500, passages: 1500, data: [] },
   repeticiones: { focus: "chapter", digests: 3000, passages: 0, data: ["repetitions"] },
   cabos: { focus: "tail", digests: 5000, passages: 2500, data: ["threads"] },
@@ -192,8 +196,10 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
     else if (!plan.explicit && cards.some((c) => c.kind === "alternative")) plan.action = "explorar";
   } else if (!input.action) {
     // Conversar: one proposal by default; several only when asked; the rest, a conversation.
-    const keep: AdvisorAction[] = ["seguir", "caminos", "consecuencias", "giro", "tension", "oportunidades"];
+    const keep: AdvisorAction[] = ["seguir", "caminos", "consecuencias", "giro", "tension", "oportunidades", "revisar"];
     if (question && wantsOptions(question)) plan.action = "caminos";
+    // «Mejora esta escena» is about what is written, even with a proposal in course.
+    else if (plan.explicit === "revisar" && (!anchored || /escena|cap[ií]tulo|texto|lo escrito|lo que escrib/i.test(question))) plan.action = "revisar";
     else if (anchored) plan.action = plan.explicit && ["consecuencias", "giro", "tension"].includes(plan.explicit) ? plan.explicit : "explorar";
     else plan.action = plan.explicit && keep.includes(plan.explicit) ? plan.explicit : "conversar";
   }
@@ -207,7 +213,9 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
   // tables of presence or repetitions to comment on (twists and opportunities keep the secrets).
   const recipe =
     mode === "conversar"
-      ? { ...RECIPES.conversar, data: (["giro", "oportunidades"].includes(plan.action) ? ["secrets"] : []) as Data[] }
+      ? plan.action === "revisar"
+        ? RECIPES.revisar
+        : { ...RECIPES.conversar, data: (["giro", "oportunidades"].includes(plan.action) ? ["secrets"] : []) as Data[] }
       : RECIPES[plan.action];
 
   // Images become their description and separators `* * *`; the model never sees a marker.
@@ -280,7 +288,9 @@ export async function buildAdvice(input: AdviceInput, signal: AbortSignal): Prom
   const blocks: string[] = [];
   const sel = input.selection && input.selection.end > input.selection.start ? input.selection : null;
   let focusRange = { start: 0, end: current.content.length };
-  if (sel && (plan.action === "coherencia" || plan.action === "analizar" || plan.action === "tension")) {
+  // The author's selection is what the turn is about, in both modes, except for the actions
+  // that look at the end of the chapter or the whole novel.
+  if (sel && !SELECTION_BLIND.includes(plan.action)) {
     const s = { start: Math.max(0, sel.start), end: Math.min(current.content.length, sel.end) };
     focusRange = nearbyRange(current.content, s);
     blocks.push(

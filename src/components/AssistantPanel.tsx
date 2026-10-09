@@ -36,6 +36,7 @@ import ContextView from "./ContextView";
 import DiffView from "./DiffView";
 import ProposalReader from "./ProposalReader";
 import type { SceneBrief } from "@/lib/advisor/converse";
+import type { Comparison } from "@/lib/advisor/compare";
 
 interface Props {
   hidden: boolean;
@@ -183,6 +184,41 @@ function insertPreview(content: string, target: InsertTarget, scene: string) {
   };
 }
 
+const VERDICT: Record<Comparison["verdict"], string> = {
+  mejor: "La propuesta mejora tu versión",
+  igual: "La propuesta no mejora ni empeora tu versión",
+  peor: "Tu versión es mejor: el Consejero recomienda conservarla",
+};
+const WINNER = { original: "tu versión", propuesta: "la propuesta", empate: "empate" } as const;
+
+/** The Consejero's comparison of a rewrite with the author's scene: a recommendation. */
+function Judgment({ j }: { j: { loading: boolean; data: Comparison | null; error: string } }) {
+  if (j.loading) return <p className="muted small judgment">El Consejero está comparando la propuesta con tu versión…</p>;
+  if (j.error) return <p className="muted small judgment">No se pudo comparar con tu versión: {j.error}</p>;
+  if (!j.data) return null;
+  const d = j.data;
+  return (
+    <div className={`judgment verdict-${d.verdict}`} data-origin="juicio comparativo del Consejero" aria-label="Recomendación del Consejero">
+      <p>
+        <strong>{VERDICT[d.verdict]}.</strong> {d.summary}
+      </p>
+      {d.criteria.length > 0 && (
+        <ul className="small">
+          {d.criteria.map((c) => (
+            <li key={c.name}>
+              {c.name}: <strong>{WINNER[c.winner]}</strong>
+              {c.why ? ` · ${c.why}` : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+      {d.losses.length > 0 && <p className="small">Lo que pierde: {d.losses.join(" · ")}</p>}
+      {d.changes.length > 0 && <p className="small">Cambia lo establecido: {d.changes.join(" · ")}</p>}
+      <p className="muted small">Es una recomendación: la decisión es tuya y puedes reemplazar igualmente.</p>
+    </div>
+  );
+}
+
 function AssistantPanel(props: Props) {
   const {
     hidden,
@@ -234,6 +270,10 @@ function AssistantPanel(props: Props) {
   // «Enviar al Asistente» from the Consejero: the decisions, limits and discards that go with
   // the argument (the author reviewed them there). Only for the next scene.
   const [brief, setBrief] = useState<SceneBrief | null>(null);
+  // «Revisar escena»: the changes the author wants (from the Consejero's review, or their own).
+  const [reviewNotes, setReviewNotes] = useState("");
+  // Juicio comparativo of the last «Revisar escena» rewrite: a recommendation, never a decision.
+  const [judgment, setJudgment] = useState<{ for: string; loading: boolean; data: Comparison | null; error: string } | null>(null);
   useEffect(() => setSceneTarget(readPref("sceneTarget") === "cursor" ? "cursor" : "end"), []);
 
   // One pending result per tab (Editar selección, Escribir escena, the Consejero's analysis):
@@ -372,6 +412,7 @@ function AssistantPanel(props: Props) {
         characterIds: characterId ? [characterId] : [],
         selectionStart: selection.start,
         selectionEnd: selection.end,
+        ...(action === "revisar" && reviewNotes.trim() ? { notes: reviewNotes.trim() } : {}),
       },
     };
   }
@@ -594,6 +635,17 @@ function AssistantPanel(props: Props) {
     setMode("scene");
     onSection("assistant");
   };
+  // «Revisar escena» from the Consejero: the review goes to Editar as the changes the author
+  // wants (editable), over the same scene, selected again if the selection moved.
+  const sendReview = (r: { notes: string; start: number; end: number }) => {
+    note(`Revisar escena → Editar (${r.notes.length} car.)`);
+    setReviewNotes(r.notes);
+    setActions((all) => ({ ...all, assistant: "revisar" }));
+    setMode("edit");
+    onSection("assistant");
+    if (!selection || selection.start !== r.start || selection.end !== r.end)
+      onGoTo(chapterId, r.start, r.end, getContent().slice(r.start, r.end));
+  };
   // The Consejero's brief, reviewed by the author: it fills the scene's fields (still nothing
   // is written: the author asks for the scene, reads it and decides).
   const sendBrief = (b: SceneBrief) => {
@@ -637,6 +689,30 @@ function AssistantPanel(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the proposal and its target
   }, [finished, last, parsed?.proposal]);
   useEffect(() => setCompareView("changes"), [rewrite]);
+  // «Revisar escena»: once the rewrite is complete, the Consejero compares it with the author's
+  // text. Only a recommendation: «Reemplazar» stays available whatever it says.
+  const judgeKey = rewrite && last?.action === "revisar" && last.section === "assistant" && parsed?.complete ? output : "";
+  useEffect(() => {
+    if (!judgeKey || !rewrite || !last?.target || judgment?.for === judgeKey) return;
+    const controller = new AbortController();
+    setJudgment({ for: judgeKey, loading: true, data: null, error: "" });
+    fetch(`/api/novels/${novelId}/compare`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ original: last.target.text, proposal: rewrite.restored.text, provider: last.provider }),
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error || `Error ${res.status}`);
+        setJudgment({ for: judgeKey, loading: false, data: json as Comparison, error: "" });
+      })
+      .catch((e: Error) => {
+        if (e.name !== "AbortError") setJudgment({ for: judgeKey, loading: false, data: null, error: e.message });
+      });
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per finished rewrite
+  }, [judgeKey]);
   useEffect(() => setShowSent(false), [last]);
   // A finished scene: its preview, redrawn while it waits.
   const sceneReady = finished && last?.mode === "scene";
@@ -905,6 +981,7 @@ function AssistantPanel(props: Props) {
               onFactAdded={onFactAdded}
               onSendToAssistant={sendToAssistant}
               onSendBrief={sendBrief}
+              onSendReview={sendReview}
             />
           </>
         ) : advisorView === "saved" ? (
@@ -968,6 +1045,17 @@ function AssistantPanel(props: Props) {
             {contextControls}
           </div>
           {!quiet && quote}
+          {action === "revisar" && section === "assistant" && (
+            <label className="argument review-notes">
+              <span>Cambios que quieres (opcional)</span>
+              <textarea
+                rows={5}
+                value={reviewNotes}
+                onChange={(e) => setReviewNotes(e.target.value)}
+                placeholder="Los cambios que apruebas, con tus palabras o los del Consejero. Vacío: el Asistente dice qué funciona y corrige sólo los problemas reales, sin añadir acontecimientos."
+              />
+            </label>
+          )}
           {current.character === "required" && !memory.characters.length && (
             <p className="muted small">Esta acción necesita la ficha de un personaje.</p>
           )}
@@ -1175,6 +1263,7 @@ function AssistantPanel(props: Props) {
                 <DiffView ops={[{ kind: "same", text: last.target.text }]} label="Tu texto actual" full />
               )}
               {parsed.warning && <p className="notice">Aviso: {parsed.warning}</p>}
+              {judgeKey && judgment?.for === judgeKey && <Judgment j={judgment} />}
             </div>
           ) : parsed.proposal !== null && sceneReady ? (
             // A scene: what goes in, and exactly where.
@@ -1239,6 +1328,23 @@ function AssistantPanel(props: Props) {
             )
           )}
 
+          {!runningHere && last.mode === "scene" && parsed && parsed.proposal === null && parsed.warning && (
+            <div className="compare contradiction" data-origin="aviso de contradicción (escena)">
+              <p className="notice" role="alert">
+                <strong>El argumento contradice algo establecido:</strong> {parsed.warning}
+              </p>
+              <p className="small">
+                Tú decides. Si quieres cambiar ese hecho, el Asistente escribirá la escena según tu argumento; si no, corrige el argumento.{" "}
+                <button
+                  type="button"
+                  className="link small strong"
+                  onClick={() => run({ ...last, body: { ...last.body, confirmChange: true } }, last.provider)}
+                >
+                  Escribir igualmente: cambio ese hecho
+                </button>
+              </p>
+            </div>
+          )}
           {short && (
             <p className="length-note muted small">
               ≈{formatCount(short.words)} palabras de ~{formatCount(short.asked)} solicitadas ·{" "}

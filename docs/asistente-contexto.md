@@ -339,3 +339,15 @@ para su propio diseño.
   revisión profunda (con IA) sigue siendo la acción *Revisar continuidad*.
 - **Tokens:** la escena medida en `tests/e2e/tokens.test.mjs` (sinopsis de 18.000 caracteres, notas
   de 6.000) pasa de ≈12.500 a ≈7.900 tokens de entrada.
+
+## 14. Revisar escena y contradicciones confirmadas
+
+*Editar → Revisar escena* (docs/consejero.md, «Revisar escena y libertad creativa») revisa una
+escena seleccionada con la Memoria completa de quienes aparecen (relaciones y hechos, como
+*Consistencia*) y, si el autor los dio, sólo los «Cambios que quieres». Puede no proponer nada.
+Al terminar la reescritura, el Consejero la compara con el original y deja una recomendación;
+aplicar sigue siendo decisión del autor.
+
+En *Escribir escena*, un argumento que contradice algo establecido ya no se escribe con un aviso
+al pie: el Asistente responde sólo con el aviso, y «Escribir igualmente: cambio ese hecho» la
+escribe (`confirmChange`).

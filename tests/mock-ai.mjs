@@ -14,8 +14,11 @@ const LONG_SCENE = (tag) =>
 const FORMAT_SCENE = "<escena>Leyó *Rayuela* de un tirón.\n\n* * *\n\nAl día siguiente dijo **nunca**.</escena>";
 // Continuity hooks in the argument: "ESCENA-ROPA" changes the garment and brings in a new
 // name; "ESCENA-EDAD" gives Claudia an age the chronology contradicts.
+// "ESCENA-CONTRADICE" in the argument: only the <aviso> (no scene) until the author confirms the change.
 const sceneReply = (prompt) =>
-  prompt.includes("ESCENA-ROPA")
+  prompt.includes("ESCENA-CONTRADICE") && !prompt.includes("El autor ya confirmó el cambio")
+    ? "<aviso>El argumento presenta a Eduardo como un desconocido, y Pola y Eduardo se conocen.</aviso>"
+    : prompt.includes("ESCENA-ROPA")
     ? "<escena>Marcela se ajustó la blusa roja frente al espejo. En el pasillo, Rodrigo esperaba sin decir nada.</escena>"
     : prompt.includes("ESCENA-EDAD")
       ? "<escena>Claudia, que tenía veinte años, cerró la ventana.</escena>"
@@ -31,7 +34,10 @@ const EDIT = "Bien el ritmo.\n\n<reescritura>Texto propuesto por el modelo.</ree
 const EDIT_KEEP = "Bien.\n\n<reescritura>Primero la imagen.\n\n[IMAGEN 1]\n\nY el texto reescrito.</reescritura>";
 // "MANTEN-FORMATO" in a request: a rewrite that keeps the italics and the scene break (as * * *).
 const EDIT_FORMAT = "Bien.\n\n<reescritura>*Uno* reescrito.\n\n* * *\n\nDos reescrito.</reescritura>";
-const editReply = (body) => (body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : body.includes("MANTEN-FORMATO") ? EDIT_FORMAT : EDIT);
+// "REESCRIBE-DESCONOCIDO" in a request: a rewrite that makes a stranger of an acquaintance («La manta»).
+const EDIT_STRANGER = "Así quedaría.\n\n<reescritura>En la parada de carretera, un desconocido ayudó a Pola con las monedas. Se llamaba Eduardo.</reescritura>";
+const editReply = (body) =>
+  body.includes("REESCRIBE-DESCONOCIDO") ? EDIT_STRANGER : body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : body.includes("MANTEN-FORMATO") ? EDIT_FORMAT : EDIT;
 
 /**
  * The Consejero's reading (structured JSON). Built from the request itself, so quotes are
@@ -43,6 +49,23 @@ const editReply = (body) => (body.includes("MANTEN-IMAGENES") ? EDIT_KEEP : body
  *   "JSON-SIEMPRE-ROTO"   never valid
  */
 function readingReply(system, user) {
+  // Juicio comparativo: a proposal that turns an acquaintance into a stranger is worse.
+  if (system.includes("<juicio-comparativo>")) {
+    const proposal = (user.match(/<propuesta>\n([\s\S]*?)\n<\/propuesta>/) ?? [])[1] ?? "";
+    const worse = /desconocid/i.test(proposal);
+    const criteria = ["Tensión emocional", "Subtexto", "Ritmo", "Naturalidad", "Caracterización", "Continuidad", "Fuerza del desenlace"].map((name) => ({
+      name,
+      winner: worse ? "original" : "empate",
+      why: worse ? "El original conserva el reconocimiento." : "Sin diferencias claras.",
+    }));
+    return JSON.stringify({
+      verdict: user.includes("JUICIO-ROTO") ? "quizá" : worse ? "peor" : "igual",
+      summary: worse ? "Conserva tu versión: la propuesta convierte a Eduardo en un desconocido." : "Las dos versiones funcionan parecido.",
+      criteria,
+      losses: worse ? ["El reconocimiento entre Pola y Eduardo"] : [],
+      changes: worse ? ["Pola y Eduardo se conocen; la propuesta los hace desconocidos"] : [],
+    });
+  }
   if (system.includes("<resumen-conversacion>")) {
     const n = (user.match(/^\[(Autor|Consejero)\]/gm) ?? []).length;
     return JSON.stringify({ summary: `Resumen de la conversación: ${n} mensajes anteriores.` });
@@ -167,6 +190,12 @@ function adviceReply(system, user) {
     refs: [{ chapter: n, quote }],
     ...extra,
   });
+  // Revisar escena (both modes): strengths first; the scene works, so nothing is proposed.
+  if (task.startsWith("El autor quiere mejorar una escena")) {
+    const scene = (user.match(/<seleccion capitulo="\d+">\n([\s\S]*?)\n<\/seleccion>/) ?? [])[1] ?? text;
+    const first = scene.split(/(?<=[.!?])\s/)[0].split(/\s+/).slice(0, 6).join(" ").replace(/[.,;:!?]+$/, "");
+    return `**Lo que funciona:** «${first}».\n\n**Veredicto:** La escena funciona; no la cambiaría.\n\n<observaciones>\n[]\n</observaciones>`;
+  }
   // Conversar: a short answer and, at most, one proposal (three when the author asked for options).
   if (system.includes("Modo: conversar.")) {
     const anchored = task.match(/(?:seguir con la propuesta|hablando de la propuesta) (\S+) \(«([^»]*)»/);
