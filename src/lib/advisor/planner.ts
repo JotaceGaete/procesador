@@ -13,7 +13,12 @@ const INTENTS: [AdvisorAction, RegExp][] = [
   ["consecuencias", /qu[eé] (pasa|pasar[ií]a|ocurre|ocurrir[ií]a|sucede|suceder[ií]a|implica|implicar[ií]a|provoca|provocar[ií]a|cambia|cambiar[ií]a) si\b|(^|[¿,.;]\s*)y si\b|consecuencias?|repercusi|qu[eé] efecto tendr/i],
   ["giro", /\bgiros?\b|vuelta de tuerca|sorprend|sorpresa|inesperad|golpe de efecto|sacudir/i],
   // «Mejora esta escena», «hazla más atractiva»: a review of what is written, not new plot.
-  ["revisar", /\bmej[oó]r(o|a|as|ar|arla|arlo|ala|alo|ar[ií]a|emos)\b|m[aá]s (atractiv|interesante|viv[ao]|intens|lograd|eficaz)|\bp[uú]l(e|ela|elo|ir|irla|irlo)\b|qu[eé] le falta|revis(a|ar|emos) (la|esta|mi) escena|(c[oó]mo|qu[eé]) (te parece|ves) (la|esta|mi) escena|esta escena funciona/i],
+  // Not when the question names a narrower subject (a character, the rhythm, the tension,
+  // the dialogue, the novel): those keep their own intent.
+  [
+    "revisar",
+    /^(?![\s\S]*(personaje|protagonista|ritmo|tensi[oó]n|di[aá]logo|estructura|novela|cap[ií]tulo\s+\d))[\s\S]*(\bmej[oó]r(o|a|as|ar|arla|arlo|ala|alo|ar[ií]a|emos)\b|m[aá]s (atractiv|interesante|viv[ao]|intens|lograd|eficaz)|\bp[uú]l(e|ela|elo|ir|irla|irlo)\b|qu[eé] le falta (a )?(la|esta|mi) escena|qu[eé] le falta\s*\??\s*$|revis(a|ar|emos) (la|esta|mi) escena|(c[oó]mo|qu[eé]) (te parece|ves) (la|esta|mi) escena|esta escena funciona)/i,
+  ],
   ["tension", /(subir|aumentar|elevar|m[aá]s|falta|poca|sin|baja)\s+(la\s+)?tensi[oó]n|tensi[oó]n\s+(baja|cae|decae|se pierde)|m[aá]s tens[oa]|suspense|suspenso|aburrid|se hace lent/i],
   ["caminos", /\b(tres|3|varios|otros|distintos|diferentes|algunos)\s+caminos|caminos posibles|qu[eé] opciones tengo|opciones (para|de) (seguir|continuar)|alternativas para|ideas para (seguir|continuar)/i],
   ["oportunidades", /oportunidad|(?<!des)aprovech|potencial|qu[eé] (puedo|podr[ií]a) (usar|explotar)|explotar/i],

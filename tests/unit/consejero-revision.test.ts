@@ -40,6 +40,17 @@ test("«Haz esta escena más atractiva» is a review of what is written, not new
   assert.equal(planQuestion("¿Qué pasaría si Eduardo se baja antes?", ctx).action, "consecuencias");
   assert.equal(planQuestion("¿Cómo sigo desde aquí?", ctx).action, "seguir");
   assert.equal(planQuestion("Mejor sin Eduardo", ctx).explicit, null, "«mejor» alone is not a review");
+  // «Mejorar» with a narrower subject keeps the intent it had before «Revisar escena».
+  for (const [q, action] of [
+    ["¿Cómo mejoro el ritmo?", "analizar"],
+    ["Quiero mejorar la tensión", "analizar"],
+    ["¿Cómo mejoro el personaje de Pola?", "personajes"],
+    ["¿Qué le falta a Pola?", "personajes"],
+    ["Mejora los diálogos", "analizar"],
+    ["Mejora el capítulo 2", "analizar"],
+    ["Mejorar el final de la novela", "analizar"],
+  ])
+    assert.equal(planQuestion(q, ctx).action, action, q);
 });
 
 test("Revisar escena: strengths first, problems apart from preferences, no new events, and «it works» is an answer", async () => {
