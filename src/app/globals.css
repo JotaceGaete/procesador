@@ -3063,3 +3063,23 @@ details.group > p {
 .reader-foot {
   flex-shrink: 0;
 }
+
+/* iOS Safari: prevent focus-driven page magnification on compact screens.
+   Text inputs smaller than 16px trigger Safari's automatic focus zoom.
+   Keep the normal pinch-to-zoom accessibility behavior enabled. */
+@media (max-width: 640px) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea,
+  [contenteditable="true"] {
+    font-size: max(16px, 1em);
+  }
+  /* The workspace must not gain a desktop-sized intrinsic width when a
+     drawer, dialog, or editor control becomes visible. */
+  .workspace,
+  .editor-col,
+  .topbar-wrap {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
