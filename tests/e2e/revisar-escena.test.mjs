@@ -7,6 +7,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { readFileSync } from "node:fs";
 import { BASE, PASSWORD, aiLog, clearAiLog, client, events, login, resetDb, textEditor } from "./helpers.mjs";
 
 let call, novel, ch, ids, browser;
@@ -14,8 +15,11 @@ let call, novel, ch, ids, browser;
 // The scene, between ~12.000 characters before and after: far from the end of the chapter.
 const FILL_BEFORE = Array.from({ length: 120 }, (_, i) => `Párrafo de antes ${i + 1}: el bus avanzaba hacia el norte sin prisa.`).join("\n\n");
 const FILL_AFTER = Array.from({ length: 120 }, (_, i) => `Párrafo de después ${i + 1}: Santiago aparecía entre la niebla.`).join("\n\n");
-const SCENE =
-  "Pola reconoció a don Eduardo dos asientos más adelante. Él la vio tiritar y le ofreció su manta.\n\nHoras después, Pola levantó una punta de la manta y lo invitó a compartirla.";
+// The test scenes written from the author's description (tests/fixtures/la-manta/README.md):
+// fictitious, not the author's text. The first line only labels them as tests.
+const fixture = (name) => readFileSync(new URL(`../fixtures/la-manta/${name}.txt`, import.meta.url), "utf8").split("\n\n").slice(1).join("\n\n").trim();
+const SCENE = fixture("original");
+const DEFECTIVE = fixture("defectuosa");
 const CONTENT = `${FILL_BEFORE}\n\n${SCENE}\n\n${FILL_AFTER}`;
 const START = CONTENT.indexOf(SCENE);
 const END = START + SCENE.length;
@@ -93,16 +97,16 @@ test("Asistente, Revisar escena: the approved changes and only those, the Memori
 });
 
 test("juicio comparativo: the stranger version is worse, with what it loses; only a recommendation; nothing stored", async () => {
-  const proposal = "En la parada de carretera, un desconocido ayudó a Pola con las monedas. Se llamaba Eduardo.";
   await clearAiLog();
-  const r = await call(`/api/novels/${novel}/compare`, "POST", { original: SCENE, proposal, provider: "anthropic" });
+  const r = await call(`/api/novels/${novel}/compare`, "POST", { original: SCENE, proposal: DEFECTIVE, provider: "anthropic" });
   assert.equal(r.status, 200);
   assert.equal(r.data.verdict, "peor");
   assert.deepEqual(r.data.criteria.map((c) => c.name), ["Tensión emocional", "Subtexto", "Ritmo", "Naturalidad", "Caracterización", "Continuidad", "Fuerza del desenlace"]);
   assert.deepEqual(r.data.changes, ["Pola y Eduardo se conocen; la propuesta los hace desconocidos"]);
   const req = await lastBody();
   assert.match(systemOf(req), /<juicio-comparativo>[\s\S]*la decisión es suya/);
-  assert.match(req.messages[0].content, /Pola → conoce → Eduardo[\s\S]*<original>\nPola reconoció[\s\S]*<propuesta>\nEn la parada/);
+  assert.match(req.messages[0].content, /Pola → conoce → Eduardo[\s\S]*<original>\n/);
+  assert.ok(req.messages[0].content.includes(`<original>\n${SCENE}\n</original>\n\n<propuesta>\n${DEFECTIVE}\n</propuesta>`), "both versions, whole");
   assert.match(req.messages[0].content, /Edad: 18 años/);
 
   assert.equal((await call(`/api/novels/${novel}/compare`, "POST", { original: SCENE, proposal: "", provider: "anthropic" })).status, 400);

@@ -890,10 +890,45 @@ el aviso de continuidad, el juicio comparativo y la contradicción confirmada). 
 deterministas con el modelo simulado: comprueban qué recibe el modelo y qué hace el panel, no
 la calidad de la respuesta de un modelo real.
 
+**Escenas de prueba** (`tests/fixtures/la-manta/`): mientras el autor no recupere sus textos,
+las pruebas usan dos escenas **ficticias**, escritas a partir de su descripción y marcadas como
+pruebas en su primera línea. La «original» tiene a Pola (18, embarazada) en el bus a Santiago,
+el reconocimiento de don Eduardo, la manta ofrecida, la invitación de ella y una intimidad que
+crece con gestos, silencios y contacto. La «defectuosa» tiene al desconocido, la parada, las
+monedas, el bolso, el boleto y la casualidad que los sienta juntos. Las usan
+`tests/unit/la-manta-prueba.test.ts` (la escena llega entera al Asistente y a la comparación, el
+aviso `relacion` salta con la defectuosa y no con la original) y `tests/e2e/revisar-escena.test.mjs`
+(la escena entera en medio del capítulo; las dos versiones enteras en el juicio comparativo).
+
+**Con un modelo real**: `npm run eval:la-manta` (`scripts/la-manta-eval.ts`) pasa las dos
+versiones por las mismas instrucciones de Procesador, con la Memoria de la escena construida en
+el script (no toca la base de datos), y comprueba 13 cosas: el Consejero empieza por lo que
+funciona, no propone los acontecimientos de la versión defectuosa, no reescribe la escena y no
+usa palabras de suavización; el Asistente, con esa revisión como cambios pedidos, mantiene a
+Pola y Eduardo como conocidos, no añade esos acontecimientos, conserva la extensión (70–140 %) y
+la manta compartida, o dice que la escena funciona; el juicio comparativo dice que la defectuosa
+es peor, que el original gana en Continuidad y en Tensión emocional, y nombra el cambio de
+relación; y, de control, la escena frente a sí misma no es peor. Escribe un informe en Markdown
+(`--out informe.md`) con las respuestas completas, para leerlas, no sólo para contarlas. Con los
+textos del autor: `-- --original a.txt --defectuosa b.txt`. Necesita la clave del proveedor
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` o `XAI_API_KEY`); cuesta unos céntimos por pasada.
+
+Resultados (2026-10-09):
+
+- `npm test`: todas las unitarias pasan, con las 5 nuevas de `la-manta-prueba.test.ts`.
+- `npm run test:e2e`: todas pasan, con `revisar-escena.test.mjs` sobre las escenas de prueba.
+- `eval:la-manta` contra el modelo simulado: el script funciona de punta a punta (11/13; las dos
+  que fallan son de la reescritura genérica del simulador, que no conserva la escena, lo que
+  muestra que la comprobación detecta una reescritura que la sustituye). **No se ha ejecutado
+  contra un proveedor real**: este entorno no tiene claves de los proveedores.
+
 Límites conocidos:
 
-- Lo que el modelo real hace con estas instrucciones sólo se comprueba con las dos versiones
-  completas de «La manta» y un proveedor real (pendiente).
+- Lo que el modelo real hace con estas instrucciones sólo se comprueba con `eval:la-manta` y una
+  clave real, primero con las escenas de prueba y después con los textos del autor (pendiente).
+- Las comprobaciones de `eval:la-manta` son por palabras («parada», «monedas», «desconocido»,
+  «suaviz…»): detectan lo que se quiere evitar en «La manta», no juzgan la calidad. El informe
+  está para que una persona lo lea.
 - La edad sólo viaja explícita cuando la ficha o la Cronología la dicen; el encargo no la lleva.
 - Las negativas del proveedor no se pueden evitar desde Procesador; el contexto de ficción
   adulta reduce las falsas negativas, no las elimina.

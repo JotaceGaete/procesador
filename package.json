@@ -5,6 +5,7 @@
   "scripts": {
     "icons": "node scripts/icons.mjs",
     "visual:report": "node --import tsx scripts/visual-roundtrip.ts",
+    "eval:la-manta": "node --import tsx --conditions=react-server scripts/la-manta-eval.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
