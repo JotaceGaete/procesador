@@ -9,6 +9,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -20,11 +21,16 @@ const SCHEMA = read("supabase/schema.sql");
 const MIGRATION = read("supabase/actualizar-consejero.sql");
 const PLOT_MIGRATION = read("supabase/actualizar-argumento.sql");
 const CRITIC_MIGRATION = read("supabase/actualizar-critico.sql");
+// Bloqueo de capítulos y capítulos en reserva: una sola migración (docs/integracion-bloqueo-reserva.md).
+const JOINT_MIGRATION = read("supabase/actualizar-bloqueo-reserva.sql");
+const LOCK_MIGRATION = JOINT_MIGRATION;
+const RESERVE_MIGRATION = JOINT_MIGRATION;
 const VERIFY = read("supabase/verificar.sql");
 const OLD = {
   "2b": read("tests/schema/fixtures/schema-2b.sql"),
   fase1: read("tests/schema/fixtures/schema-fase1.sql"),
   fase4: read("tests/schema/fixtures/schema-fase4.sql"),
+  critico: read("tests/schema/fixtures/schema-critico.sql"),
 };
 const TABLES = [
   "novels", "chapters", "characters", "relationships", "places", "facts", "fact_characters", "assets",
@@ -34,7 +40,7 @@ const TABLES = [
 ];
 /** What only schema.sql brings (versions and trash), not actualizar-consejero.sql. */
 const AFTER_CONSEJERO =
-  /chapter_versions|save_chapter_version|trash_chapter|chapter_trash|restore_chapter|chapter_version_auto|chapters_version|time_marks|novels\.calendar|dismissed_warnings|age_anchor|age_approx|characters\.death|anterior a la cronología|novels\.book|anterior a la exportación|novels\.plot|chapter_critiques|ai_usage\.purpose/;
+  /chapter_versions|save_chapter_version|trash_chapter|chapter_trash|restore_chapter|chapter_version_auto|chapters_version|time_marks|novels\.calendar|dismissed_warnings|age_anchor|age_approx|characters\.death|anterior a la cronología|novels\.book|anterior a la exportación|novels\.plot|chapter_critiques|ai_usage\.purpose|chapters\.reserved|chapter_versions\.reserved|create_chapter|move_chapter|capítulos en reserva|chapters\.locked|chapter_guard_locked|chapters_guard_locked|anterior al bloqueo/;
 
 let bin, dir, port;
 
@@ -467,5 +473,561 @@ test("crítico literario: actualizar-critico.sql adds chapter_critiques and the 
     must(db, SCHEMA);
     assertComplete(db);
     assertDataKept(db, fp);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Capítulos en reserva (docs/capitulos-reserva.md)
+// ---------------------------------------------------------------------------
+
+const NOVEL = "11111111-1111-4111-8111-111111111111";
+/** The novel's chapters as "title:position" per group, in order. */
+const groups = (db, novel = NOVEL) => ({
+  main: must(db, `select coalesce(string_agg(title, ',' order by position, created_at), '') from chapters where novel_id = '${novel}' and not reserved`),
+  reserve: must(db, `select coalesce(string_agg(title, ',' order by position, created_at), '') from chapters where novel_id = '${novel}' and reserved`),
+  positions: must(db, `select string_agg(position::text, ',' order by reserved, position) from chapters where novel_id = '${novel}'`),
+});
+/** A novel of five chapters (A–E) with text, an image and versions, on the current schema. */
+function reserveDb() {
+  const db = newDb();
+  must(db, SCHEMA);
+  must(db, DATA, "psql");
+  must(db, `update chapters set title = 'A' where position = 1; update chapters set title = 'B' where position = 2;`);
+  for (const [t, p] of [["C", 3], ["D", 4], ["E", 5]])
+    must(db, `insert into chapters (novel_id, title, position, content) values ('${NOVEL}', '${t}', ${p}, 'Texto de ${t}.')`);
+  return db;
+}
+const id = (db, title) => must(db, `select id from chapters where title = '${title}'`);
+const move = (db, title, reserved, at) => must(db, `select public.move_chapter('${id(db, title)}', ${reserved}, ${at === null ? "null" : at})`);
+
+test("reserva: the migration over the production base (Crítico) adds the groups, keeps ids, text and order, and only strips stored numbers from titles", () => {
+  for (const mode of ["editor", "psql"]) {
+    const db = newDb();
+    must(db, OLD.critico, "psql");
+    must(db, DATA, "psql");
+    must(db, `insert into chapters (id, novel_id, title, position, content) values
+      ('22222222-2222-4222-8222-222222222223', '${NOVEL}', 'Capítulo 3', 3, 'Tres.'),
+      ('22222222-2222-4222-8222-222222222224', '${NOVEL}', 'CAPÍTULO 4: La manta', 4, 'Cuatro.'),
+      ('22222222-2222-4222-8222-222222222225', '${NOVEL}', 'Capítulo 5 - El tren', 5, 'Cinco.'),
+      ('22222222-2222-4222-8222-222222222226', '${NOVEL}', 'Capítulos perdidos', 6, 'Seis.'),
+      ('22222222-2222-4222-8222-222222222227', '${NOVEL}', 'Capítulo 7 La espera', 7, 'Siete.')`, "psql");
+    const ids = must(db, "select string_agg(id::text || ':' || position || ':' || md5(content), ',' order by id) from chapters");
+    const missing = must(db, VERIFY);
+    assert.match(missing, /chapters\.reserved/, "verificar.sql sees what is missing");
+    must(db, RESERVE_MIGRATION, mode);
+    must(db, RESERVE_MIGRATION, mode);
+    assertComplete(db);
+    assert.equal(must(db, "select string_agg(id::text || ':' || position || ':' || md5(content), ',' order by id) from chapters"), ids, "ids, order and text kept");
+    assert.equal(must(db, "select count(*) from chapters where reserved"), "0", "everything stays in the manuscript");
+    assert.equal(
+      must(db, "select string_agg(title, '|' order by position) from chapters"),
+      "Uno|Dos||La manta|El tren|Capítulos perdidos|Capítulo 7 La espera",
+      "only the number the app stored is removed",
+    );
+    // Run again after the author titles a chapter «Capítulo 3: …» on purpose: it is left alone.
+    must(db, "update chapters set title = 'Capítulo 3: Prólogo' where position = 3");
+    must(db, RESERVE_MIGRATION, mode);
+    assert.equal(must(db, "select title from chapters where position = 3"), "Capítulo 3: Prólogo");
+    // The old app keeps working on the new base: its outline call and its reorder.
+    assert.match(must(db, `select string_agg(title, ',') from public.novel_outline('${NOVEL}')`), /Uno,Dos/);
+    must(db, `select public.reorder_chapters('${NOVEL}', (select array_agg(id order by position desc) from chapters))`);
+    assert.ok(must(db, "select public.duplicate_novel('11111111-1111-4111-8111-111111111111', 'Copia')"));
+    // And schema.sql over it is a no-op.
+    const fp = fingerprint(db);
+    must(db, SCHEMA);
+    assertComplete(db);
+    assertDataKept(db, fp);
+  }
+});
+
+test("reserva: the migration's functions are exactly schema.sql's", () => {
+  const fns = (sql) => Object.fromEntries([...sql.matchAll(/create or replace function public\.(\w+)\([\s\S]*?\$\$;\n/g)].map((m) => [m[1], m[0]]));
+  const mine = fns(RESERVE_MIGRATION);
+  const all = fns(SCHEMA);
+  assert.equal(Object.keys(mine).length, 9);
+  for (const [name, body] of Object.entries(mine)) assert.equal(body, all[name], `${name} igual en los dos archivos`);
+});
+
+test("reserva: create a chapter anywhere in either group; each group numbered 1…n", () => {
+  const db = reserveDb();
+  must(db, `select public.create_chapter('${NOVEL}', 'Entre B y C', false, 3)`);
+  must(db, `select public.create_chapter('${NOVEL}', 'Al principio', false, 1)`);
+  must(db, `select public.create_chapter('${NOVEL}', 'Al final', false, null)`);
+  must(db, `select public.create_chapter('${NOVEL}', 'R1', true, null)`);
+  must(db, `select public.create_chapter('${NOVEL}', 'R0', true, 1)`);
+  must(db, `select public.create_chapter('${NOVEL}', 'Lejos', false, 999)`);
+  const g = groups(db);
+  assert.equal(g.main, "Al principio,A,B,Entre B y C,C,D,E,Al final,Lejos");
+  assert.equal(g.reserve, "R0,R1");
+  assert.equal(g.positions, "1,2,3,4,5,6,7,8,9,1,2");
+  assert.equal(must(db, `select title from chapters where title = '  ' or title = ''`), "", "no number in any title");
+  assert.ok(!run(db, `select public.create_chapter('99999999-9999-4999-8999-999999999999', 'x', false, null)`).ok);
+});
+
+test("reserva: reorder (arrows, drag and drop) and move between groups keep text, images, versions and ids", () => {
+  const db = reserveDb();
+  const mimg = must(db, "select id from manuscript_images limit 1");
+  must(db, `update chapters set content = 'Con imagen.' || chr(10) || '[[imagen:${mimg}]]' where title = 'B'`);
+  must(db, `select public.save_chapter_version('${id(db, "B")}', 'manual', 'Mía')`);
+  const before = must(db, "select string_agg(id::text || md5(content) || revision, ',' order by id) from chapters");
+  const versions = must(db, "select count(*) from chapter_versions");
+
+  move(db, "D", false, 2); // up, by drag and drop
+  assert.equal(groups(db).main, "A,D,B,C,E");
+  move(db, "A", false, 2); // down one (the arrow)
+  assert.equal(groups(db).main, "D,A,B,C,E");
+  move(db, "B", true, null); // to the reserve
+  move(db, "E", true, 1); // to the reserve, first
+  let g = groups(db);
+  assert.equal(g.main, "D,A,C");
+  assert.equal(g.reserve, "E,B");
+  assert.equal(g.positions, "1,2,3,1,2");
+  move(db, "B", false, 2); // into the manuscript, between D and A
+  g = groups(db);
+  assert.equal(g.main, "D,B,A,C");
+  assert.equal(g.reserve, "E");
+  assert.equal(g.positions, "1,2,3,4,1");
+  move(db, "C", false, null); // already last: nothing changes
+  assert.equal(groups(db).main, "D,B,A,C");
+
+  assert.equal(must(db, "select string_agg(id::text || md5(content) || revision, ',' order by id) from chapters"), before, "ids, text and revisions intact");
+  assert.equal(must(db, "select count(*) from chapter_versions"), versions, "moving leaves no version");
+  assert.equal(must(db, `select chapter_id from manuscript_images where id = '${mimg}'`), id(db, "B"), "its image is still in it");
+});
+
+test("reserva: the manuscript keeps a chapter; deleting and restoring keep the group", () => {
+  const db = reserveDb();
+  for (const t of ["B", "C", "D", "E"]) move(db, t, true, null);
+  const r = run(db, `select public.move_chapter('${id(db, "A")}', true, null)`);
+  assert.ok(!r.ok && /al menos un capítulo/.test(r.error), "the last one can't go to the reserve");
+  assert.ok(!run(db, `select public.trash_chapter('${id(db, "A")}')`).ok, "nor to the trash");
+  // A chapter in reserve can always be deleted, and comes back to the reserve.
+  const e = id(db, "E");
+  must(db, `select public.trash_chapter('${e}')`);
+  const back = must(db, `select public.restore_chapter('${NOVEL}', '${e}')`);
+  assert.equal(must(db, `select reserved::text || ':' || position from chapters where id = '${back}'`), "true:4", "back in the reserve, at its end");
+  assert.equal(groups(db).main, "A", "never into the manuscript");
+  // One from the manuscript comes back to the manuscript.
+  move(db, "B", false, null);
+  const b = id(db, "B");
+  must(db, `select public.trash_chapter('${b}')`);
+  const b2 = must(db, `select public.restore_chapter('${NOVEL}', '${b}')`);
+  assert.equal(must(db, `select reserved::text || ':' || position from chapters where id = '${b2}'`), "false:2");
+});
+
+test("reserva: two moves at once are applied one after the other (no duplicate or lost position)", async () => {
+  const db = reserveDb();
+  const { spawn } = await import("node:child_process");
+  const go = (sql) =>
+    new Promise((resolve) => {
+      const p = spawn(path.join(bin, "psql"), ["-h", dir, "-p", String(port), "-U", "postgres", "-d", db, "-v", "ON_ERROR_STOP=1", "-q", "-c", sql]);
+      p.on("exit", resolve);
+    });
+  // The first holds the novel's lock for a moment; the second waits for it.
+  await Promise.all([
+    go(`begin; select public.move_chapter('${id(db, "A")}', true, null); select pg_sleep(0.5); commit;`),
+    go(`select pg_sleep(0.1); select public.move_chapter('${id(db, "E")}', false, 1);`),
+    go(`select pg_sleep(0.15); select public.create_chapter('${NOVEL}', 'Nuevo', false, 2);`),
+  ]);
+  const g = groups(db);
+  assert.equal(g.reserve, "A");
+  assert.equal(g.main, "E,Nuevo,B,C,D");
+  assert.equal(g.positions, "1,2,3,4,5,1");
+});
+
+test("reserva: going to the reserve invalidates what the Consejero derived from it; coming back cleans its thread refs", () => {
+  const db = reserveDb();
+  const [a, b, c] = ["A", "B", "C"].map((t) => id(db, t));
+  const digest = (ch, threads, edited = false) =>
+    must(db, `insert into chapter_digests (chapter_id, novel_id, source_revision, summary, threads, author_edited)
+              values ('${ch}', '${NOVEL}', 0, 'Resumen', '${JSON.stringify(threads)}', ${edited})`);
+  const thread = (title, extra = "") =>
+    must(db, `insert into story_threads (novel_id, title${extra ? ", origin, confirmed" : ""}) values ('${NOVEL}', '${title}'${extra}) returning id`);
+  const onlyB = thread("Sólo de B");
+  const shared = thread("De A y de B");
+  const authors = thread("Del autor", ", 'author', false");
+  const confirmed = thread("Confirmado", ", 'advisor', true");
+  digest(a, [{ thread: shared, change: "opened", quote: "" }]);
+  digest(b, [
+    { thread: onlyB, change: "opened", quote: "" },
+    { thread: shared, change: "advanced", quote: "" },
+    { thread: authors, change: "opened", quote: "" },
+    { thread: confirmed, change: "opened", quote: "" },
+  ]);
+  digest(c, []); // made with B's summary as "the previous chapter"
+  must(db, `insert into novel_digests (novel_id, summary, based_on) values ('${NOVEL}', 'Todo', '{"${a}": 0, "${b}": 0}')`);
+
+  move(db, "B", true, null);
+  assert.equal(must(db, `select count(*) from chapter_digests where chapter_id = '${b}'`), "0", "its digest");
+  assert.equal(must(db, `select count(*) from chapter_digests where chapter_id = '${c}'`), "0", "the next one's");
+  assert.equal(must(db, `select count(*) from chapter_digests where chapter_id = '${a}'`), "1", "others stay");
+  assert.equal(must(db, `select count(*) from novel_digests`), "0", "the global summary that included it");
+  assert.equal(
+    must(db, "select string_agg(title, ',' order by title) from story_threads"),
+    "Confirmado,De A y de B,Del autor",
+    "only the possible thread that came from it alone",
+  );
+
+  // A digest corrected by the author is kept (the app doesn't read it while in reserve)…
+  move(db, "B", false, 2);
+  digest(b, [{ thread: onlyB, change: "opened", quote: "" }, { thread: shared, change: "advanced", quote: "" }], true);
+  must(db, `delete from story_threads where id = '${onlyB}'`);
+  move(db, "C", true, null);
+  move(db, "B", true, null);
+  assert.equal(must(db, `select count(*) from chapter_digests where chapter_id = '${b}'`), "1");
+  // …and coming back it only keeps references to threads that exist.
+  move(db, "B", false, null);
+  assert.equal(must(db, `select threads::text from chapter_digests where chapter_id = '${b}'`), JSON.stringify([{ quote: "", change: "advanced", thread: shared }]).replace(/,/g, ", ").replace(/:/g, ": "));
+  // A global summary made without it is merely incomplete: it stays (and the app sees it is not current).
+  must(db, `insert into novel_digests (novel_id, summary, based_on) values ('${NOVEL}', 'Todo', '{"${a}": 0}')`);
+  move(db, "D", true, null);
+  assert.equal(must(db, `select count(*) from novel_digests`), "1");
+});
+
+test("reserva: duplicating a novel keeps each chapter's group", () => {
+  const db = reserveDb();
+  move(db, "C", true, null);
+  must(db, `select public.duplicate_novel('${NOVEL}', 'Copia')`);
+  const copy = must(db, "select id from novels where title = 'Copia'");
+  const g = groups(db, copy);
+  assert.equal(g.main, "A,B,D,E");
+  assert.equal(g.reserve, "C");
+});
+
+test("reserva: closed to the public keys", () => {
+  const db = reserveDb();
+  for (const fn of ["create_chapter(uuid, text, boolean, integer)", "move_chapter(uuid, boolean, integer)"]) {
+    assert.equal(must(db, `select has_function_privilege('anon', 'public.${fn}', 'execute')`), "f");
+    assert.equal(must(db, `select has_function_privilege('authenticated', 'public.${fn}', 'execute')`), "f");
+    assert.equal(must(db, `select has_function_privilege('service_role', 'public.${fn}', 'execute')`), "t");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Bloqueo de capítulos (docs/bloqueo-capitulos.md)
+// ---------------------------------------------------------------------------
+
+const CH1 = "22222222-2222-4222-8222-222222222221";
+const CH2 = "22222222-2222-4222-8222-222222222222";
+
+test("bloqueo: actualizar-bloqueo.sql over the production base (Crítico), twice, both ways, keeps every text and leaves every chapter unlocked", () => {
+  for (const mode of ["editor", "psql"]) {
+    const db = newDb();
+    must(db, OLD.critico, "psql");
+    must(db, DATA, "psql");
+    assert.equal(must(db, "select count(*) from information_schema.columns where table_name = 'chapters' and column_name = 'locked'"), "0", "the base before");
+    const fp = fingerprint(db);
+    const texts = must(db, "select string_agg(id || ':' || revision || ':' || content, '|' order by id) from chapters");
+    must(db, LOCK_MIGRATION, mode);
+    must(db, LOCK_MIGRATION, mode);
+    assertComplete(db);
+    assertDataKept(db, fp);
+    assert.equal(must(db, "select string_agg(id || ':' || revision || ':' || content, '|' order by id) from chapters"), texts, "same texts, same revisions");
+    assert.equal(must(db, "select count(*) from chapters where locked or locked_at is not null"), "0", "existing chapters stay unlocked");
+    assert.equal(must(db, `select string_agg(locked::text, ',') from public.novel_outline('${NOVEL}')`), "false,false");
+    // schema.sql over it is still a no-op for its data.
+    must(db, SCHEMA);
+    assertComplete(db);
+    assertDataKept(db, fp);
+  }
+});
+
+test("bloqueo: schema.sql completo over the production base adds the lock without touching texts", () => {
+  const db = newDb();
+  must(db, OLD.critico, "psql");
+  must(db, DATA, "psql");
+  const fp = fingerprint(db);
+  must(db, SCHEMA);
+  must(db, SCHEMA, "psql");
+  assertComplete(db);
+  assertDataKept(db, fp);
+  assert.equal(must(db, "select count(*) from chapters where locked"), "0");
+});
+
+test("bloqueo: the database refuses any change of a locked chapter's text or title, wherever it comes from", () => {
+  const db = newDb();
+  must(db, SCHEMA);
+  must(db, DATA, "psql");
+  const before = must(db, `select title || '|' || content || '|' || revision from chapters where id = '${CH1}'`);
+  const versions = must(db, `select count(*) from chapter_versions where chapter_id = '${CH1}'`);
+  must(db, `update chapters set locked = true, locked_at = now() where id = '${CH1}'`);
+  assert.equal(must(db, `select title || '|' || content || '|' || revision from chapters where id = '${CH1}'`), before, "locking changes nothing else (not even the revision)");
+
+  for (const sql of [
+    `update chapters set content = 'Otro texto' where id = '${CH1}'`,
+    `update chapters set content = content || ' más' where id = '${CH1}'`,
+    `update chapters set content = '' where id = '${CH1}'`,
+    `update chapters set title = 'Otro título' where id = '${CH1}'`,
+    // Unlocking and writing at once: never.
+    `update chapters set locked = false, content = 'Colado al desbloquear' where id = '${CH1}'`,
+    // A bulk update (an old or stray statement) can't touch it either.
+    `update chapters set content = 'Todo igual' where novel_id = '${NOVEL}'`,
+  ]) {
+    const r = run(db, sql);
+    assert.ok(!r.ok, `refused: ${sql}`);
+    assert.match(r.error, /bloqueado/);
+  }
+  assert.equal(must(db, `select title || '|' || content || '|' || revision from chapters where id = '${CH1}'`), before, "intact");
+  assert.equal(must(db, `select content from chapters where id = '${CH2}'`), "Texto del dos.", "the bulk update changed nothing at all (one statement)");
+  assert.equal(must(db, `select count(*) from chapter_versions where chapter_id = '${CH1}'`), versions, "no version from a refused change");
+
+  // The error code the server turns into 423.
+  assert.equal(run(db, `do $$ begin update public.chapters set content = 'x' where id = '${CH1}'; exception when sqlstate 'P0423' then null; end $$;`).ok, true, "SQLSTATE P0423");
+
+  // What doesn't change the text is allowed: its place in the novel, an identical write.
+  must(db, `update chapters set position = 5 where id = '${CH1}'`);
+  must(db, `update chapters set content = content, title = title where id = '${CH1}'`);
+  // Other chapters are still editable.
+  must(db, `update chapters set content = 'Texto del dos, editado.' where id = '${CH2}'`);
+
+  // Unlocking is its own statement; then it is editable again.
+  must(db, `update chapters set locked = false, locked_at = null where id = '${CH1}'`);
+  must(db, `update chapters set content = 'Ya editable.' where id = '${CH1}'`);
+  assert.equal(must(db, `select content from chapters where id = '${CH1}'`), "Ya editable.");
+});
+
+test("bloqueo: a locked chapter can't go to the trash, but the novel can still be duplicated and deleted", () => {
+  const db = newDb();
+  must(db, SCHEMA);
+  must(db, DATA, "psql");
+  must(db, `update chapters set locked = true where id = '${CH1}'`);
+  const r = run(db, `select public.trash_chapter('${CH1}')`);
+  assert.ok(!r.ok);
+  assert.match(r.error, /bloqueado/);
+  assert.equal(must(db, `select count(*) from chapters where id = '${CH1}'`), "1");
+  assert.equal(must(db, "select count(*) from chapter_versions where reason = 'delete'"), "0", "nothing kept for a refused delete");
+  must(db, `select public.trash_chapter('${CH2}')`); // an unlocked one still goes
+
+  // Duplicating rewrites image markers in the copy: the lock is not copied, so nothing blocks it.
+  must(db, `update chapters set locked = false where id = '${CH1}'`);
+  const img = must(db, "select id from manuscript_images limit 1");
+  must(db, `update chapters set content = 'Antes [[imagen:${img}]] después' where id = '${CH1}'`);
+  must(db, `update chapters set locked = true where id = '${CH1}'`);
+  const copy = JSON.parse(must(db, `select public.duplicate_novel('${NOVEL}', 'Copia')`)).id;
+  assert.ok(copy);
+  assert.equal(must(db, `select count(*) from chapters where novel_id = '${copy}' and locked`), "0", "the copy starts unlocked");
+  assert.doesNotMatch(must(db, `select content from chapters where novel_id = '${copy}'`), new RegExp(img), "its own image");
+  assert.equal(must(db, `select content from chapters where id = '${CH1}'`), `Antes [[imagen:${img}]] después`, "the original, intact");
+
+  // Deleting the whole novel (an explicit, confirmed action) is not blocked by its locks.
+  must(db, `delete from novels where id = '${NOVEL}'`);
+  assert.equal(must(db, `select count(*) from chapters where novel_id = '${NOVEL}'`), "0");
+});
+
+test("bloqueo: concurrent sessions: a save that lost the race against the lock is refused", () => {
+  const db = newDb();
+  must(db, SCHEMA);
+  must(db, DATA, "psql");
+  // The server's own save: only if unlocked and at the revision the tab saw.
+  const rev = must(db, `select revision from chapters where id = '${CH1}'`);
+  must(db, `update chapters set locked = true where id = '${CH1}'`);
+  const out = must(db, `update chapters set content = 'Guardado tardío' where id = '${CH1}' and locked = false and revision = ${rev} returning id`);
+  assert.equal(out, "", "no row");
+  assert.notEqual(must(db, `select content from chapters where id = '${CH1}'`), "Guardado tardío");
+});
+
+// ---------------------------------------------------------------------------
+// Bloqueo + reserva juntos (docs/integracion-bloqueo-reserva.md)
+// ---------------------------------------------------------------------------
+
+const UNDO = read("supabase/deshacer-bloqueo-reserva.sql");
+const PR12 = read("tests/schema/fixtures/actualizar-bloqueo-pr12.sql");
+const PR13 = read("tests/schema/fixtures/actualizar-reserva-pr13.sql");
+/** Every chapter as it reads in the outline: title|locked|reserved, in order. */
+const outline = (db, novel = NOVEL) =>
+  must(db, `select string_agg(title || '|' || locked || '|' || reserved, ',' order by reserved, position) from public.novel_outline('${novel}')`);
+/** Definitions of the functions the production code calls on chapters, to compare two bases. */
+const PROD_FUNCS = ["novel_outline", "reorder_chapters", "save_chapter_version", "trash_chapter", "restore_chapter", "duplicate_novel", "chapter_trash"];
+const defs = (db) =>
+  must(db, `select string_agg(proname || ':' || pg_get_functiondef(oid), E'\\n---\\n' order by proname) from pg_proc
+            where pronamespace = 'public'::regnamespace and proname = any(array['${PROD_FUNCS.join("','")}'])`);
+
+test("integración: the joint migration over the production base, twice, both ways: both columns, no text lost, the old code's calls still work", () => {
+  for (const mode of ["editor", "psql"]) {
+    const db = newDb();
+    must(db, OLD.critico, "psql");
+    must(db, DATA, "psql");
+    must(db, `insert into chapters (id, novel_id, title, position, content) values
+      ('22222222-2222-4222-8222-222222222223', '${NOVEL}', 'Capítulo 3', 3, 'Tres.'),
+      ('22222222-2222-4222-8222-222222222224', '${NOVEL}', 'Capítulo 4: La manta', 4, 'Cuatro.')`, "psql");
+    must(db, `select public.save_chapter_version('22222222-2222-4222-8222-222222222224', 'manual', 'Antes')`);
+    const texts = must(db, "select string_agg(id || ':' || position || ':' || md5(content), ',' order by id) from chapters");
+    const versions = must(db, "select count(*) || md5(string_agg(content, '' order by id)) from chapter_versions");
+    const missing = must(db, VERIFY);
+    for (const what of ["chapters.locked", "chapters.reserved", "chapter_guard_locked", "move_chapter"]) assert.match(missing, new RegExp(what.replace(".", "\\.")));
+    must(db, JOINT_MIGRATION, mode);
+    must(db, JOINT_MIGRATION, mode);
+    assertComplete(db);
+    assert.equal(must(db, "select string_agg(id || ':' || position || ':' || md5(content), ',' order by id) from chapters"), texts, "ids, order and texts");
+    assert.equal(must(db, "select count(*) || md5(string_agg(content, '' order by id)) from chapter_versions"), versions, "versions untouched");
+    assert.equal(outline(db), "Uno|false|false,Dos|false|false,|false|false,La manta|false|false");
+    // The code in production today (main) on the new base: the same calls it makes.
+    assert.equal(must(db, `select count(*) from (select id, title, position, chars, words, updated_at from public.novel_outline('${NOVEL}')) o`), "4");
+    must(db, `select public.reorder_chapters('${NOVEL}', (select array_agg(id order by position desc) from chapters where novel_id = '${NOVEL}'))`);
+    must(db, `update chapters set content = 'Editado por el código anterior.', title = 'Nuevo título' where id = '22222222-2222-4222-8222-222222222221'`);
+    must(db, `insert into chapters (novel_id, title, position) values ('${NOVEL}', 'Capítulo 5', 5)`); // its "new chapter"
+    must(db, `select public.trash_chapter('22222222-2222-4222-8222-222222222223')`);
+    must(db, `select public.restore_chapter('${NOVEL}', '22222222-2222-4222-8222-222222222223')`);
+    assert.ok(JSON.parse(must(db, `select public.duplicate_novel('${NOVEL}', 'Copia')`)).id);
+    assert.equal(must(db, "select count(*) from chapters where locked or reserved"), "0", "nothing locked or reserved until the new code does it");
+    const fp = fingerprint(db);
+    must(db, SCHEMA);
+    assertComplete(db);
+    assertDataKept(db, fp);
+  }
+});
+
+test("integración: the joint migration also works where PR #12's or PR #13's migration was already applied", () => {
+  // PR #12 first, with a chapter already locked whose title still carries the stored number.
+  let db = newDb();
+  must(db, OLD.critico, "psql");
+  must(db, DATA, "psql");
+  must(db, `insert into chapters (id, novel_id, title, position, content) values
+    ('22222222-2222-4222-8222-222222222223', '${NOVEL}', 'Capítulo 3: Revisado', 3, 'Tres.'),
+    ('22222222-2222-4222-8222-222222222224', '${NOVEL}', 'Capítulo 4', 4, 'Cuatro.')`, "psql");
+  must(db, PR12);
+  must(db, `update chapters set locked = true, locked_at = now() where id = '22222222-2222-4222-8222-222222222223'`);
+  must(db, JOINT_MIGRATION);
+  must(db, JOINT_MIGRATION, "psql");
+  assertComplete(db);
+  assert.equal(outline(db), "Uno|false|false,Dos|false|false,Capítulo 3: Revisado|true|false,|false|false", "the lock protects its title");
+  assert.ok(!run(db, `update chapters set title = 'x' where id = '22222222-2222-4222-8222-222222222223'`).ok, "still locked");
+
+  // PR #13 first, with a chapter already in the reserve.
+  db = newDb();
+  must(db, OLD.critico, "psql");
+  must(db, DATA, "psql");
+  must(db, PR13);
+  must(db, `select public.move_chapter('22222222-2222-4222-8222-222222222222', true, null)`);
+  must(db, `update chapters set title = 'Capítulo 9' where id = '22222222-2222-4222-8222-222222222221'`); // the author's own, after
+  must(db, JOINT_MIGRATION);
+  assertComplete(db);
+  assert.equal(outline(db), "Capítulo 9|false|false,Dos|false|true", "the reserve kept; titles not stripped a second time");
+});
+
+test("integración: a locked chapter moves freely (place, reserve, back) but its text and title stay protected", () => {
+  const db = reserveDb();
+  const b = id(db, "B");
+  must(db, `update chapters set locked = true, locked_at = now() where id = '${b}'`);
+  const before = must(db, `select title || '|' || md5(content) || '|' || revision from chapters where id = '${b}'`);
+  const versions = must(db, "select count(*) from chapter_versions");
+  move(db, "B", false, 1);
+  assert.equal(groups(db).main, "B,A,C,D,E");
+  move(db, "B", true, null);
+  assert.equal(outline(db), "A|false|false,C|false|false,D|false|false,E|false|false,B|true|true");
+  for (const sql of [`update chapters set content = 'x' where id = '${b}'`, `update chapters set title = 'x' where id = '${b}'`]) {
+    const r = run(db, sql);
+    assert.ok(!r.ok && /bloqueado/.test(r.error), `in the reserve too: ${sql}`);
+  }
+  assert.ok(/bloqueado/.test(run(db, `select public.trash_chapter('${b}')`).error), "a locked chapter in the reserve can't go to the trash");
+  move(db, "B", false, 3);
+  assert.equal(groups(db).main, "A,C,B,D,E");
+  assert.equal(must(db, `select title || '|' || md5(content) || '|' || revision from chapters where id = '${b}'`), before, "moving kept text, title and revision");
+  assert.equal(must(db, "select count(*) from chapter_versions"), versions, "and made no version");
+  assert.equal(must(db, `select locked from chapters where id = '${b}'`), "t", "still locked");
+  // The manuscript's last chapter, even if locked, can't go to the reserve (the usual rule).
+  for (const t of ["A", "C", "D", "E"]) move(db, t, true, null);
+  assert.match(run(db, `select public.move_chapter('${b}', true, null)`).error, /al menos un capítulo/);
+});
+
+test("integración: unlock, trash and restore a chapter in the reserve: back to the reserve, unlocked; the copy keeps groups and starts unlocked", () => {
+  const db = reserveDb();
+  move(db, "C", true, null);
+  must(db, `update chapters set locked = true where title in ('C', 'D')`);
+  const copy = JSON.parse(must(db, `select public.duplicate_novel('${NOVEL}', 'Copia')`)).id;
+  assert.equal(outline(db, copy), "A|false|false,B|false|false,D|false|false,E|false|false,C|false|true");
+  const c = must(db, `select id from chapters where title = 'C' and novel_id = '${NOVEL}'`);
+  must(db, `update chapters set locked = false where id = '${c}'`);
+  must(db, `select public.trash_chapter('${c}')`);
+  const back = must(db, `select public.restore_chapter('${NOVEL}', '${c}')`);
+  assert.equal(must(db, `select reserved || ':' || locked from chapters where id = '${back}'`), "true:false");
+  assert.equal(must(db, `select content from chapters where id = '${back}'`), "Texto de C.");
+});
+
+test("integración: deshacer-bloqueo-reserva.sql returns the base to production's functions without losing a chapter, and the joint migration applies again", () => {
+  const prod = newDb();
+  must(prod, OLD.critico, "psql");
+  const prodDefs = defs(prod);
+
+  const db = newDb();
+  must(db, OLD.critico, "psql");
+  must(db, DATA, "psql");
+  must(db, `insert into chapters (novel_id, title, position, content) values ('${NOVEL}', 'Tres', 3, 'Texto del tres.')`);
+  must(db, JOINT_MIGRATION);
+  must(db, `select public.move_chapter('22222222-2222-4222-8222-222222222221', true, null)`);
+  must(db, `update chapters set locked = true where id = '22222222-2222-4222-8222-222222222222'`);
+  const texts = must(db, "select string_agg(id || ':' || md5(content) || ':' || title, ',' order by id) from chapters");
+  for (const mode of ["editor", "psql"]) must(db, UNDO, mode); // twice: idempotent
+  assert.equal(defs(db), prodDefs, "the same functions as production");
+  assert.equal(must(db, "select count(*) from information_schema.columns where table_name in ('chapters', 'chapter_versions') and column_name in ('locked', 'locked_at', 'reserved')"), "0");
+  assert.equal(must(db, "select count(*) from pg_proc where proname in ('move_chapter', 'create_chapter', 'chapter_guard_locked')"), "0");
+  assert.equal(must(db, "select string_agg(id || ':' || md5(content) || ':' || title, ',' order by id) from chapters"), texts, "every chapter, text and title");
+  assert.equal(must(db, `select string_agg(title, ',' order by position) from chapters where novel_id = '${NOVEL}'`), "Dos,Tres,Uno", "the reserve after the manuscript");
+  assert.equal(must(db, `select string_agg(position::text, ',' order by position) from chapters where novel_id = '${NOVEL}'`), "1,2,3");
+  must(db, `update chapters set content = 'Editable otra vez.' where id = '22222222-2222-4222-8222-222222222222'`);
+  assert.equal(must(db, "select has_function_privilege('service_role', 'public.novel_outline(uuid)', 'execute')"), "t");
+  assert.equal(must(db, "select has_function_privilege('anon', 'public.novel_outline(uuid)', 'execute')"), "f");
+  // And forward again.
+  must(db, JOINT_MIGRATION);
+  assertComplete(db);
+});
+
+test("integración: on a base older than the Crítico the joint migration refuses to run and changes nothing", () => {
+  const db = newDb();
+  must(db, OLD.fase4, "psql");
+  must(db, DATA, "psql");
+  const fp = fingerprint(db);
+  const r = run(db, JOINT_MIGRATION);
+  assert.ok(!r.ok);
+  assert.match(r.error, /no está al día con el Crítico/);
+  assertDataKept(db, fp);
+  assert.equal(must(db, "select count(*) from information_schema.columns where table_name = 'chapters' and column_name in ('locked', 'reserved')"), "0");
+});
+
+test("integración: huella.sql is the same before and after the migration (and after undoing it); only titles with a stored number change their own line", () => {
+  const HUELLA = read("supabase/huella.sql");
+  const db = newDb();
+  must(db, OLD.critico, "psql");
+  must(db, DATA, "psql");
+  const before = must(db, HUELLA);
+  assert.match(before, /^chapters\|2 filas · [0-9a-f]{32}$/m);
+  must(db, JOINT_MIGRATION);
+  assert.equal(must(db, HUELLA), before, "no title had a number: everything equal");
+  must(db, UNDO);
+  assert.equal(must(db, HUELLA), before, "undone: equal");
+
+  must(db, `update chapters set title = 'Capítulo 2' where title = 'Dos'`);
+  const numbered = must(db, HUELLA);
+  must(db, JOINT_MIGRATION);
+  const after = must(db, HUELLA);
+  const diff = numbered.split("\n").filter((l, i) => l !== after.split("\n")[i]);
+  assert.deepEqual(diff.map((l) => l.split("|")[0]), ["chapters.title"], "only the titles line");
+});
+
+test("integración: over production as it really is (Crítico + Privacidad's migrations), the joint migration and its undo leave Privacidad working", () => {
+  const SESSIONS = read("tests/schema/fixtures/actualizar-sesiones-privacidad.sql");
+  const PROTECTED = read("tests/schema/fixtures/actualizar-protegidas-privacidad.sql");
+  for (const mode of ["editor", "psql"]) {
+    const db = newDb();
+    must(db, OLD.critico, "psql");
+    must(db, SESSIONS);
+    must(db, PROTECTED);
+    must(db, DATA, "psql");
+    must(db, `insert into novel_protection (novel_id, secret_hash, secret_kind, pepper_version) values ('${NOVEL}', 'h', 'pin', 1)`);
+    const HUELLA = read("supabase/huella.sql");
+    const before = must(db, HUELLA);
+    assert.match(before, /^novel_protection\|1 filas/m, "the huella covers Privacidad's tables too");
+    must(db, JOINT_MIGRATION, mode);
+    must(db, JOINT_MIGRATION, mode);
+    assertComplete(db);
+    assert.equal(must(db, HUELLA), before);
+    // Privacidad's functions still work over the new ones.
+    const copy = JSON.parse(must(db, `select public.duplicate_novel_with_protection('${NOVEL}', 'Copia')`)).id;
+    assert.equal(must(db, `select count(*) from novel_protection where novel_id = '${copy}'`), "1");
+    assert.equal(outline(db, copy), "Uno|false|false,Dos|false|false");
+    assert.equal(must(db, `select string_agg(title || ':' || protected || ':' || locked, ',' order by title) from public.library('${crypto.randomUUID()}')`), "Copia:true:true,Mi novela:true:true");
+    must(db, UNDO, mode);
+    assert.equal(must(db, `select count(*) from public.novel_protection`), "2");
+    assert.ok(JSON.parse(must(db, `select public.duplicate_novel_with_protection('${NOVEL}', 'Copia 2')`)).id);
   }
 });

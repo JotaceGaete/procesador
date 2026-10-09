@@ -163,6 +163,7 @@ export default function MemoryModal({
         ? chapterLabel(
             chapters.findIndex((c) => c.id === f.chapter_id),
             chapters.find((c) => c.id === f.chapter_id)?.title ?? "",
+            chapters.find((c) => c.id === f.chapter_id)?.reserved,
           )
         : "",
       f.story_time,
@@ -392,7 +393,7 @@ export default function MemoryModal({
                     <option value="">—</option>
                     {chapters.map((c, i) => (
                       <option key={c.id} value={c.id}>
-                        {chapterLabel(i, c.title)}
+                        {chapterLabel(i, c.title, c.reserved)}
                       </option>
                     ))}
                   </select>

@@ -1,5 +1,5 @@
 import "server-only";
-import { db, getChapterTexts, getMemory, getOutline } from "./supabase";
+import { db, getChapterTexts, getScopedMemory, readingOutline } from "./supabase";
 import { HttpError } from "./http";
 import {
   chronology,
@@ -22,6 +22,8 @@ export async function getTimeMarks(novelId: string): Promise<TimeMark[]> {
 /**
  * The novel's chronology. With `texts`, who appears where is read from the chapters (for
  * the warnings); without, only times and ages (cheaper, enough for the AI's context).
+ * By default over the manuscript only: a chapter in reserve has no place in the story's time
+ * yet (docs/capitulos-reserva.md); its marks are kept and ignored until it is incorporated.
  */
 export async function novelChronology(
   novel: Pick<Novel, "id" | "calendar">,
@@ -29,8 +31,8 @@ export async function novelChronology(
 ): Promise<{ result: Chronology; chapters: { id: string; title: string }[]; characters: Character[]; marks: TimeMark[] }> {
   const [marks, memory, chapters] = await Promise.all([
     getTimeMarks(novel.id),
-    opts.memory ?? getMemory(novel.id),
-    opts.chapters ?? (opts.texts ? getChapterTexts(novel.id) : getOutline(novel.id)),
+    opts.memory ?? getScopedMemory(novel.id),
+    opts.chapters ?? (opts.texts ? getChapterTexts(novel.id) : readingOutline(novel.id)),
   ]);
   const result = chronology({
     calendar: novel.calendar,

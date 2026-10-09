@@ -63,7 +63,8 @@ export function present(content: string): PresentedBlock[] {
  * A chapter's heading as the book shows it: «Capítulo 3» and the author's own title. The
  * default title the app gives («Capítulo 3») is not repeated under the number.
  */
-export function chapterHeading(index: number, title: string): { number: string; title: string } {
+export function chapterHeading(index: number, title: string, reserved = false): { number: string; title: string } {
   const t = title.trim();
-  return { number: `Capítulo ${index + 1}`, title: t && !/^cap[ií]tulo\s+\d+$/i.test(t) ? t : "" };
+  // A chapter in reserve has no number (docs/capitulos-reserva.md).
+  return { number: reserved ? "En reserva" : `Capítulo ${index + 1}`, title: t && !/^cap[ií]tulo\s+\d+$/i.test(t) ? t : "" };
 }

@@ -103,7 +103,7 @@ export function mightBeRequest(text: string): boolean {
 // ---------------------------------------------------------------------------
 
 export interface ToolContext {
-  chapters: { id: string; title: string; content: string; revision: number }[];
+  chapters: { id: string; title: string; content: string; revision: number; reserved?: boolean }[];
   digests: Map<string, ChapterDigest>;
   memory: Memory;
   threads: StoryThread[];
@@ -153,7 +153,7 @@ function chapterIndex(ctx: ToolContext, n: unknown): number | null {
   return Number.isInteger(i) && i >= 0 && i < ctx.chapters.length ? i : null;
 }
 
-const label = (ctx: ToolContext, i: number) => chapterLabel(i, ctx.chapters[i].title);
+const label = (ctx: ToolContext, i: number) => chapterLabel(i, ctx.chapters[i].title, ctx.chapters[i].reserved);
 
 const STOP = new Set(
   "para como pero porque cuando donde esta este esto todo toda sobre entre desde hasta tiene tenía había habia fueron estaba nunca siempre algo nada".split(" "),

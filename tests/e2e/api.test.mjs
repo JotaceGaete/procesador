@@ -66,7 +66,7 @@ test("chapters: each one keeps its own revision line", async () => {
   s.ch3 = r3.data.id;
   assert.deepEqual(
     r3.data.chapters.map((c) => c.title),
-    ["La llegada", "Capítulo 2", "El incendio"],
+    ["La llegada", "", "El incendio"],
   );
   await call(`/api/chapters/${s.ch2}`, "PATCH", {
     content: "Marta habló con Elena en la cocina. Elena le dijo que Juan mentía.",

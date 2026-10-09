@@ -6,7 +6,8 @@ type Ctx = { params: Promise<{ id: string }> };
 
 /**
  * Copia de seguridad (docs/versiones.md): everything the author wrote and decided for this
- * novel, as data. The browser adds the original files (each through its own short-lived
+ * novel, as data: every chapter, those in reserve too (`reserved`: docs/capitulos-reserva.md;
+ * the book's exports leave them out). The browser adds the original files (each through its own short-lived
  * link: they can be larger than what a function may return) and builds the ZIP.
  */
 export const GET = handler<Ctx>(async (_request, { params }) => {
@@ -14,7 +15,7 @@ export const GET = handler<Ctx>(async (_request, { params }) => {
   const of = (table: string, columns: string, order = "created_at") =>
     db().from(table).select(columns).eq("novel_id", novel.id).order(order);
   const [chapters, memory, threads, digests, global, manuscriptImages, characterImages, assets] = await Promise.all([
-    db().from("chapters").select("id, title, position, content, revision, created_at, updated_at").eq("novel_id", novel.id).order("position").order("created_at"),
+    db().from("chapters").select("id, title, position, reserved, content, revision, created_at, updated_at").eq("novel_id", novel.id).order("reserved").order("position").order("created_at"),
     getMemory(novel.id),
     of("story_threads", "*"),
     of("chapter_digests", "*"),

@@ -13,7 +13,7 @@ import { MARKER_RE, SEPARATOR_RE } from "./manuscript";
 
 export interface BackupData {
   novel: { title: string; synopsis: string };
-  chapters: { id: string; title: string; content: string }[];
+  chapters: { id: string; title: string; content: string; reserved?: boolean }[];
   images: {
     manuscript: { id: string; asset_id: string; alt: string; caption: string; decorative: boolean }[];
     files: { id: string; version: number; file_name: string; original_type: string }[];
@@ -63,7 +63,7 @@ export function backupTexts(data: BackupData): { name: string; text: string }[] 
   const novel = [
     `# ${data.novel.title}`,
     data.novel.synopsis.trim() ? `> ${data.novel.synopsis.trim().replace(/\n/g, "\n> ")}` : "",
-    ...data.chapters.map((c, i) => `## ${chapterLabel(i, c.title)}\n\n${readable(c.content).trim()}`),
+    ...data.chapters.map((c, i) => `## ${chapterLabel(i, c.title, c.reserved)}\n\n${readable(c.content).trim()}`),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -74,7 +74,7 @@ export function backupTexts(data: BackupData): { name: string; text: string }[] 
       text: [
         `Copia de seguridad de «${data.novel.title}», hecha con Procesador el ${new Date(data.exported_at).toLocaleString("es")}.`,
         "",
-        "novela.md            La novela completa para leer (cursivas entre *asteriscos*, cambios de escena como * * *).",
+        "novela.md            La novela completa para leer (cursivas entre *asteriscos*, cambios de escena como * * *); al final, los capítulos en reserva.",
         "capitulos/           Cada capítulo tal como lo guarda Procesador, para recuperar su texto exacto.",
         "procesador.json      Todos los datos: novela, Argumento general, Guía Maestra, capítulos, Memoria, lectura del Consejero e imágenes.",
         "imagenes/            Los archivos originales de las imágenes, tal como se subieron.",
@@ -83,7 +83,7 @@ export function backupTexts(data: BackupData): { name: string; text: string }[] 
     },
     { name: "novela.md", text: `${novel}\n` },
     ...data.chapters.map((c, i) => ({
-      name: `capitulos/${String(i + 1).padStart(pad, "0")} ${safeName(chapterLabel(i, c.title))}.txt`,
+      name: `capitulos/${String(i + 1).padStart(pad, "0")} ${safeName(chapterLabel(i, c.title, c.reserved))}.txt`,
       text: c.content,
     })),
     { name: "procesador.json", text: JSON.stringify(data, null, 2) },

@@ -1,5 +1,5 @@
 import "server-only";
-import { getMemory } from "../supabase";
+import { getScopedMemory } from "../supabase";
 import { nameMatcher } from "../ai/context";
 import { formatCharacter } from "../ai/prompts";
 import { completeJson, InvalidOutput } from "../ai/structured";
@@ -71,7 +71,7 @@ export async function compareVersions(opts: {
   provider: ProviderId;
   signal: AbortSignal;
 }): Promise<Comparison> {
-  const memory = await getMemory(opts.novelId);
+  const memory = await getScopedMemory(opts.novelId);
   const text = `${opts.original}\n${opts.proposal}`;
   const people = memory.characters.filter((c) => nameMatcher(c)?.test(text));
   const ids = new Set(people.map((c) => c.id));

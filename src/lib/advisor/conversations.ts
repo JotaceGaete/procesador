@@ -13,7 +13,7 @@ import type {
   StoredObservation,
   Usage,
 } from "../types";
-import { chapterRows } from "./reading";
+import { allChapterRows } from "./reading";
 import { findQuote } from "./quotes";
 import { CONVERSATION_SUMMARY_INSTRUCTIONS } from "./prompts";
 import { cardStates, cardsBlock, currentFocus, type Anchor, type CardRef, type CardWithState, type ConversationMessage } from "./cards";
@@ -167,10 +167,54 @@ export async function conversationContext(opts: {
   return { text, messages: messages.length, cards, focus, plan };
 }
 
+/**
+ * Capítulos en reserva (docs/capitulos-reserva.md): a conversation carries what it read. It
+ * may go on only where everything it touched may be read now: the manuscript, plus `open`.
+ * So a conversation held on a chapter in reserve doesn't travel to the manuscript or to
+ * another chapter in reserve, and one that read a chapter later moved to the reserve waits
+ * until that chapter is incorporated again (or is the one open). Computed on reading, so it
+ * applies at once and nothing has to be deleted. Returns why not, or null.
+ */
+export async function conversationOutOfScope(conversationId: string, novelId: string, open: string | null): Promise<string | null> {
+  const rows = await messageRows(conversationId);
+  // Chapter id → whether it was in reserve when the conversation used it.
+  const touched = new Map<string, boolean>();
+  const use = (id: unknown, reserved = false) => {
+    if (typeof id === "string" && id) touched.set(id, touched.get(id) === true || reserved);
+  };
+  for (const m of rows) {
+    const ctx = m.context;
+    if (ctx?.chapter) use(ctx.chapter.id, ctx.chapter.reserved === true);
+    for (const id of Object.keys(ctx?.basedOn ?? {})) use(id);
+  }
+  const ids = rows.filter((m) => m.role === "advisor").map((m) => m.id);
+  if (ids.length) {
+    const { data, error } = await db().from("advisor_observations").select("based_on, refs").in("message_id", ids);
+    if (error) throw error;
+    for (const o of data as { based_on: Record<string, number> | null; refs: { chapterId?: string }[] | null }[]) {
+      for (const id of Object.keys(o.based_on ?? {})) use(id);
+      for (const r of o.refs ?? []) use(r.chapterId);
+    }
+  }
+  if (!touched.size) return null;
+  const { data, error } = await db().from("chapters").select("id, reserved").eq("novel_id", novelId);
+  if (error) throw error;
+  const now = new Map((data as { id: string; reserved: boolean }[]).map((c) => [c.id, c.reserved]));
+  for (const [id, wasReserved] of touched) {
+    if (id === open) continue;
+    const reservedNow = now.get(id);
+    if (reservedNow === true || (reservedNow === undefined && wasReserved))
+      return wasReserved
+        ? "Esta conversación es de un capítulo en reserva: sólo puede seguir con ese capítulo abierto. Empieza una conversación nueva aquí."
+        : "Esta conversación leyó un capítulo que ahora está en reserva: no puede seguir mientras siga allí (o ábrelo para seguirla). Empieza una conversación nueva aquí.";
+  }
+  return null;
+}
+
 /** Revisions of the given chapters now: what an observation relied on. */
 export async function revisionsOf(novelId: string, ids: Iterable<string>): Promise<Record<string, number>> {
   const want = new Set(ids);
-  const rows = await chapterRows(novelId);
+  const rows = await allChapterRows(novelId);
   return Object.fromEntries(rows.filter((r) => want.has(r.id)).map((r) => [r.id, r.revision]));
 }
 
@@ -200,6 +244,8 @@ export async function saveExchange(opts: {
     rounds?: number;
     cards?: { label: string; from: string | null }[];
     mode?: "conversar" | "analizar";
+    /** The chapter it was asked from and its group then (see conversationOutOfScope). */
+    chapter: { id: string; reserved: boolean };
   };
   /** The card the author's message was about. */
   anchor?: Anchor | null;
@@ -229,7 +275,13 @@ export async function saveExchange(opts: {
     .from("advisor_messages")
     .insert([
       { conversation_id: conversationId, novel_id: opts.novelId, role: "author", content: opts.question, context: authorContext(opts) },
-      { conversation_id: conversationId, novel_id: opts.novelId, role: "advisor", content: opts.answer, context: opts.context },
+      {
+        conversation_id: conversationId,
+        novel_id: opts.novelId,
+        role: "advisor",
+        content: opts.answer,
+        context: { ...opts.context, basedOn: opts.basedOn },
+      },
     ])
     .select("id, role");
   if (error) throw error;
@@ -275,7 +327,7 @@ function withFreshness(rows: Omit<StoredObservation, "changed">[], revisions: Ma
 }
 
 async function revisionMap(novelId: string) {
-  return new Map((await chapterRows(novelId)).map((r) => [r.id, r.revision]));
+  return new Map((await allChapterRows(novelId)).map((r) => [r.id, r.revision]));
 }
 
 export async function listConversations(novelId: string): Promise<ConversationSummary[]> {
@@ -344,7 +396,7 @@ async function listOne(id: string, novelId: string) {
  */
 export async function recheckObservation(id: string) {
   const o = await getObservation(id);
-  const rows = await chapterRows(o.novel_id);
+  const rows = await allChapterRows(o.novel_id);
   const refs = o.refs.map((r) => {
     const order = [...rows.filter((c) => c.id === r.chapterId), ...rows.filter((c) => c.id !== r.chapterId)];
     for (const c of order) {

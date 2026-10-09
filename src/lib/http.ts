@@ -19,6 +19,8 @@ export function errorResponse(error: unknown) {
   if (pg?.code === "22023") return NextResponse.json({ error: pg.message }, { status: 400 });
   // A function's own "not found" (raise … using errcode = 'P0002').
   if (pg?.code === "P0002") return NextResponse.json({ error: pg.message }, { status: 404 });
+  // A locked chapter (docs/bloqueo-capitulos.md): the database refused to change it.
+  if (pg?.code === "P0423") return NextResponse.json({ error: pg.message, locked: true }, { status: 423 });
   const message = error instanceof Error ? error.message : typeof pg?.message === "string" ? pg.message : "Error desconocido";
   console.error("[api]", message);
   return NextResponse.json({ error: message }, { status: 500 });
@@ -43,4 +45,11 @@ export function pickFields(body: Record<string, unknown>, fields: readonly strin
     else if (typeof value === "string") out[key] = value.slice(0, MAX_FIELD_CHARS);
   }
   return out;
+}
+
+/** A position in a group of chapters (1-based), or null for "at the end" (docs/capitulos-reserva.md). */
+export function groupPosition(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 100_000) throw new HttpError(400, "Posición inválida");
+  return value;
 }

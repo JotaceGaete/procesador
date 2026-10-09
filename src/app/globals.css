@@ -233,6 +233,26 @@ input:focus,
 .save.conflict .link {
   text-decoration: underline;
 }
+.save.locked {
+  color: var(--danger);
+}
+
+/* Bloqueo de capítulos (docs/bloqueo-capitulos.md): a discreet lock next to the save state. The
+   open lock is faint; the closed one reads «Revisado». */
+.topbar .lock-toggle {
+  color: var(--muted);
+  opacity: 0.75;
+}
+.topbar .lock-toggle.on {
+  color: var(--text);
+  opacity: 1;
+}
+.topbar .lock-toggle:disabled {
+  opacity: 0.4;
+}
+.chapter-lock {
+  font-size: 0.85em;
+}
 
 .focus .topbar {
   opacity: 0;
@@ -575,6 +595,57 @@ input:focus,
 }
 .chapters .add {
   font-size: 13px;
+}
+/* Capítulos en reserva (docs/capitulos-reserva.md): the manuscript and the reserve, apart. */
+.chapters ul {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+.chapter-group .group-title {
+  margin: 14px 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.chapter-group .group-add {
+  margin: 0;
+}
+.reserve-group {
+  margin-top: 18px;
+  padding-top: 4px;
+  border-top: 1px solid var(--faint);
+}
+.reserve-group .chapter-name {
+  font-style: italic;
+}
+.chapters select.move {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent, inherit);
+  cursor: pointer;
+  max-width: 7.5em;
+}
+.chapters li[draggable="true"] {
+  cursor: grab;
+}
+.chapters li.dragging {
+  opacity: 0.4;
+}
+.chapters li.drop-before {
+  box-shadow: inset 0 2px 0 var(--text);
+}
+.chapters li.drop-after {
+  box-shadow: inset 0 -2px 0 var(--text);
+}
+.reserve-group.drop-into {
+  outline: 2px dashed var(--faint);
+  outline-offset: 4px;
 }
 /* Editor visual on/off: a real switch, first thing in the drawer. */
 .editor-switch {
@@ -3071,7 +3142,10 @@ details.group > p {
   input:not([type="checkbox"]):not([type="radio"]),
   select,
   textarea,
-  [contenteditable="true"] {
+  [contenteditable="true"],
+  /* A locked chapter's visual editor is not editable: same size as when it is, so locking never
+     changes the text's size. */
+  .visual-text[contenteditable="false"] {
     font-size: max(16px, 1em);
   }
   /* The workspace must not gain a desktop-sized intrinsic width when a
@@ -3244,5 +3318,13 @@ details.group > p {
   }
   .critic-scores td:last-child {
     grid-column: 1 / -1;
+  }
+}
+
+/* Capítulos en reserva: «Mover» is a native list; on a phone at 16px, so Safari doesn't zoom on it. */
+@media (max-width: 640px) {
+  .chapters select.move {
+    font-size: 16px;
+    max-width: 9em;
   }
 }

@@ -184,7 +184,7 @@ test("above the extraordinary threshold it pauses; approved, it resumes with tha
   assert.deepEqual(typeOf(list, "reading"), { type: "reading", round: 0, items: ["cap. 5 completo", "cap. 6 completo"] });
   const log = await aiLog();
   assert.equal(log.length, 1, "the approved material goes in the first call");
-  assert.match(log[0].body.messages[0].content, /<capitulo numero="5" titulo="Capítulo 5">[\s\S]*recortado por el límite de tamaño/);
+  assert.match(log[0].body.messages[0].content, /<capitulo numero="5" titulo="">[\s\S]*recortado por el límite de tamaño/);
   assert.ok(typeOf(list, "saved"));
 });
 

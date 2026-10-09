@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { handler } from "@/lib/auth";
-import { db, getChapterTexts, getMemory, getNovel, getOutline } from "@/lib/supabase";
+import { db, getChapterTexts, getScopedMemory, getNovel, readingOutline } from "@/lib/supabase";
 import { countWords, forModel, protectImages, separatorsForModel } from "@/lib/manuscript";
 import { HttpError, readJson } from "@/lib/http";
 import { briefBlock, parseBrief } from "@/lib/advisor/converse";
@@ -21,6 +21,8 @@ import {
 } from "@/lib/ai/context";
 import {
   EDIT_INSTRUCTIONS,
+  RESERVE_NOTE,
+  RESERVE_NOTICE,
   SCENE_PROVIDER_NOTES,
   editPrompt,
   memoryBlock,
@@ -130,17 +132,23 @@ function proposalOf(output: string, tag: "escena" | "reescritura"): string {
 
 async function buildRequest(body: Record<string, unknown>, signal: AbortSignal): Promise<BuiltRequest> {
   const novel = await getNovel(String(body.novelId ?? ""));
-  const outline = await getOutline(novel.id);
+  // What the AI may read (docs/capitulos-reserva.md): the manuscript and, if the open chapter
+  // is in reserve, that one after it. Never another chapter in reserve.
+  const open = typeof body.chapterId === "string" ? body.chapterId : null;
+  const outline = await readingOutline(novel.id, open);
   const chapterIndex = outline.findIndex((c) => c.id === body.chapterId);
   if (chapterIndex === -1) throw new HttpError(404, "Capítulo no encontrado");
   const chapter = outline[chapterIndex];
+  // A chapter in reserve has no place in the story yet: the manuscript is its background, not
+  // what comes right before it (no previous chapter's ending, no one carried over from it).
+  const reserved = chapter.reserved;
   const content = typeof body.content === "string" ? body.content : "";
   const includeManuscript = body.includeManuscript === true;
   const characterIds = stringList(body.characterIds);
   const placeIds = stringList(body.placeIds);
   const chapterOrder = outline.map((c) => c.id);
 
-  const memory = await getMemory(novel.id);
+  const memory = await getScopedMemory(novel.id, chapter.id);
   const guide = compileGuide(novel);
   // Cronología (docs/cronologia-edades.md): the time at this chapter and each character's age,
   // computed from marks up to here (nothing of later chapters is said).
@@ -170,14 +178,14 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
     }),
   });
   const project = (selected: SelectedMemory) =>
-    [guide, memoryBlock(selected, memory, outline, chapter.id, time)].filter(Boolean).join("\n\n");
+    [guide, reserved ? RESERVE_NOTE : "", memoryBlock(selected, memory, outline, chapter.id, time)].filter(Boolean).join("\n\n");
   const guideInventory = guideSection(novel, guide);
   const wholeNovel = async (text: string | null) =>
     text ? [manuscriptSection(text, (await manuscript()).chapters.length)] : [];
 
   // Other chapters are read from the database only when the request needs them.
   let ms: Manuscript | null = null;
-  const manuscript = async () => (ms ??= buildManuscript(await getChapterTexts(novel.id), { id: chapter.id, content }));
+  const manuscript = async () => (ms ??= buildManuscript(await getChapterTexts(novel.id, chapter.id), { id: chapter.id, content }));
 
   // The assistant never receives images or markers: each image becomes a neutral line and
   // each separator `* * *`, applied to each piece as it is cut (offsets stay those of the real text).
@@ -220,15 +228,15 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
 
     // The Consejero's reading of the novel, as far as this point (docs/asistente-contexto.md).
     const [rows, digests, threads, global] = await Promise.all([
-      chapterRows(novel.id),
-      digestRows(novel.id),
-      threadRows(novel.id),
+      chapterRows(novel.id, chapter.id),
+      digestRows(novel.id, chapter.id),
+      threadRows(novel.id, chapter.id),
       novelDigestRow(novel.id),
     ]);
 
     // Who is in the scene: the chosen ones, those named in the argument or in the text before the
     // cursor, and, early in a chapter, those on stage in the previous one (the scene goes on from there).
-    const previousDigest = chapterIndex > 0 ? digests.find((d) => d.chapter_id === outline[chapterIndex - 1].id) : null;
+    const previousDigest = chapterIndex > 0 && !reserved ? digests.find((d) => d.chapter_id === outline[chapterIndex - 1].id) : null;
     const continuing =
       previousDigest && cursor <= EARLY_IN_CHAPTER_CHARS
         ? previousDigest.presence
@@ -297,7 +305,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
           earlierOmitted = countWords(head.slice(end));
         }
       }
-      if (before.trim().length < 1500 && !earlier && chapterIndex > 0) {
+      if (before.trim().length < 1500 && !earlier && chapterIndex > 0 && !reserved) {
         const prev = (await manuscript()).chapters[chapterIndex - 1];
         previousChapterTail = (await plain(prev.content.slice(-PREVIOUS_CHAPTER_CHARS).trim())) || null;
       }
@@ -307,6 +315,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
     const texts = sceneTextSections({
       chapterIndex,
       chapterTitle: chapter.title,
+      chapterReserved: reserved,
       before,
       after,
       earlier,
@@ -352,7 +361,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
           }
         : texts.argument,
       ...(draft ? [draftSection(draft)] : []),
-      ...(whole ? [storyManuscriptSection(whole, chapterIndex)] : []),
+      ...(whole ? [storyManuscriptSection(whole, chapterIndex, reserved)] : []),
     ];
     const later = picked.later
       ? [
@@ -361,7 +370,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       : [];
     return {
       sections,
-      notices: [...story.notices, ...later],
+      notices: [...(reserved ? [RESERVE_NOTICE] : []), ...story.notices, ...later],
       // The common base, plus the provider's own block (only Grok has one).
       instructions: writeInstructions(body.provider as ProviderId),
       manuscript: whole,
@@ -369,7 +378,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
       prompt: scenePrompt({
         argument,
         length,
-        chapter: chapterLabel(chapterIndex, chapter.title),
+        chapter: chapterLabel(chapterIndex, chapter.title, reserved),
         previousChapterTail,
         earlier,
         earlierOmitted,
@@ -487,7 +496,7 @@ async function buildRequest(body: Record<string, unknown>, signal: AbortSignal):
   }
   return {
     sections,
-    notices: [],
+    notices: reserved ? [RESERVE_NOTICE] : [],
     instructions: EDIT_INSTRUCTIONS,
     manuscript: whole,
     project: project(selected),
