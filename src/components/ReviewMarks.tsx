@@ -37,6 +37,7 @@ export default function ReviewMarks({ novelId, chapterId, selection, flush, goTo
     try {
       if (!(await flush())) throw new Error("Primero debes guardar el capítulo.");
       const s = selection?.text ? selection : { start: 0, end: 0, text: "" };
+      if (s.text.length > 3000) throw new Error("Selecciona un fragmento de hasta 3000 caracteres.");
       await api(`/api/novels/${novelId}/review-marks`, {
         method: "POST", json: {
           chapter_id: chapterId, category, note: note.trim(), quote: s.text,
