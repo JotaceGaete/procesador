@@ -869,7 +869,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
           if (!(await flush())) throw new Error("Primero guarda el capítulo.");
           await api(`/api/novels/${novel.id}/review-marks`, {
             method: "POST",
-            json: { chapter_id: id, start_offset: start, end_offset: end, quote, category: "incoherencia", note: note.slice(0, 4000) },
+            json: { chapter_id: id, start_offset: start, end_offset: end, quote, category: "incoherencia", origin: "ai", note: note.slice(0, 4000) },
           });
           setNotice("Observación del Consejero guardada en Marcas de revisión.");
         }}
@@ -953,7 +953,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
             if (!(await flush())) throw new Error("Primero guarda el capítulo.");
             await api(`/api/novels/${novel.id}/review-marks`, {
               method: "POST",
-              json: { chapter_id: id, start_offset: start, end_offset: end, quote, category: "incoherencia", note: "Revisar la observación señalada por el Crítico." },
+              json: { chapter_id: id, start_offset: start, end_offset: end, quote, category: "incoherencia", origin: "ai", note: "Revisar la observación señalada por el Crítico." },
             });
             setNotice("Observación del Crítico guardada en Marcas de revisión.");
           }}
