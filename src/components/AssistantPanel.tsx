@@ -1018,7 +1018,7 @@ function AssistantPanel(props: Props) {
               confirmTokens={confirmTokens}
               getContent={getContent}
               onGoTo={onGoTo}
-              onMark={p.onMark}
+              onMark={props.onMark}
               memory={memory}
               flush={flush}
               onFactAdded={onFactAdded}
@@ -1033,7 +1033,7 @@ function AssistantPanel(props: Props) {
             chapters={chapters}
             memory={memory}
             onGoTo={onGoTo}
-            onMark={p.onMark}
+            onMark={props.onMark}
             onSendToAssistant={sendToAssistant}
             onFactAdded={onFactAdded}
           />
