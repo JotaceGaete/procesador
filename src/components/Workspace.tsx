@@ -19,6 +19,7 @@ import { chapterLabel } from "@/lib/ai/context";
 import type { SaveState } from "./useAutosave";
 import ChapterEditor, { type EditorHandle, type SaveActions, type Selection } from "./ChapterEditor";
 import VisualEditor from "./VisualEditor";
+import ReviewMarks from "./ReviewMarks";
 import ChapterNav from "./ChapterNav";
 import { TrashModal, VersionsModal } from "./Versions";
 import CriticReport from "./CriticReport";
@@ -90,6 +91,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
   const showCard = useCallback((id: string) => requestAnimationFrame(() => requestAnimationFrame(() => setActiveImage(id))), []);
 
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [stats, setStats] = useState({ words: 0, chars: 0 });
   const [save, setSave] = useState<{ state: SaveState } & SaveActions>({
     state: "saved",
@@ -720,11 +722,24 @@ export default function Workspace({ novelId }: { novelId: string }) {
             >
               Crítico
             </button>
+            <button className={`link${reviewOpen ? " on" : ""}`} onClick={() => setReviewOpen((open) => !open)} aria-pressed={reviewOpen} title="Guardar observaciones y corregirlas después">
+              Marcas
+            </button>
             <button className="link focus-toggle" onClick={() => setFocusMode((f) => !f)} title="Ctrl/⌘ + .  ·  Esc para salir">
               {focusMode ? "Salir" : "Concentración"}
             </button>
           </header>
         </div>
+        {reviewOpen && (
+          <ReviewMarks
+            novelId={novel.id}
+            chapterId={chapter.id}
+            selection={selection}
+            flush={flush}
+            goTo={goTo}
+            onClose={() => setReviewOpen(false)}
+          />
+        )}
         {visualEditor ? (
           <VisualEditor
             key={`${chapter.id}:visual`}
