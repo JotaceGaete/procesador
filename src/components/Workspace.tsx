@@ -940,6 +940,14 @@ export default function Workspace({ novelId }: { novelId: string }) {
           defaultProvider={loaded.defaultProvider}
           flush={flush}
           onGoTo={goTo}
+          onMark={async (id, start, end, quote) => {
+            if (!(await flush())) throw new Error("Primero guarda el capítulo.");
+            await api(`/api/novels/${novel.id}/review-marks`, {
+              method: "POST",
+              json: { chapter_id: id, start_offset: start, end_offset: end, quote, category: "incoherencia", note: "Revisar la observación señalada por el Crítico." },
+            });
+            setNotice("Observación del Crítico guardada en Marcas de revisión.");
+          }}
           onClose={() => setModal(null)}
         />
       )}
