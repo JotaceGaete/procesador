@@ -38,10 +38,10 @@ export default function ReviewMarks({ novelId, chapterId, selection, flush, goTo
       if (!(await flush())) throw new Error("Primero debes guardar el capítulo.");
       const s = selection?.text ? selection : { start: 0, end: 0, text: "" };
       await api(`/api/novels/${novelId}/review-marks`, {
-        method: "POST", body: JSON.stringify({
+        method: "POST", json: {
           chapter_id: chapterId, category, note: note.trim(), quote: s.text,
           start_offset: s.start, end_offset: s.end,
-        }),
+        },
       });
       setNote("");
       await load();
@@ -53,7 +53,7 @@ export default function ReviewMarks({ novelId, chapterId, selection, flush, goTo
     try {
       await api(`/api/novels/${novelId}/review-marks/${mark.id}`, {
         method: status ? "PATCH" : "DELETE",
-        ...(status ? { body: JSON.stringify({ status }) } : {}),
+        ...(status ? { json: { status } } : {}),
       });
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : "No se pudo actualizar"); }
