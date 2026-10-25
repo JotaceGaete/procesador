@@ -211,7 +211,10 @@ function Report({
       setError((e as Error).message);
     }
   };
-  const q = (x: { quote: string; verified: boolean }) => <Quote quote={x.quote} verified={x.verified} at={c.at[x.quote]} go={go} mark={mark && c.at[x.quote] ? () => mark(chapterId, c.at[x.quote].start, c.at[x.quote].end, x.quote) : undefined} />;
+  const q = (x: { quote: string; verified: boolean }) => {
+    const at = c.at[x.quote];
+    return <Quote quote={x.quote} verified={x.verified} at={at} go={go} mark={mark && at ? () => mark(chapterId, at.start, at.end, x.quote) : undefined} />;
+  };
   const ctx = c.context;
 
   return (
