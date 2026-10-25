@@ -49,6 +49,21 @@ export default function ReviewMarks({ novelId, chapterId, selection, flush, goTo
     } catch (e) { setError(e instanceof Error ? e.message : "No se pudo crear la marca"); }
     finally { setBusy(false); }
   };
+  const navigate = async (mark: Mark) => {
+    setError("");
+    try {
+      if (mark.quote) {
+        const chapter = await api<{ content: string }>(`/api/chapters/${mark.chapter_id}`);
+        if (chapter.content.slice(mark.start_offset, mark.end_offset) !== mark.quote) {
+          const first = chapter.content.indexOf(mark.quote);
+          if (first < 0) throw new Error("El fragmento marcado ya no aparece en el capítulo. La observación sigue guardada para revisión.");
+          await goTo(mark.chapter_id, first, first + mark.quote.length, mark.quote);
+          return;
+        }
+      }
+      await goTo(mark.chapter_id, mark.start_offset, mark.end_offset, mark.quote);
+    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo localizar el fragmento"); }
+  };
   const update = async (mark: Mark, status?: Mark["status"]) => {
     setBusy(true); setError("");
     try {
@@ -89,7 +104,7 @@ export default function ReviewMarks({ novelId, chapterId, selection, flush, goTo
             <p style={{ whiteSpace: "pre-wrap" }}>{m.note}</p>
             {m.quote && <blockquote style={{ overflowWrap: "anywhere" }}>{m.quote.slice(0, 200)}</blockquote>}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              <button disabled={busy} onClick={() => void goTo(m.chapter_id, m.start_offset, m.end_offset, m.quote)}>Ir al texto</button>
+              <button disabled={busy} onClick={() => void navigate(m)}>Ir al texto</button>
               <button disabled={busy} onClick={() => void update(m, m.status === "pending" ? "resolved" : "pending")}>{m.status === "pending" ? "Resolver" : "Reabrir"}</button>
               <button disabled={busy} onClick={() => { if (window.confirm("¿Eliminar esta marca?")) void update(m); }}>Eliminar</button>
             </div>
