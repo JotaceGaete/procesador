@@ -865,6 +865,14 @@ export default function Workspace({ novelId }: { novelId: string }) {
         onSection={chooseSection}
         confirmTokens={loaded.confirmTokens}
         onGoTo={goTo}
+        onMark={async (id, start, end, quote, note) => {
+          if (!(await flush())) throw new Error("Primero guarda el capítulo.");
+          await api(`/api/novels/${novel.id}/review-marks`, {
+            method: "POST",
+            json: { chapter_id: id, start_offset: start, end_offset: end, quote, category: "incoherencia", note: note.slice(0, 4000) },
+          });
+          setNotice("Observación del Consejero guardada en Marcas de revisión.");
+        }}
         flush={flush}
         onAutoDigest={onAutoDigest}
         chapters={chapters}
