@@ -15,6 +15,7 @@ export default function AdvisorSaved(p: {
   chapters: ChapterInfo[];
   memory: Memory;
   onGoTo(chapterId: string, start: number, end: number, text: string): void;
+  onMark?(chapterId: string, start: number, end: number, quote: string, note: string): Promise<void>;
   onSendToAssistant(text: string): void;
   onFactAdded(f: Fact): void;
 }) {
@@ -62,7 +63,7 @@ export default function AdvisorSaved(p: {
               key={o.id}
               o={o}
               label={label}
-              onGoTo={p.onGoTo}
+              onGoTo={p.onGoTo} onMark={p.onMark}
               onSendToAssistant={p.onSendToAssistant}
               actions={{
                 novelId: p.novelId,
