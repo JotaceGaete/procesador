@@ -38,7 +38,7 @@ export const POST = handler<Ctx>(async (request, { params }) => {
   }
   const { data, error } = await db().from("review_marks").insert({
     novel_id: novelId, chapter_id: chapterId, category, note, quote,
-    start_offset: start, end_offset: end, origin: "manual",
+    start_offset: start, end_offset: end, origin: body.origin === "ai" ? "ai" : "manual",
   }).select(columns).single();
   if (error) throw error;
   return NextResponse.json(data, { status: 201 });
