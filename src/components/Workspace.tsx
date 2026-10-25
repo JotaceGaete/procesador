@@ -92,6 +92,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
 
   const [selection, setSelection] = useState<Selection | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewSelection, setReviewSelection] = useState<Selection | null>(null);
   const [stats, setStats] = useState({ words: 0, chars: 0 });
   const [save, setSave] = useState<{ state: SaveState } & SaveActions>({
     state: "saved",
@@ -722,7 +723,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
             >
               Crítico
             </button>
-            <button className={`link${reviewOpen ? " on" : ""}`} onClick={() => setReviewOpen((open) => !open)} aria-pressed={reviewOpen} title="Guardar observaciones y corregirlas después">
+            <button className={`link${reviewOpen ? " on" : ""}`} onMouseDown={(e) => e.preventDefault()} onClick={() => { setReviewSelection(selection); setReviewOpen((open) => !open); }} aria-pressed={reviewOpen} title="Guardar observaciones y corregirlas después">
               Marcas
             </button>
             <button className="link focus-toggle" onClick={() => setFocusMode((f) => !f)} title="Ctrl/⌘ + .  ·  Esc para salir">
@@ -734,7 +735,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
           <ReviewMarks
             novelId={novel.id}
             chapterId={chapter.id}
-            selection={selection}
+            selection={reviewSelection}
             flush={flush}
             goTo={goTo}
             onClose={() => setReviewOpen(false)}
