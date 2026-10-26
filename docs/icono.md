@@ -16,7 +16,7 @@ borgoña oscuro (`#6b2a2a`), en un cuadrado de esquinas redondeadas.
   probaron también azul tinta (se pierde sobre la barra oscura de Chrome) y un plumín solo
   (a 16 px se lee como un escudo o una gota).
 
-La interfaz no cambia: no hay `theme-color` en las páginas ni colores nuevos en `globals.css`.
+La interfaz mantiene sus colores y estilos actuales. La PWA utiliza el mismo icono y el color del manifiesto.
 
 ## Archivos
 
@@ -35,8 +35,7 @@ guardan en el repositorio):
 Next.js genera las etiquetas `<link rel="icon">`, `apple-touch-icon` y `manifest` a partir de
 esos archivos, con una URL que cambia con el contenido (`/icon.svg?icon.<hash>.svg`).
 
-El manifiesto usa `display: "browser"`: el acceso directo abre Procesador en el navegador, como
-hoy; no lo convierte en una aplicación instalada.
+El manifiesto usa `display: "standalone"` y `scope: "/"`: al añadir Procesador a la pantalla de inicio desde Safari en iPhone, se abre sin la barra del navegador. `layout.tsx` incluye los metadatos Apple para ese modo.\n\n**Conexión y datos:** esta primera PWA funciona conectada; no incluye service worker ni caché offline del manuscrito. El guardado y la IA siguen utilizando las API autenticadas del servidor. Para instalarla: Safari → Compartir → Añadir a pantalla de inicio → Abrir como app web → Añadir.
 
 `src/proxy.ts` deja pasar sin sesión sólo esas rutas (`/favicon.ico`, `/icon.svg`,
 `/apple-icon.png`, `/manifest.webmanifest`, `/icons/…`): la página de entrada muestra el icono y
