@@ -28,11 +28,23 @@ export const POST = handler(async (request) => {
       throw new HttpError(400, "Mensaje no válido");
     return { speaker: x.speaker, text: x.text };
   });
+  const recentText = history.slice(-12).map((t) => t.text).join(" ").toLocaleLowerCase("es");
+  const mentioned = memory.characters.filter((c) => c.id !== character?.id &&
+    [c.name, ...c.aliases.split(",")].some((n) => n.trim().length >= 3 && recentText.includes(n.trim().toLocaleLowerCase("es"))));
+  const relatedIds = new Set(memory.relationships.filter((r) => r.from_id === character?.id || r.to_id === character?.id)
+    .map((r) => r.from_id === character?.id ? r.to_id : r.from_id));
+  const relevant = memory.characters.filter((c) => c.id !== character?.id && (mentioned.includes(c) || relatedIds.has(c.id))).slice(0, 8);
+  const storyContext = relevant.map((c) => {
+    const links = memory.relationships.filter((r) => (r.from_id === character?.id && r.to_id === c.id) ||
+      (r.to_id === character?.id && r.from_id === c.id));
+    return [c.name, c.role && `Rol: ${c.role.slice(0, 90)}`, c.description && `Descripción: ${c.description.slice(0, 180)}`,
+      ...links.map((l) => `Vínculo: ${l.kind.slice(0, 90)}`)].filter(Boolean).join(". ");
+  }).join("\n");
   let prompt: string;
   try {
     prompt = roleplayPrompt({ name, authorName: typeof body.authorName === "string" ? body.authorName : "Autor",
       personality: character?.personality, voice: character?.voice, permanentRules: character?.dialogue_rules, knows: character?.knows,
-      unaware: character?.unaware, objective: typeof body.objective === "string" ? body.objective : "", avoid: typeof body.avoid === "string" ? body.avoid : "", history });
+      unaware: character?.unaware, storyContext, objective: typeof body.objective === "string" ? body.objective : "", avoid: typeof body.avoid === "string" ? body.avoid : "", history });
   } catch (e) { throw new HttpError(400, e instanceof Error ? e.message : "Conversación no válida"); }
   let text = "";
   let truncated = false;
