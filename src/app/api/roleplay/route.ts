@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { handler } from "@/lib/auth";
 import { getChapter, getNovel, getScopedMemory } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
-import { roleplayPrompt, type RoleTurn } from "@/lib/ai/roleplay";
+import { roleplayPrompt, roleplayMessages, type RoleTurn } from "@/lib/ai/roleplay";
 import { getProvider } from "@/lib/ai/providers";
 import { recordUsage } from "@/lib/ai/usage";
 import type { ProviderId, Usage } from "@/lib/types";
@@ -50,8 +50,8 @@ export const POST = handler(async (request) => {
   let truncated = false;
   let usage: Usage | null = null;
   for await (const event of provider.stream({
-    instructions: "Eres un personaje ficticio en un role play literario. Solo una intervención por respuesta.",
-    manuscript: null, project: "", prompt, signal: request.signal, role: "write", maxOutputTokens: 450,
+    instructions: prompt, messages: roleplayMessages(history),
+    manuscript: null, project: "", prompt: "", signal: request.signal, role: "write", maxOutputTokens: 220,
   })) {
     if (event.type === "text") text += event.text;
     if (event.type === "truncated") truncated = true;
