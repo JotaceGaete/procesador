@@ -14,6 +14,7 @@ export const character = (p: Partial<Character> & { name: string }): Character =
   contradictions: "",
   values: "",
   voice: "",
+  dialogue_rules: "",
   vocabulary: "",
   secrets: "",
   knows: "",
