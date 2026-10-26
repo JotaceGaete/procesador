@@ -14,14 +14,15 @@ export default function DialogueDirector(props: Props) {
   const [provider, setProvider] = useState<ProviderId | null>(props.defaultProvider ?? props.providers[0] ?? null);
   const [history, setHistory] = useState<RoleTurn[]>([]);
   const [draft, setDraft] = useState("");
+  const [sceneNote, setSceneNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const name = props.memory.characters.find((c) => c.id === characterId)?.name ?? casualName.trim();
   const reset = () => { setHistory([]); setError(""); };
   const send = async () => {
-    if (!name || !draft.trim() || !provider || busy) return;
-    const next: RoleTurn[] = [...history, { speaker: "autor", text: draft.trim().slice(0, 500) }];
-    setHistory(next); setDraft(""); setBusy(true); setError("");
+    if (!name || (!draft.trim() && !sceneNote.trim()) || !provider || busy) return;
+    const next: RoleTurn[] = [...history, { speaker: "autor", text: draft.trim().slice(0, 500), context: sceneNote.trim().slice(0, 600) }];
+    setHistory(next); setDraft(""); setSceneNote(""); setBusy(true); setError("");
     try {
       const result = await api<{ text: string; truncated: boolean }>("/api/roleplay", {
         method: "POST", body: JSON.stringify({ novelId: props.novelId, chapterId: props.chapterId,
@@ -33,7 +34,7 @@ export default function DialogueDirector(props: Props) {
     } catch (e) { setError(e instanceof Error ? e.message : "No se pudo responder"); }
     finally { setBusy(false); }
   };
-  const transcript = history.map((t) => (t.speaker === "autor" ? authorName : name) + ": " + t.text).join("\n\n");
+  const transcript = history.map((t) => (t.speaker === "autor" ? authorName : name) + ": " + (t.context ? "[" + t.context + "]\n" : "") + t.text).join("\n\n");
   return <div className="modal-backdrop">
     <section className="modal" role="dialog" aria-modal="true" aria-label="Role play de personajes"
       style={{ width: "min(94vw, 740px)", maxWidth: 740, maxHeight: "92vh", overflowY: "auto", padding: 20 }}>
@@ -76,10 +77,14 @@ export default function DialogueDirector(props: Props) {
       <div aria-label="Conversación" aria-live="polite" style={{ marginTop: 16, minHeight: 170, maxHeight: 290, overflowY: "auto", padding: 12, border: "1px solid #999", borderRadius: 8 }}>
         {!history.length && <p>Escribe tu primer mensaje para comenzar.</p>}
         {history.map((t, i) => <p key={i} style={{ whiteSpace: "pre-wrap", marginBottom: 12 }}>
-          <strong>{t.speaker === "autor" ? authorName : name}:</strong> {t.text}
+          <strong>{t.speaker === "autor" ? authorName : name}:</strong> {t.context && <span style={{ display: "block", fontStyle: "italic", opacity: 0.8 }}>Contexto: {t.context}</span>}{t.text}
         </p>)}
         {busy && <p>{name} está respondiendo…</p>}
       </div>
+      <label style={{ display: "block", marginTop: 12 }}>Contexto de este momento (gestos, acciones y situación; no es diálogo)
+        <textarea style={{ display: "block", width: "100%", minHeight: 60 }} value={sceneNote} maxLength={600}
+          onChange={(e) => setSceneNote(e.target.value)} placeholder="Anny dice que está caro. Carlos la mira con mala cara. Ella se incomoda." />
+      </label>
       <label style={{ display: "block", marginTop: 12 }}>Tu mensaje
         <textarea style={{ display: "block", width: "100%", minHeight: 65 }} value={draft} maxLength={500}
           onChange={(e) => setDraft(e.target.value)} placeholder={"Hola, " + (name || "¿cómo estás?")}
@@ -98,7 +103,7 @@ export default function DialogueDirector(props: Props) {
       </div>
       {props.locked && <p>El capítulo está bloqueado; puedes conversar, pero no insertar.</p>}
       {error && <p role="alert">{error}</p>}
-      <p style={{ fontSize: 12 }}>Ahorro de tokens: solo ficha del interlocutor, objetivo y últimas 12 intervenciones. Cada mensaje enviado consume tokens.</p>
+      <p style={{ fontSize: 12 }}>Ahorro de tokens: ficha, reglas, contexto escénico y últimas 12 intervenciones. Cada mensaje enviado consume tokens.</p>
     </section>
   </div>;
 }
