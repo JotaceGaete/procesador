@@ -21,11 +21,11 @@ export const POST = handler(async (request) => {
   if (!name) throw new HttpError(400, "Selecciona un personaje o indica su nombre");
   const raw = Array.isArray(body.history) ? body.history : [];
   if (raw.length > 200) throw new HttpError(400, "Conversación demasiado larga");
-  const history: RoleTurn[] = raw.map((t: unknown) => {
-    if (!t || typeof t !== "object") throw new HttpError(400, "Mensaje no válido");
+  const history: RoleTurn[] = raw.map((t: unknown, index: number) => {
+    if (!t || typeof t !== "object") throw new HttpError(400, `Intervención ${index + 1} inválida: no es un objeto.`);
     const x = t as Record<string, unknown>;
     if ((x.speaker !== "autor" && x.speaker !== "personaje") || typeof x.text !== "string" || x.text.length > 500)
-      throw new HttpError(400, "Mensaje no válido");
+      throw new HttpError(400, `Intervención ${index + 1} inválida: comprueba el tipo de participante y el límite de 500 caracteres.`);
     return { speaker: x.speaker, text: x.text, context: typeof x.context === "string" ? x.context.slice(0, 600) : undefined };
   });
   const recentText = history.slice(-12).map((t) => t.text).join(" ").toLocaleLowerCase("es");
