@@ -10,6 +10,7 @@ export default function DialogueDirector(props: Props) {
   const [casualName, setCasualName] = useState("");
   const [authorName, setAuthorName] = useState("Carlos");
   const [objective, setObjective] = useState("");
+  const [direction, setDirection] = useState("");
   const [avoid, setAvoid] = useState("");
   const [provider, setProvider] = useState<ProviderId | null>(props.defaultProvider ?? props.providers[0] ?? null);
   const [history, setHistory] = useState<RoleTurn[]>([]);
@@ -27,9 +28,10 @@ export default function DialogueDirector(props: Props) {
       const result = await api<{ text: string; truncated: boolean }>("/api/roleplay", {
         method: "POST", body: JSON.stringify({ novelId: props.novelId, chapterId: props.chapterId,
           characterId: characterId || undefined, casualName: characterId ? undefined : casualName,
-          authorName, objective, avoid, provider, history: next }),
+          authorName, objective, direction, avoid, provider, history: next }),
       });
       setHistory([...next, { speaker: "personaje", text: result.text }]);
+      setDirection("");
       if (result.truncated) setError("Respuesta incompleta: revisa el último mensaje.");
     } catch (e) { setError(e instanceof Error ? e.message : "No se pudo responder"); }
     finally { setBusy(false); }
@@ -63,6 +65,11 @@ export default function DialogueDirector(props: Props) {
         <textarea style={{ display: "block", width: "100%", minHeight: 65 }} value={objective} maxLength={900}
           onChange={(e) => setObjective(e.target.value)}
           placeholder="Any quiere aceptar la invitación, pero disimula. No debe adelantarse a mi siguiente intervención." />
+      </label>
+      <label style={{ display: "block", marginTop: 12 }}>Dirección del director para la próxima respuesta
+        <textarea style={{ display: "block", width: "100%", minHeight: 65 }} value={direction} maxLength={900}
+          onChange={(e) => setDirection(e.target.value)}
+          placeholder="Ahora se niega. / En esta respuesta empieza a dudar. / Ahora acepta sin condiciones." />
       </label>
       <label style={{ display: "block", marginTop: 12 }}>Qué debe evitar el personaje (prompt negativo)
         <textarea style={{ display: "block", width: "100%", minHeight: 65 }} value={avoid} maxLength={900}
