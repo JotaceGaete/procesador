@@ -21,7 +21,7 @@ export default function DialogueDirector(props: Props) {
   const name = props.memory.characters.find((c) => c.id === characterId)?.name ?? casualName.trim();
   const reset = () => { setHistory([]); setError(""); };
   const send = async () => {
-    if (!name || (!draft.trim() && !sceneNote.trim()) || !provider || busy) return;
+    if (!name || (!draft.trim() && !sceneNote.trim() && !direction.trim()) || !provider || busy) return;
     const next: RoleTurn[] = [...history, { speaker: "autor", text: draft.trim().slice(0, 500), context: sceneNote.trim().slice(0, 600) }];
     setHistory(next); setDraft(""); setSceneNote(""); setBusy(true); setError("");
     try {
@@ -69,7 +69,7 @@ export default function DialogueDirector(props: Props) {
       <label style={{ display: "block", marginTop: 12 }}>Dirección del director para la próxima respuesta
         <textarea style={{ display: "block", width: "100%", minHeight: 65 }} value={direction} maxLength={900}
           onChange={(e) => setDirection(e.target.value)}
-          placeholder="Ahora se niega. / En esta respuesta empieza a dudar. / Ahora acepta sin condiciones." />
+          placeholder="Ahora acepta sin condiciones. Interpreta su reacción con gestos y diálogo, sin inventar nuevos obstáculos." />
       </label>
       <label style={{ display: "block", marginTop: 12 }}>Qué debe evitar el personaje (prompt negativo)
         <textarea style={{ display: "block", width: "100%", minHeight: 65 }} value={avoid} maxLength={900}
@@ -82,7 +82,7 @@ export default function DialogueDirector(props: Props) {
         </select>
       </label>
       <div aria-label="Conversación" aria-live="polite" style={{ marginTop: 16, minHeight: 170, maxHeight: 290, overflowY: "auto", padding: 12, border: "1px solid #999", borderRadius: 8 }}>
-        {!history.length && <p>Escribe tu primer mensaje para comenzar.</p>}
+        {!history.length && <p>Escribe un mensaje o dirige la escena para comenzar.</p>}
         {history.map((t, i) => <p key={i} style={{ whiteSpace: "pre-wrap", marginBottom: 12 }}>
           <strong>{t.speaker === "autor" ? authorName : name}:</strong> {t.context && <span style={{ display: "block", fontStyle: "italic", opacity: 0.8 }}>Contexto: {t.context}</span>}{t.text}
         </p>)}
@@ -98,7 +98,7 @@ export default function DialogueDirector(props: Props) {
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }} />
       </label>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-        <button type="button" disabled={!name || !draft.trim() || !provider || busy} onClick={() => void send()}>Enviar mensaje</button>
+        <button type="button" disabled={!name || (!draft.trim() && !sceneNote.trim() && !direction.trim()) || !provider || busy} onClick={() => void send()}>Enviar mensaje</button>
         <button type="button" disabled={busy || !history.length} onClick={reset}>Nueva conversación</button>
         <button type="button" disabled={busy || props.locked || history.length < 2}
           onClick={async () => {
