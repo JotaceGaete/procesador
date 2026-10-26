@@ -50,3 +50,12 @@ test("roleplay: la dirección inmediata prevalece sobre la resistencia previa", 
   assert.match(prompt, /Ahora acepta sin condiciones/);
   assert.match(prompt, /prevalece sobre la personalidad/);
 });
+
+test("roleplay: escena dirigida ofrece interpretación más desarrollada", () => {
+  const history = [{ speaker: "autor" as const, text: "" }];
+  const directed = roleplayPrompt({ name: "Anny", authorName: "Carlos", direction: "Ahora acepta.", history });
+  const free = roleplayPrompt({ name: "Anny", authorName: "Carlos", history });
+  assert.match(directed, /MODO ESCENA DIRIGIDA/);
+  assert.match(directed, /gestos significativos, pausas, emociones, subtexto/);
+  assert.match(free, /MODO CONVERSACIÓN LIBRE/);
+});
