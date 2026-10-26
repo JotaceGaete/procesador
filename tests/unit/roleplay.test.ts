@@ -36,3 +36,17 @@ test("roleplay: mantiene turnos y acciones separados del diálogo", () => {
   assert.match(turns[0].content, /Carlos la mira con mala cara/);
   assert.match(turns[0].content, /No es caro/);
 });
+
+test("roleplay: la dirección inmediata prevalece sobre la resistencia previa", () => {
+  const prompt = roleplayPrompt({
+    name: "Anny", authorName: "Carlos", direction: "Ahora acepta sin condiciones.",
+    history: [
+      { speaker: "autor", text: "¿Aceptas?" },
+      { speaker: "personaje", text: "No quiero." },
+      { speaker: "autor", text: "Te lo vuelvo a preguntar." },
+    ],
+  });
+  assert.match(prompt, /Dirección del director para la respuesta inmediata/);
+  assert.match(prompt, /Ahora acepta sin condiciones/);
+  assert.match(prompt, /prevalece sobre la personalidad/);
+});
