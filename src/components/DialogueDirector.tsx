@@ -59,7 +59,7 @@ export default function DialogueDirector(props: Props) {
         <input style={{ display: "block", width: "100%" }} value={casualName} maxLength={100}
           onChange={(e) => { setCasualName(e.target.value); reset(); }} placeholder="Any, Sonia, camarero..." />
       </label>}
-      <label style={{ display: "block", marginTop: 12 }}>Hacia dónde quiero llevar la conversación (opcional)
+      <label style={{ display: "block", marginTop: 12 }}>Situación inicial y dirección de la escena (opcional)
         <textarea style={{ display: "block", width: "100%", minHeight: 65 }} value={objective} maxLength={900}
           onChange={(e) => setObjective(e.target.value)}
           placeholder="Any quiere aceptar la invitación, pero disimula. No debe adelantarse a mi siguiente intervención." />
@@ -83,7 +83,7 @@ export default function DialogueDirector(props: Props) {
       </div>
       <label style={{ display: "block", marginTop: 12 }}>Contexto de este momento (gestos, acciones y situación; no es diálogo)
         <textarea style={{ display: "block", width: "100%", minHeight: 60 }} value={sceneNote} maxLength={600}
-          onChange={(e) => setSceneNote(e.target.value)} placeholder="Anny dice que está caro. Carlos la mira con mala cara. Ella se incomoda." />
+          onChange={(e) => setSceneNote(e.target.value)} placeholder="Describe solo lo que ocurre ahora: gestos, movimientos o circunstancias nuevas." />
       </label>
       <label style={{ display: "block", marginTop: 12 }}>Tu mensaje
         <textarea style={{ display: "block", width: "100%", minHeight: 65 }} value={draft} maxLength={500}
@@ -103,7 +103,7 @@ export default function DialogueDirector(props: Props) {
       </div>
       {props.locked && <p>El capítulo está bloqueado; puedes conversar, pero no insertar.</p>}
       {error && <p role="alert">{error}</p>}
-      <p style={{ fontSize: 12 }}>Ahorro de tokens: ficha, reglas, contexto escénico y últimas 12 intervenciones. Cada mensaje enviado consume tokens.</p>
+      <p style={{ fontSize: 12 }}>Ahorro de tokens: ficha, reglas, contexto escénico y últimas 16 intervenciones. Cada mensaje enviado consume tokens.</p>
     </section>
   </div>;
 }
