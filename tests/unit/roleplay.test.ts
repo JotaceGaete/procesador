@@ -4,9 +4,10 @@ import { roleplayPrompt } from "../../src/lib/ai/roleplay";
 
 test("roleplay: responde solo el interlocutor y conserva la dirección", () => {
   const prompt = roleplayPrompt({ name: "Any", authorName: "Carlos", personality: "Espontánea",
-    objective: "Desea aceptar una invitación pero disimula", history: [{ speaker: "autor", text: "Hola Any, ¿cómo estás?" }] });
+    objective: "Desea aceptar una invitación pero disimula", avoid: "No tutear a Carlos; tratarlo de usted", history: [{ speaker: "autor", text: "Hola Any, ¿cómo estás?" }] });
   assert.match(prompt, /No escribas sus respuestas/);
   assert.match(prompt, /Desea aceptar/);
+  assert.match(prompt, /No tutear a Carlos; tratarlo de usted/);
   assert.match(prompt, /Carlos: Hola Any/);
   assert.match(prompt, /Carácter: Espontánea/);
 });
