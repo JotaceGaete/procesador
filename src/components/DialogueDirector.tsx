@@ -10,6 +10,7 @@ export default function DialogueDirector(props: Props) {
   const [casualName, setCasualName] = useState("");
   const [authorName, setAuthorName] = useState("Carlos");
   const [objective, setObjective] = useState("");
+  const [avoid, setAvoid] = useState("");
   const [provider, setProvider] = useState<ProviderId | null>(props.defaultProvider ?? props.providers[0] ?? null);
   const [history, setHistory] = useState<RoleTurn[]>([]);
   const [draft, setDraft] = useState("");
@@ -25,7 +26,7 @@ export default function DialogueDirector(props: Props) {
       const result = await api<{ text: string; truncated: boolean }>("/api/roleplay", {
         method: "POST", body: JSON.stringify({ novelId: props.novelId, chapterId: props.chapterId,
           characterId: characterId || undefined, casualName: characterId ? undefined : casualName,
-          authorName, objective, provider, history: next }),
+          authorName, objective, avoid, provider, history: next }),
       });
       setHistory([...next, { speaker: "personaje", text: result.text }]);
       if (result.truncated) setError("Respuesta incompleta: revisa el último mensaje.");
@@ -61,6 +62,11 @@ export default function DialogueDirector(props: Props) {
         <textarea style={{ display: "block", width: "100%", minHeight: 65 }} value={objective} maxLength={900}
           onChange={(e) => setObjective(e.target.value)}
           placeholder="Any quiere aceptar la invitación, pero disimula. No debe adelantarse a mi siguiente intervención." />
+      </label>
+      <label style={{ display: "block", marginTop: 12 }}>Qué debe evitar el personaje (prompt negativo)
+        <textarea style={{ display: "block", width: "100%", minHeight: 65 }} value={avoid} maxLength={900}
+          onChange={(e) => setAvoid(e.target.value)}
+          placeholder="No tutear al jefe; tratarlo de usted. No hacerse la difícil, ni usar frases como tienes que conquistarme. No hablar con excesiva confianza." />
       </label>
       <label style={{ display: "block", marginTop: 12 }}>Proveedor
         <select value={provider ?? ""} onChange={(e) => setProvider(e.target.value as ProviderId)}>
