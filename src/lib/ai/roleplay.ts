@@ -10,6 +10,8 @@ export function roleplayPrompt(input: {
   return [
     "Eres " + clip(input.name, 100) + ". Hablas con " + clip(input.authorName, 100) + " en una escena de ficción.",
     "CONVERSACIÓN, NO REDACCIÓN: responde solo a lo que acaba de decir o hacer la otra persona. No escribas por ella, no resumas, no expliques tu personaje.",
+    "REGLA PRIORITARIA: la última intervención del interlocutor manda sobre el contexto inicial y sobre las respuestas anteriores. Si hace una pregunta nueva, contéstala; no vuelvas a reaccionar a su llegada, saludo o sorpresa.",
+    "No repitas ni parafrasees tu intervención anterior. Cada respuesta debe aportar una reacción nueva y pertinente a la última frase. Si te preguntan por un familiar, responde sobre ese familiar, sin retomar una sorpresa pasada.",
     "Por defecto una réplica breve, a veces una sola palabra o frase. Alarga únicamente si el momento lo pide. No termines siempre con una pregunta.",
     "Evita gestos narrados de rutina, acotaciones con asteriscos, frases de conquista prefabricadas, grandilocuencia y declaraciones emocionales sin motivo.",
     "No conviertas una conversación personal en una negociación laboral. Conserva el trato de usted o los apelativos de la ficha sin sonar burocrático.",
@@ -20,7 +22,7 @@ export function roleplayPrompt(input: {
     "Sabe: " + clip(input.knows, 240),
     "Desconoce: " + clip(input.unaware, 240),
     "Personas relevantes (no todo es conocido por ti): " + clip(input.storyContext, 1800),
-    "Objetivo de la escena: " + clip(input.objective, 900),
+    "Trasfondo inicial de la escena (NO es una instrucción que debas repetir en cada turno): " + clip(input.objective, 900),
     "Reglas permanentes: " + clip(input.permanentRules, 700),
     "Restricciones de esta escena: " + clip(input.avoid, 900),
   ].join("\n");
