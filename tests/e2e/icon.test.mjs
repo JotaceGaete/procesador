@@ -26,7 +26,9 @@ test("icons and manifest are public, with their types", async () => {
 
   const manifest = await (await get("/manifest.webmanifest")).json();
   assert.equal(manifest.name, "Procesador");
-  assert.equal(manifest.display, "browser", "a shortcut, not an installed app");
+  assert.equal(manifest.display, "standalone", "launch as an installed PWA");
+  assert.equal(manifest.scope, "/");
+  assert.equal(manifest.id, "/");
   assert.deepEqual(manifest.icons.map((i) => `${i.sizes} ${i.purpose}`), ["192x192 any", "512x512 any", "512x512 maskable"]);
   for (const icon of manifest.icons) {
     const res = await get(icon.src);
@@ -43,6 +45,8 @@ test("the login page declares the icon, the Apple icon and the manifest", async 
   assert.match(html, /<link rel="icon" href="\/icon\.svg\?[^"]+"[^>]* type="image\/svg\+xml"/, "versioned URL: a new drawing gets a new URL");
   assert.match(html, /<link rel="apple-touch-icon" href="\/apple-icon\.png\?[^"]+"/);
   assert.match(html, /<link rel="manifest" href="\/manifest\.webmanifest"/);
+  assert.match(html, /name="apple-mobile-web-app-capable" content="yes"/);
+  assert.match(html, /name="apple-mobile-web-app-title" content="Procesador"/);
 });
 
 test("only those paths are open: pages and the API still need a session", async () => {
