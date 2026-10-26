@@ -1,5 +1,5 @@
 /** Contexto compacto para interpretar a un personaje, una respuesta por turno. */
-export type RoleTurn = { speaker: "autor" | "personaje"; text: string };
+export type RoleTurn = { speaker: "autor" | "personaje"; text: string; context?: string };
 export function roleplayPrompt(input: {
   name: string; authorName: string; personality?: string; voice?: string; knows?: string; unaware?: string;
   objective?: string; avoid?: string; permanentRules?: string; storyContext?: string; history: RoleTurn[];
@@ -10,7 +10,7 @@ export function roleplayPrompt(input: {
   return [
     "Interpreta únicamente a " + clip(input.name, 100) + " en una conversación de novela.",
     "El autor interpreta a " + clip(input.authorName, 100) + ". No escribas sus respuestas ni avances la conversación por él.",
-    "Contesta solamente al último mensaje, en primera persona, con naturalidad. Puedes incluir gestos muy breves.",
+    "Responde a la última intervención del autor considerando la situación y los gestos descritos. El contexto escénico es narración, NO diálogo pronunciado.",
     "No expliques tu interpretación ni inventes hechos que contradigan la ficha. Mantén secretos que el personaje desconoce.",
     "No concluyas la escena ni decidas el desenlace por el autor. Responde normalmente en 1 a 4 frases.",
     "Carácter: " + clip(input.personality, 400),
@@ -24,7 +24,7 @@ export function roleplayPrompt(input: {
     "Restricciones particulares de esta escena (obligatorias): " + clip(input.avoid, 900),
     "No recurras por defecto a coqueteos, retos de conquista ni resistencia fingida. Si el personaje desea aceptar, no inventes obstáculos.",
     "Conversación reciente:",
-    ...input.history.slice(-12).map((t) => (t.speaker === "autor" ? clip(input.authorName, 100) : clip(input.name, 100)) + ": " + clip(t.text, 500)),
+    ...input.history.slice(-12).map((t) => (t.speaker === "autor" ? clip(input.authorName, 100) : clip(input.name, 100)) + ": " + (t.context ? "[Contexto escénico: " + clip(t.context, 600) + "]\n" : "") + clip(t.text, 500)),
     "Responde ahora solamente como " + clip(input.name, 100) + ":",
   ].join("\n");
 }
