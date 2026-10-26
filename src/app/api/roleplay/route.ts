@@ -86,8 +86,8 @@ export const POST = handler(async (request) => {
     })) {
       if (event.type === "text") verdict += event.text;
     }
-    if (/^CUMPLE\\b/i.test(verdict.trim())) { feedback = ""; break; }
-    feedback = verdict.trim().replace(/^NO_CUMPLE\\s*:?\\s*/i, "") || "no cumple la dirección narrativa";
+    if (/^CUMPLE\b/i.test(verdict.trim())) { feedback = ""; break; }
+    feedback = verdict.trim().replace(/^NO_CUMPLE\s*:?\s*/i, "") || "no cumple la dirección narrativa";
     text = "";
   }
   if (direction && !text.trim()) throw new HttpError(422, "La IA no consiguió cumplir la dirección del autor tras varios intentos. No se agregó ninguna respuesta al diálogo; puedes reformular la instrucción o probar otro proveedor.");
