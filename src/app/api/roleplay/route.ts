@@ -49,14 +49,24 @@ export const POST = handler(async (request) => {
   let text = "";
   let truncated = false;
   let usage: Usage | null = null;
-  for await (const event of provider.stream({
-    instructions: prompt, messages: roleplayMessages(history),
-    manuscript: null, project: "", prompt: "", signal: request.signal, role: "write", maxOutputTokens: typeof body.direction === "string" && body.direction.trim() ? 550 : 220,
-  })) {
-    if (event.type === "text") text += event.text;
-    if (event.type === "truncated") truncated = true;
-    if (event.type === "usage") usage = { model: event.model, input: event.input, cached: event.cached, output: event.output, costUsd: event.costUsd };
-    if (event.type === "refusal") throw new HttpError(422, event.message);
+  // A provider can complete without visible text (e.g. exhausted output budget).
+  // Retry once with a clearer, smaller response request instead of losing the scene.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    text = "";
+    truncated = false;
+    usage = null;
+    for await (const event of provider.stream({
+      instructions: attempt === 0 ? prompt : prompt + "\\nRESPUESTA DE RECUPERACIÓN: contesta directamente a la última intervención del interlocutor. Produce una respuesta visible y concreta, en tu voz, sin prefacios ni explicaciones.",
+      messages: roleplayMessages(history),
+      manuscript: null, project: "", prompt: "", signal: request.signal, role: "write",
+      maxOutputTokens: attempt === 0 ? (typeof body.direction === "string" && body.direction.trim() ? 550 : 300) : 550,
+    })) {
+      if (event.type === "text") text += event.text;
+      if (event.type === "truncated") truncated = true;
+      if (event.type === "usage") usage = { model: event.model, input: event.input, cached: event.cached, output: event.output, costUsd: event.costUsd };
+      if (event.type === "refusal") throw new HttpError(422, event.message);
+    }
+    if (text.trim()) break;
   }
   if (usage) await recordUsage(novel.id, "assist", providerId, usage);
   if (!text.trim()) throw new HttpError(502, "El personaje no respondió");
