@@ -2,7 +2,7 @@
 export type RoleTurn = { speaker: "autor" | "personaje"; text: string };
 export function roleplayPrompt(input: {
   name: string; authorName: string; personality?: string; voice?: string; knows?: string; unaware?: string;
-  objective?: string; history: RoleTurn[];
+  objective?: string; avoid?: string; history: RoleTurn[];
 }): string {
   const clip = (s: string | undefined, n: number) => (s ?? "").trim().slice(0, n);
   if (!input.name.trim()) throw new Error("Selecciona el personaje.");
@@ -18,6 +18,8 @@ export function roleplayPrompt(input: {
     "Sabe: " + clip(input.knows, 240),
     "Desconoce: " + clip(input.unaware, 240),
     "Dirección del autor: " + clip(input.objective, 900),
+    "Restricciones de voz y conducta (obligatorias en todos los turnos): " + clip(input.avoid, 900),
+    "No recurras por defecto a coqueteos, retos de conquista ni resistencia fingida. Si el personaje desea aceptar, no inventes obstáculos.",
     "Conversación reciente:",
     ...input.history.slice(-12).map((t) => (t.speaker === "autor" ? clip(input.authorName, 100) : clip(input.name, 100)) + ": " + clip(t.text, 500)),
     "Responde ahora solamente como " + clip(input.name, 100) + ":",
