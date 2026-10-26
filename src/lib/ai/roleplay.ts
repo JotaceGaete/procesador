@@ -8,26 +8,28 @@ export function roleplayPrompt(input: {
   if (!input.name.trim()) throw new Error("Selecciona el personaje.");
   if (!input.history.length || input.history.at(-1)?.speaker !== "autor") throw new Error("Escribe tu intervención.");
   return [
-    "Interpreta únicamente a " + clip(input.name, 100) + " en una conversación de novela.",
-    "El autor interpreta a " + clip(input.authorName, 100) + ". No escribas sus respuestas ni avances la conversación por él.",
-    "Responde a la última intervención del autor considerando la situación y los gestos descritos. El contexto escénico es narración, NO diálogo pronunciado.",
-    "No expliques tu interpretación ni inventes hechos que contradigan la ficha. Mantén secretos que el personaje desconoce.",
-    "No concluyas la escena ni decidas el desenlace por el autor. Responde normalmente en 1 a 4 frases.",
+    "Eres " + clip(input.name, 100) + ". Hablas con " + clip(input.authorName, 100) + " en una escena de ficción.",
+    "CONVERSACIÓN, NO REDACCIÓN: responde solo a lo que acaba de decir o hacer la otra persona. No escribas por ella, no resumas, no expliques tu personaje.",
+    "Por defecto una réplica breve, a veces una sola palabra o frase. Alarga únicamente si el momento lo pide. No termines siempre con una pregunta.",
+    "Evita gestos narrados de rutina, acotaciones con asteriscos, frases de conquista prefabricadas, grandilocuencia y declaraciones emocionales sin motivo.",
+    "No conviertas una conversación personal en una negociación laboral. Conserva el trato de usted o los apelativos de la ficha sin sonar burocrático.",
+    "No introduzcas tensión romántica automáticamente: escucha, reacciona y deja que el autor dirija el ritmo.",
+    "Respeta lo que el personaje sabe y desconoce; no inventes datos ni relaciones.",
     "Carácter: " + clip(input.personality, 400),
-    "Forma de hablar: " + clip(input.voice, 280),
+    "Voz: " + clip(input.voice, 280),
     "Sabe: " + clip(input.knows, 240),
     "Desconoce: " + clip(input.unaware, 240),
-    "Dirección del autor: " + clip(input.objective, 900),
-    "Personajes y vínculos del mundo narrativo (referencia, no conocimiento automático del personaje): " + clip(input.storyContext, 1800),
-    "Si preguntan por alguien, usa las referencias de la novela; no inventes vínculos ni finjas desconocer nombres documentados. Distingue lo que existe en la novela de lo que tu personaje realmente sabe. Si no consta que lo conozca, expresa incertidumbre.",
-    "Reglas permanentes del personaje (obligatorias): " + clip(input.permanentRules, 700),
-    "Restricciones particulares de esta escena (obligatorias): " + clip(input.avoid, 900),
-    "Prioriza la situación y la emoción presentes sobre el oficio habitual de los personajes.",
-    "En una escena personal o íntima, evita lenguaje de propuestas laborales, méritos profesionales o negociaciones, a menos que el autor introduzca esos temas.",
-    "Conserva el tratamiento habitual, como usted o jefe, pero permite cercanía, espontaneidad y vulnerabilidad según la escena. El respeto no implica lenguaje burocrático.",
-    "No recurras por defecto a coqueteos, retos de conquista ni resistencia fingida. Si el personaje desea aceptar, no inventes obstáculos.",
-    "Conversación reciente:",
-    ...input.history.slice(-12).map((t) => (t.speaker === "autor" ? clip(input.authorName, 100) : clip(input.name, 100)) + ": " + (t.context ? "[Contexto escénico: " + clip(t.context, 600) + "]\n" : "") + clip(t.text, 500)),
-    "Responde ahora solamente como " + clip(input.name, 100) + ":",
+    "Personas relevantes (no todo es conocido por ti): " + clip(input.storyContext, 1800),
+    "Objetivo de la escena: " + clip(input.objective, 900),
+    "Reglas permanentes: " + clip(input.permanentRules, 700),
+    "Restricciones de esta escena: " + clip(input.avoid, 900),
   ].join("\n");
+}
+
+export function roleplayMessages(history: RoleTurn[]): { role: "user" | "assistant"; content: string }[] {
+  return history.slice(-16).map((turn) => ({
+    role: turn.speaker === "autor" ? "user" : "assistant",
+    content: [turn.context ? "[Situación y acciones, no palabras pronunciadas: " + turn.context.slice(0, 600) + "]" : "",
+      turn.text.slice(0, 500)].filter(Boolean).join("\n"),
+  }));
 }
