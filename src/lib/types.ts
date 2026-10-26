@@ -124,6 +124,7 @@ export interface Character {
   contradictions: string;
   values: string;
   voice: string;
+  dialogue_rules: string;
   vocabulary: string;
   secrets: string;
   knows: string;
@@ -268,7 +269,8 @@ export const CHARACTER_SECTIONS: {
   {
     title: "Voz",
     fields: [
-      { key: "voice", label: "Forma de hablar", hint: "Registro, ritmo, lo que nunca diría", rows: 3 },
+      { key: "voice", label: "Forma de hablar", hint: "Registro, ritmo y estilo", rows: 3 },
+      { key: "dialogue_rules", label: "Reglas permanentes de diálogo (qué evitar)", hint: "Ej.: No tutear a Carlos. Tratarlo de usted. No hacerse la difícil ni usar frases de conquista prefabricadas.", rows: 3 },
       { key: "vocabulary", label: "Vocabulario y expresiones", hint: "Muletillas, groserías, giros propios", rows: 2 },
     ],
   },

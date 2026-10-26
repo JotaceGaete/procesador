@@ -26,6 +26,7 @@ import { ChronologyModal } from "./Chronology";
 import NovelModal from "./NovelModal";
 import MemoryModal from "./MemoryModal";
 import AssistantPanel from "./AssistantPanel";
+import DialogueDirector from "./DialogueDirector";
 import { ChapterImagesModal, ImageCard, ReadingView, type Pending } from "./ManuscriptImages";
 import { addManuscriptImage, rejectReason, replaceImage } from "@/lib/upload";
 import { imageAt, imageIds } from "@/lib/manuscript";
@@ -100,6 +101,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
 
   const [navOpen, setNavOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [dialogueOpen, setDialogueOpen] = useState(false);
   const [section, setSection] = useState<AIPanelSection>("assistant");
   // A Consejero "Ir" into another chapter: applied once that chapter's editor is mounted.
   const pendingGoTo = useRef<{ chapterId: string; start: number; end: number; text: string } | null>(null);
@@ -713,6 +715,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
             >
               Consejero
             </button>
+            <button className={`link${dialogueOpen ? " on" : ""}`} onClick={() => setDialogueOpen(true)} title="Dirigir una conversación entre personajes">Diálogos</button>
             <button
               className={`link${modal === "critic" ? " on" : ""}`}
               onClick={() => setModal("critic")}
@@ -842,6 +845,19 @@ export default function Workspace({ novelId }: { novelId: string }) {
           />
         )}
       </main>
+
+      {dialogueOpen && (
+        <DialogueDirector
+          novelId={novel.id}
+          chapterId={chapter.id}
+          memory={memory}
+          providers={loaded.providers}
+          defaultProvider={loaded.defaultProvider}
+          locked={locked}
+          onInsert={(text) => insertScene(chapter.id, text, { kind: "end" })}
+          onClose={() => setDialogueOpen(false)}
+        />
+      )}
 
       <AssistantPanel
         hidden={!showPanel}
