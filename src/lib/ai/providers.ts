@@ -9,6 +9,8 @@ import { costUsd, modelFor } from "./models";
  * which provider will answer; each provider maps it to its own API.
  */
 export interface CompletionRequest {
+  /** Optional genuine conversational turns; roleplay uses this instead of a flattened transcript. */
+  messages?: { role: "user" | "assistant"; content: string }[];
   /** Mode instructions (edit or write): identical on every request of that mode. */
   instructions: string;
   /** Full manuscript, only when the author asks for it. Kept as its own block so it can be cached. */
@@ -126,7 +128,7 @@ async function* streamAnthropic(req: CompletionRequest): AsyncGenerator<Provider
       max_tokens: req.maxOutputTokens ?? 16000,
       output_config: { effort: (process.env.ANTHROPIC_EFFORT as Effort) || "medium" },
       system,
-      messages: [{ role: "user", content: req.prompt }],
+      messages: req.messages ?? [{ role: "user", content: req.prompt }],
     },
     { signal: req.signal },
   );
@@ -161,7 +163,7 @@ async function* streamOpenAI(req: CompletionRequest): AsyncGenerator<ProviderEve
     {
       model,
       instructions: [req.instructions, req.manuscript, req.project].filter(Boolean).join("\n\n"),
-      input: req.prompt,
+      input: req.messages ?? req.prompt,
       max_output_tokens: req.maxOutputTokens ?? 16000,
       stream: true,
     },
@@ -211,7 +213,7 @@ async function* streamXai(req: CompletionRequest): AsyncGenerator<ProviderEvent>
         max_tokens: req.maxOutputTokens ?? 16000,
         messages: [
           { role: "system", content: system },
-          { role: "user", content: req.prompt },
+          ...(req.messages ?? [{ role: "user" as const, content: req.prompt }]),
         ],
       }),
     });
