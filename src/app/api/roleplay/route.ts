@@ -31,7 +31,7 @@ export const POST = handler(async (request) => {
   let prompt: string;
   try {
     prompt = roleplayPrompt({ name, authorName: typeof body.authorName === "string" ? body.authorName : "Autor",
-      personality: character?.personality, voice: character?.voice, knows: character?.knows,
+      personality: character?.personality, voice: character?.voice, permanentRules: character?.dialogue_rules, knows: character?.knows,
       unaware: character?.unaware, objective: typeof body.objective === "string" ? body.objective : "", avoid: typeof body.avoid === "string" ? body.avoid : "", history });
   } catch (e) { throw new HttpError(400, e instanceof Error ? e.message : "Conversación no válida"); }
   let text = "";
