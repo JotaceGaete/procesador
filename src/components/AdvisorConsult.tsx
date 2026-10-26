@@ -127,6 +127,12 @@ export default function AdvisorConsult(p: Props) {
   const [deep, setDeep] = useState(true);
   useEffect(() => setDeep(readPref("deepReading") !== "0"), []);
   const abort = useRef<AbortController | null>(null);
+  const stop = () => {
+    abort.current?.abort();
+    setRunning(false);
+    setProgress(null);
+    setNotice("Consulta detenida por el autor.");
+  };
   useEffect(() => () => abort.current?.abort(), []);
 
   // Conversations: the open one (null: a new one starts with the next question) and its history.
@@ -219,6 +225,7 @@ export default function AdvisorConsult(p: Props) {
       await p.flush();
       // What it would read, and which chapters it would like read first.
       const dry = await (await post("/api/advisor", { ...body(ask, using), dryRun: true }, controller.signal)).json();
+      if (controller.signal.aborted) return;
       setPlan(dry.plan);
       const unread: Unread[] = dry.unread ?? [];
       const reading = unread.reduce((n, u) => n + u.estimate, 0);
@@ -232,6 +239,7 @@ export default function AdvisorConsult(p: Props) {
       }
       const failed: string[] = [];
       for (const [i, u] of unread.entries()) {
+        if (controller.signal.aborted) return;
         setProgress(`Leyendo ${u.title} para tener su ficha (${i + 1} de ${unread.length})…`);
         try {
           await post(`/api/chapters/${u.id}/digest`, { provider: using }, controller.signal);
@@ -241,9 +249,11 @@ export default function AdvisorConsult(p: Props) {
           failed.push(`${u.title}: ${(e as Error).message}`);
         }
       }
+      if (controller.signal.aborted) return;
       setProgress(null);
       if (failed.length) setNotice(`No se pudieron leer: ${failed.join("; ")}`);
 
+      if (controller.signal.aborted) return;
       const res = await post("/api/advisor", body(ask, using), controller.signal);
       const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
       let buffer = "";
@@ -283,11 +293,16 @@ export default function AdvisorConsult(p: Props) {
         }
       }
     } catch (e) {
-      if ((e as Error).name !== "AbortError") setNotice((e as Error).message);
+      if (controller.signal.aborted || (e as Error).name === "AbortError") setNotice("Consulta detenida por el autor.");
+      else setNotice((e as Error).message);
     } finally {
       setProgress(null);
-      if (abort.current === controller) setRunning(false);
+      if (abort.current === controller) {
+        abort.current = null;
+        setRunning(false);
+      }
     }
+    if (controller.signal.aborted) return;
     // Paused before reading beyond the extraordinary threshold: the author decides.
     if (pause) {
       const p0 = pause as { tokens: number; requests: unknown[]; items: string[] };
@@ -407,6 +422,7 @@ export default function AdvisorConsult(p: Props) {
         <section className="result advisor-result chat" aria-live="polite" data-origin="consejero: respuesta en curso (conversar)">
           {plan?.detail && <p className="muted small plan">{plan.detail}</p>}
           {progress && <p className="muted small" role="status">{progress}</p>}
+          {running && <button type="button" className="btn ghost" onClick={stop} aria-label="Detener lectura del Consejero">■ Detener lectura</button>}
           {visible(text) && (
             <div className="markdown">
               <ReactMarkdown>{visible(text)}</ReactMarkdown>
@@ -756,7 +772,7 @@ export default function AdvisorConsult(p: Props) {
           <span className="muted small">Piensa contigo; no cambia el texto.</span>
           <span className="spacer" />
           {running ? (
-            <button type="button" className="btn ghost" onClick={() => abort.current?.abort()}>
+            <button type="button" className="btn ghost" onClick={stop}>
               Detener
             </button>
           ) : (
