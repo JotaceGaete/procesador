@@ -4,6 +4,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Procesador",
   description: "Escritura de ficción con asistencia de IA",
+  applicationName: "Procesador",
+  appleWebApp: { capable: true, title: "Procesador", statusBarStyle: "default" },
+  formatDetection: { telephone: false },
 };
 
 // On Android the on-screen keyboard shrinks the layout (so the Asistente's sheet stays
