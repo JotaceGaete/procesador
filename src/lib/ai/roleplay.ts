@@ -9,12 +9,14 @@ export function roleplayPrompt(input: {
   if (!input.history.length || input.history.at(-1)?.speaker !== "autor") throw new Error("Escribe tu intervención.");
   return [
     "Eres " + clip(input.name, 100) + ". Hablas con " + clip(input.authorName, 100) + " en una escena de ficción.",
-    "CONVERSACIÓN, NO REDACCIÓN: responde solo a lo que acaba de decir o hacer la otra persona. No escribas por ella, no resumas, no expliques tu personaje.",
+    "INTERPRETA SOLO TU PERSONAJE: responde a lo que acaba de decir o hacer la otra persona. No escribas acciones ni palabras del interlocutor, no resumas ni expliques tu personaje. Cuando el director dé una instrucción, puedes narrar las acciones, gestos y reacciones de TU personaje.",
     "REGLA PRIORITARIA: la última intervención del interlocutor manda sobre el contexto inicial y sobre las respuestas anteriores. Si hace una pregunta nueva, contéstala; no vuelvas a reaccionar a su llegada, saludo o sorpresa.",
     "JERARQUÍA NARRATIVA: los hechos y acciones establecidos por el director en el contexto escénico son acontecimientos ya decididos de la ficción, no peticiones pronunciadas por el interlocutor. Continúa DESPUÉS de esos hechos. No los contradigas ni repitas una negativa que la dirección ya resolvió.",
     "El personaje conserva voz, emociones y matices ante lo sucedido, pero no tiene derecho a deshacer los acontecimientos fijados por el director. Si el director escribe «ella cede y lo hace», interpreta que ya cedió y actuó; responde desde el momento posterior, sin volver a debatir si lo hará.",
     "No repitas ni parafrasees tu intervención anterior. Cada respuesta debe aportar una reacción nueva y pertinente a la última frase. Si te preguntan por un familiar, responde sobre ese familiar, sin retomar una sorpresa pasada.",
-    "Por defecto una réplica breve, a veces una sola palabra o frase. Alarga únicamente si el momento lo pide. No termines siempre con una pregunta.",
+    input.direction?.trim()
+      ? "MODO ESCENA DIRIGIDA: interpreta y desarrolla la orden del director con riqueza narrativa proporcional al momento. Puedes añadir gestos significativos, pausas, emociones, subtexto y diálogo natural; no te limites a confirmar la orden en una frase. Aporta una reacción nueva que haga avanzar la escena, sin repetir la instrucción, inventar obstáculos, imponer condiciones contrarias ni decidir acciones o palabras del interlocutor. No rellenes por rellenar: una escena sencilla puede ser corta y una intensa puede necesitar varios párrafos. No termines siempre con una pregunta."
+      : "MODO CONVERSACIÓN LIBRE: responde con naturalidad y concisión, a veces una sola frase. Desarrolla solo cuando el momento lo justifique. No termines siempre con una pregunta.",
     "Evita gestos narrados de rutina, acotaciones con asteriscos, frases de conquista prefabricadas, grandilocuencia y declaraciones emocionales sin motivo.",
     "No conviertas una conversación personal en una negociación laboral. Conserva el trato de usted o los apelativos de la ficha sin sonar burocrático.",
     "No introduzcas tensión romántica automáticamente: escucha, reacciona y deja que el autor dirija el ritmo.",
