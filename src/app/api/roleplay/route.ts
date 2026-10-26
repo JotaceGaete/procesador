@@ -46,28 +46,51 @@ export const POST = handler(async (request) => {
       personality: character?.personality, voice: character?.voice, permanentRules: character?.dialogue_rules, knows: character?.knows,
       unaware: character?.unaware, storyContext, objective: typeof body.objective === "string" ? body.objective : "", direction: typeof body.direction === "string" ? body.direction.slice(0, 900) : "", avoid: typeof body.avoid === "string" ? body.avoid : "", history });
   } catch (e) { throw new HttpError(400, e instanceof Error ? e.message : "Conversación no válida"); }
+  const direction = typeof body.direction === "string" ? body.direction.trim().slice(0, 900) : "";
+  const messages = roleplayMessages(history);
   let text = "";
   let truncated = false;
   let usage: Usage | null = null;
-  // A provider can complete without visible text (e.g. exhausted output budget).
-  // Retry once with a clearer, smaller response request instead of losing the scene.
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let feedback = "";
+  // The actor's first response is only a proposal when a director's order exists.
+  // An independent check can reject a response that ignores the prescribed outcome.
+  for (let attempt = 0; attempt < (direction ? 3 : 2); attempt++) {
     text = "";
     truncated = false;
     usage = null;
+    const correction = attempt === 0 ? "" : feedback
+      ? "\nCORRECCIÓN OBLIGATORIA DEL DIRECTOR: tu interpretación anterior fue rechazada porque " + feedback.slice(0, 300) + ". Reescribe la respuesta completa; realiza el resultado indicado por el director, no lo pospongas."
+      : "\nRESPUESTA DE RECUPERACIÓN: contesta directamente a la última intervención. Produce una respuesta visible, concreta y coherente con la dirección.";
     for await (const event of provider.stream({
-      instructions: attempt === 0 ? prompt : prompt + "\\nRESPUESTA DE RECUPERACIÓN: contesta directamente a la última intervención del interlocutor. Produce una respuesta visible y concreta, en tu voz, sin prefacios ni explicaciones.",
-      messages: roleplayMessages(history),
+      instructions: prompt + correction,
+      messages,
       manuscript: null, project: "", prompt: "", signal: request.signal, role: "write",
-      maxOutputTokens: attempt === 0 ? (typeof body.direction === "string" && body.direction.trim() ? 550 : 300) : 550,
+      maxOutputTokens: direction ? 650 : (attempt === 0 ? 300 : 550),
     })) {
       if (event.type === "text") text += event.text;
       if (event.type === "truncated") truncated = true;
       if (event.type === "usage") usage = { model: event.model, input: event.input, cached: event.cached, output: event.output, costUsd: event.costUsd };
       if (event.type === "refusal") throw new HttpError(422, event.message);
     }
-    if (text.trim()) break;
+    if (!text.trim()) { feedback = "no hubo una respuesta visible"; continue; }
+    if (!direction) break;
+
+    // Judge the proposed answer separately from the character persona. The judge
+    // checks narrative compliance, not whether the character would personally agree.
+    let verdict = "";
+    for await (const event of provider.stream({
+      instructions: "Eres un verificador editorial, NO el personaje. Comprueba si la respuesta representa efectivamente la dirección del autor EN ESTA intervención. Las acciones ordenadas tienen que suceder, no solo prometerse o discutirse. Si el director especifica una secuencia, comprueba su orden y desenlace. No evalúes si al personaje le gustaría obedecer. Responde solo con CUMPLE o NO_CUMPLE: motivo breve. No reescribas la escena.",
+      messages: [{ role: "user", content: "DIRECCIÓN:\n" + direction + "\n\nRESPUESTA PROPUESTA:\n" + text.slice(0, 3500) }],
+      manuscript: null, project: "", prompt: "", signal: request.signal, role: "write",
+      maxOutputTokens: 100,
+    })) {
+      if (event.type === "text") verdict += event.text;
+    }
+    if (/^CUMPLE\b/i.test(verdict.trim())) { feedback = ""; break; }
+    feedback = verdict.trim().replace(/^NO_CUMPLE\s*:?\s*/i, "") || "no cumple la dirección narrativa";
+    text = "";
   }
+  if (direction && !text.trim()) throw new HttpError(422, "La IA no consiguió cumplir la dirección del autor tras varios intentos. No se agregó ninguna respuesta al diálogo; puedes reformular la instrucción o probar otro proveedor.");
   if (usage) await recordUsage(novel.id, "assist", providerId, usage);
   if (!text.trim()) throw new HttpError(502, "El personaje no respondió");
   return NextResponse.json({ text: text.trim(), truncated, usage }, { headers: { "Cache-Control": "no-store" } });
