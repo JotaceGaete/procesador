@@ -33,7 +33,7 @@ export const POST = handler(async (request) => {
   let truncated = false;
   for await (const event of provider.stream({
     instructions: "Escribe únicamente la escena dialogada solicitada.", manuscript: null, project: "",
-    prompt, signal: request.signal, role: "analysis", maxOutputTokens: 1200,
+    prompt, signal: request.signal, role: "write", maxOutputTokens: 1200,
   })) {
     if (event.type === "text") output += event.text;
     if (event.type === "truncated") truncated = true;
