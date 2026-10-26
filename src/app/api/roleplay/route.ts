@@ -51,7 +51,7 @@ export const POST = handler(async (request) => {
   let usage: Usage | null = null;
   for await (const event of provider.stream({
     instructions: prompt, messages: roleplayMessages(history),
-    manuscript: null, project: "", prompt: "", signal: request.signal, role: "write", maxOutputTokens: 220,
+    manuscript: null, project: "", prompt: "", signal: request.signal, role: "write", maxOutputTokens: typeof body.direction === "string" && body.direction.trim() ? 550 : 220,
   })) {
     if (event.type === "text") text += event.text;
     if (event.type === "truncated") truncated = true;
