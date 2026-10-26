@@ -26,7 +26,7 @@ export const POST = handler(async (request) => {
     const x = t as Record<string, unknown>;
     if ((x.speaker !== "autor" && x.speaker !== "personaje") || typeof x.text !== "string" || x.text.length > 500)
       throw new HttpError(400, "Mensaje no válido");
-    return { speaker: x.speaker, text: x.text };
+    return { speaker: x.speaker, text: x.text, context: typeof x.context === "string" ? x.context.slice(0, 600) : undefined };
   });
   const recentText = history.slice(-12).map((t) => t.text).join(" ").toLocaleLowerCase("es");
   const mentioned = memory.characters.filter((c) => c.id !== character?.id &&
