@@ -2,7 +2,7 @@
 export type RoleTurn = { speaker: "autor" | "personaje"; text: string; context?: string };
 export function roleplayPrompt(input: {
   name: string; authorName: string; personality?: string; voice?: string; knows?: string; unaware?: string;
-  objective?: string; avoid?: string; permanentRules?: string; storyContext?: string; history: RoleTurn[];
+  objective?: string; direction?: string; avoid?: string; permanentRules?: string; storyContext?: string; history: RoleTurn[];
 }): string {
   const clip = (s: string | undefined, n: number) => (s ?? "").trim().slice(0, n);
   if (!input.name.trim()) throw new Error("Selecciona el personaje.");
@@ -26,6 +26,8 @@ export function roleplayPrompt(input: {
     "Personas relevantes (no todo es conocido por ti): " + clip(input.storyContext, 1800),
     "Trasfondo inicial de la escena (NO es una instrucción que debas repetir en cada turno): " + clip(input.objective, 900),
     "Reglas permanentes: " + clip(input.permanentRules, 700),
+    "La dirección explícita del autor para ESTA respuesta prevalece sobre la personalidad, la resistencia anterior y la evolución prevista. Si indica ahora negar, niega; si indica ahora aceptar sin condiciones, acepta sin condiciones, sin seguir negociando ni inventar obstáculos.",
+    "Dirección del director para la respuesta inmediata (no es diálogo ni se debe citar): " + clip(input.direction, 900),
     "Restricciones de esta escena: " + clip(input.avoid, 900),
   ].join("\n");
 }
