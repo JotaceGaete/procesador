@@ -2,82 +2,97 @@
 import { useState } from "react";
 import type { Memory, ProviderId } from "@/lib/types";
 import { api } from "@/lib/client";
+import type { RoleTurn } from "@/lib/ai/roleplay";
 
-type Person = { key: string; role: "habla" | "escucha" };
 type Props = { novelId: string; chapterId: string; memory: Memory; providers: ProviderId[]; defaultProvider: ProviderId | null; locked: boolean; onInsert(text: string): Promise<boolean>; onClose(): void };
 export default function DialogueDirector(props: Props) {
-  const [people, setPeople] = useState<Person[]>([]);
-  const [casual, setCasual] = useState("");
-  const [argument, setArgument] = useState("");
-  const [context, setContext] = useState("");
-  const [length, setLength] = useState<"breve" | "media" | "larga">("breve");
-  const [provider, setProvider] = useState<ProviderId | null>(props.defaultProvider);
-  const [preview, setPreview] = useState("");
-  const [truncated, setTruncated] = useState(false);
+  const [characterId, setCharacterId] = useState("");
+  const [casualName, setCasualName] = useState("");
+  const [authorName, setAuthorName] = useState("Carlos");
+  const [objective, setObjective] = useState("");
+  const [provider, setProvider] = useState<ProviderId | null>(props.defaultProvider ?? props.providers[0] ?? null);
+  const [history, setHistory] = useState<RoleTurn[]>([]);
+  const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const toggle = (key: string) => {
-    setPeople((list) => list.some((p) => p.key === key) ? list.filter((p) => p.key !== key) : [...list, { key, role: "habla" }]);
-    setPreview("");
-  };
-  const generate = async () => {
-    if (!provider) return;
-    setBusy(true); setError(""); setPreview("");
+  const name = props.memory.characters.find((c) => c.id === characterId)?.name ?? casualName.trim();
+  const reset = () => { setHistory([]); setError(""); };
+  const send = async () => {
+    if (!name || !draft.trim() || !provider || busy) return;
+    const next: RoleTurn[] = [...history, { speaker: "autor", text: draft.trim().slice(0, 500) }];
+    setHistory(next); setDraft(""); setBusy(true); setError("");
     try {
-      const participants = people.map((p) => p.key.startsWith("oc:") ? { name: p.key.slice(3), role: p.role } : { id: p.key, role: p.role });
-      const result = await api<{ text: string; truncated: boolean }>("/api/dialogue", {
-        method: "POST", body: JSON.stringify({ novelId: props.novelId, chapterId: props.chapterId, provider, participants, argument, context, length }),
+      const result = await api<{ text: string; truncated: boolean }>("/api/roleplay", {
+        method: "POST", body: JSON.stringify({ novelId: props.novelId, chapterId: props.chapterId,
+          characterId: characterId || undefined, casualName: characterId ? undefined : casualName,
+          authorName, objective, provider, history: next }),
       });
-      setPreview(result.text); setTruncated(result.truncated);
-    } catch (e) { setError(e instanceof Error ? e.message : "Error al generar"); }
+      setHistory([...next, { speaker: "personaje", text: result.text }]);
+      if (result.truncated) setError("Respuesta incompleta: revisa el último mensaje.");
+    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo responder"); }
     finally { setBusy(false); }
   };
-  const canGenerate = Boolean(provider && people.length >= 2 && argument.trim() && !busy);
-  const reason = people.length < 2 ? "Selecciona o añade al menos dos personajes." : !argument.trim() ? "Escribe qué debe ocurrir y cómo termina la conversación." : !provider ? "Selecciona un proveedor de IA." : "";
-  const field = { display: "block", marginTop: 16 } as const;
+  const transcript = history.map((t) => (t.speaker === "autor" ? authorName : name) + ": " + t.text).join("\n\n");
   return <div className="modal-backdrop">
-    <section className="modal" role="dialog" aria-modal="true" aria-label="Director de diálogos" style={{ width: "min(94vw, 700px)", maxWidth: 700, maxHeight: "90vh", overflowY: "auto", padding: 22 }}>
-      <h2 style={{ marginBottom: 10 }}>Director de diálogos</h2>
-      <button type="button" onClick={props.onClose}>Cerrar</button>
-      <p>Selecciona quién participa y quién solo escucha. Si falta una ficha, añade ese personaje por su nombre; no se guardará una ficha nueva.</p>
-      {props.memory.characters.map((c) => {
-        const selected = people.find((p) => p.key === c.id);
-        return <div key={c.id}>
-          <label><input type="checkbox" checked={!!selected} onChange={() => toggle(c.id)} />{c.name}</label>
-          {selected && <select aria-label={c.name + " participación"} value={selected.role} onChange={(e) => setPeople((list) => list.map((p) => p.key === c.id ? { ...p, role: e.target.value as Person["role"] } : p))}><option value="habla">Habla</option><option value="escucha">Escucha</option></select>}
-        </div>;
-      })}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 16 }}><input aria-label="Añadir participante por nombre" placeholder="Carlos, Sonia, camarero..." value={casual} onChange={(e) => setCasual(e.target.value)} />
-      <button type="button" onClick={() => {
-        const name = casual.trim();
-        if (name && !people.some((p) => p.key.toLowerCase() === ("oc:" + name).toLowerCase())) {
-          setPeople((list) => [...list, { key: "oc:" + name, role: "habla" }]); setCasual("");
-        }
-      }}>Añadir participante</button></div>
-      {people.filter((p) => p.key.startsWith("oc:")).map((p) => <div key={p.key}>
-        {p.key.slice(3)}
-        <select value={p.role} onChange={(e) => setPeople((list) => list.map((x) => x.key === p.key ? { ...x, role: e.target.value as Person["role"] } : x))}><option value="habla">Habla</option><option value="escucha">Escucha</option></select>
-        <button type="button" onClick={() => toggle(p.key)}>Quitar</button>
-      </div>)}
-      <label style={field}>Argumento y desenlace<textarea style={{ width: "100%", minHeight: 100 }} value={argument} onChange={(e) => setArgument(e.target.value)} /></label>
-      <label style={field}>Contexto breve (opcional)<textarea style={{ width: "100%" }} value={context} onChange={(e) => setContext(e.target.value)} /></label>
-      <label style={field}>Extensión <select value={length} onChange={(e) => setLength(e.target.value as typeof length)}><option value="breve">Breve</option><option value="media">Media</option><option value="larga">Larga</option></select></label>
-      <label style={field}>Proveedor <select value={provider ?? ""} onChange={(e) => setProvider(e.target.value as ProviderId)}>{props.providers.map((p) => <option key={p} value={p}>{p}</option>)}</select></label>
-      <p>Modo económico: solo fichas seleccionadas y contexto breve.</p>
-      {reason && <p role="status" style={{ marginTop: 12 }}>{reason}</p>}
-      <button type="button" disabled={!canGenerate} onClick={() => void generate()}>{busy ? "Generando…" : "Generar diálogo"}</button>
+    <section className="modal" role="dialog" aria-modal="true" aria-label="Role play de personajes"
+      style={{ width: "min(94vw, 740px)", maxWidth: 740, maxHeight: "92vh", overflowY: "auto", padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <h2>Conversar con un personaje</h2><button type="button" onClick={props.onClose}>Cerrar</button>
+      </div>
+      <p>Tú interpretas a un personaje; Procesador responde como el otro, un mensaje cada vez.</p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+        <label>Yo interpreto a
+          <input style={{ display: "block", width: "100%" }} value={authorName} maxLength={100}
+            onChange={(e) => { setAuthorName(e.target.value); reset(); }} placeholder="Carlos" />
+        </label>
+        <label>Converso con
+          <select style={{ display: "block", width: "100%" }} value={characterId}
+            onChange={(e) => { setCharacterId(e.target.value); reset(); }}>
+            <option value="">Personaje sin ficha (por nombre)</option>
+            {props.memory.characters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </label>
+      </div>
+      {!characterId && <label style={{ display: "block", marginTop: 10 }}>Nombre del personaje
+        <input style={{ display: "block", width: "100%" }} value={casualName} maxLength={100}
+          onChange={(e) => { setCasualName(e.target.value); reset(); }} placeholder="Any, Sonia, camarero..." />
+      </label>}
+      <label style={{ display: "block", marginTop: 12 }}>Hacia dónde quiero llevar la conversación (opcional)
+        <textarea style={{ display: "block", width: "100%", minHeight: 65 }} value={objective} maxLength={900}
+          onChange={(e) => setObjective(e.target.value)}
+          placeholder="Any quiere aceptar la invitación, pero disimula. No debe adelantarse a mi siguiente intervención." />
+      </label>
+      <label style={{ display: "block", marginTop: 12 }}>Proveedor
+        <select value={provider ?? ""} onChange={(e) => setProvider(e.target.value as ProviderId)}>
+          {props.providers.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+      </label>
+      <div aria-label="Conversación" aria-live="polite" style={{ marginTop: 16, minHeight: 170, maxHeight: 290, overflowY: "auto", padding: 12, border: "1px solid #999", borderRadius: 8 }}>
+        {!history.length && <p>Escribe tu primer mensaje para comenzar.</p>}
+        {history.map((t, i) => <p key={i} style={{ whiteSpace: "pre-wrap", marginBottom: 12 }}>
+          <strong>{t.speaker === "autor" ? authorName : name}:</strong> {t.text}
+        </p>)}
+        {busy && <p>{name} está respondiendo…</p>}
+      </div>
+      <label style={{ display: "block", marginTop: 12 }}>Tu mensaje
+        <textarea style={{ display: "block", width: "100%", minHeight: 65 }} value={draft} maxLength={500}
+          onChange={(e) => setDraft(e.target.value)} placeholder={"Hola, " + (name || "¿cómo estás?")}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }} />
+      </label>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+        <button type="button" disabled={!name || !draft.trim() || !provider || busy} onClick={() => void send()}>Enviar mensaje</button>
+        <button type="button" disabled={busy || !history.length} onClick={reset}>Nueva conversación</button>
+        <button type="button" disabled={busy || props.locked || history.length < 2}
+          onClick={async () => {
+            setBusy(true); setError("");
+            try { if (await props.onInsert(transcript)) props.onClose(); }
+            catch (e) { setError(e instanceof Error ? e.message : "No se pudo insertar"); }
+            finally { setBusy(false); }
+          }}>Insertar conversación en capítulo</button>
+      </div>
+      {props.locked && <p>El capítulo está bloqueado; puedes conversar, pero no insertar.</p>}
       {error && <p role="alert">{error}</p>}
-      {preview && <div>
-        {truncated && <p>Respuesta incompleta: no se puede insertar.</p>}
-        <label>Vista previa editable<textarea style={{ width: "100%", minHeight: 200 }} value={preview} onChange={(e) => setPreview(e.target.value)} /></label>
-        <button type="button" disabled={busy || props.locked || truncated} onClick={async () => {
-          setBusy(true);
-          try { if (await props.onInsert(preview)) props.onClose(); }
-          catch (e) { setError(e instanceof Error ? e.message : "Error al insertar"); }
-          finally { setBusy(false); }
-        }}>Insertar al final del capítulo</button>
-        {props.locked && <p>Capítulo bloqueado: desbloquéalo para insertar.</p>}
-      </div>}
+      <p style={{ fontSize: 12 }}>Ahorro de tokens: solo ficha del interlocutor, objetivo y últimas 12 intervenciones. Cada mensaje enviado consume tokens.</p>
     </section>
   </div>;
 }
