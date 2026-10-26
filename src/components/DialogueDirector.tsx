@@ -33,7 +33,12 @@ export default function DialogueDirector(props: Props) {
       setHistory([...next, { speaker: "personaje", text: result.text }]);
       setDirection("");
       if (result.truncated) setError("Respuesta incompleta: revisa el último mensaje.");
-    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo responder"); }
+    } catch (e) {
+      setHistory(history);
+      setDraft(draft);
+      setSceneNote(sceneNote);
+      setError((e instanceof Error ? e.message : "No se pudo responder") + ". Tu mensaje se conservó: puedes reintentar.");
+    }
     finally { setBusy(false); }
   };
   const transcript = history.map((t) => (t.speaker === "autor" ? authorName : name) + ": " + (t.context ? "[" + t.context + "]\n" : "") + t.text).join("\n\n");
