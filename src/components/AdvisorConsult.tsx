@@ -41,6 +41,7 @@ interface Props {
   confirmTokens: number;
   getContent(): string;
   onGoTo(chapterId: string, start: number, end: number, text: string): void;
+  onMark?(chapterId: string, start: number, end: number, quote: string, note: string): Promise<void>;
   /** An alternative of "¿Cómo seguir?" goes to the Asistente as the argument of a scene. */
   onSendToAssistant(text: string): void;
   /** «Enviar al Asistente» from Conversar: the scene order the author reviewed. */
@@ -464,7 +465,7 @@ export default function AdvisorConsult(p: Props) {
           {cards && cards.length > 0 && (
             <ul className="observations">
               {cards.map((o, k) => (
-                <ObservationCard key={k} o={o} label={label} onGoTo={p.onGoTo} onSendToAssistant={p.onSendToAssistant} tag={labels?.[k]} />
+                <ObservationCard key={k} o={o} label={label} onGoTo={p.onGoTo} onMark={p.onMark} onSendToAssistant={p.onSendToAssistant} tag={labels?.[k]} />
               ))}
             </ul>
           )}
@@ -577,7 +578,7 @@ export default function AdvisorConsult(p: Props) {
                         key={o.id}
                         o={o}
                         label={label}
-                        onGoTo={p.onGoTo}
+                        onGoTo={p.onGoTo} onMark={p.onMark}
                         onSendToAssistant={p.onSendToAssistant}
                         actions={actions}
                         tag={tags.get(o.id)}

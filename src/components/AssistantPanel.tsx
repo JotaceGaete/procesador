@@ -46,6 +46,7 @@ interface Props {
   /** Requests above this many tokens ask before going out (AI_CONFIRM_TOKENS). */
   confirmTokens: number;
   onGoTo(chapterId: string, start: number, end: number, text: string): void;
+  onMark?(chapterId: string, start: number, end: number, quote: string, note: string): Promise<void>;
   /** Saves the open chapter (a reading is of the saved text). */
   flush(): Promise<boolean>;
   onAutoDigest(on: boolean): void;
@@ -1017,6 +1018,7 @@ function AssistantPanel(props: Props) {
               confirmTokens={confirmTokens}
               getContent={getContent}
               onGoTo={onGoTo}
+              onMark={props.onMark}
               memory={memory}
               flush={flush}
               onFactAdded={onFactAdded}
@@ -1031,6 +1033,7 @@ function AssistantPanel(props: Props) {
             chapters={chapters}
             memory={memory}
             onGoTo={onGoTo}
+            onMark={props.onMark}
             onSendToAssistant={sendToAssistant}
             onFactAdded={onFactAdded}
           />

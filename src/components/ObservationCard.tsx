@@ -73,6 +73,7 @@ export default function ObservationCard(p: {
   o: Observation | StoredObservation;
   label(chapterId: string): string;
   onGoTo(chapterId: string, start: number, end: number, text: string): void;
+  onMark?(chapterId: string, start: number, end: number, quote: string, note: string): Promise<void>;
   onSendToAssistant(text: string): void;
   actions?: CardActions;
   /** Its label in the conversation (A, B, B2 — a version of B). */
@@ -147,6 +148,7 @@ export default function ObservationCard(p: {
                   <button className="link small" onClick={() => p.onGoTo(r.chapterId, r.at!.start, r.at!.end, r.quote)}>
                     Ir
                   </button>
+                  {p.onMark && <button className="link small" disabled={busy} onClick={() => { setBusy(true); setError(""); void p.onMark!(r.chapterId, r.at!.start, r.at!.end, r.quote, `${o.title}: ${o.body}`).catch((e: Error) => setError(e.message)).finally(() => setBusy(false)); }}>Marcar pendiente</button>}
                 </>
               ) : (
                 <>

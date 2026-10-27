@@ -27,6 +27,7 @@ export default function CriticReport(props: {
   /** Saves the open chapter first: the Crítico reads the chapter as saved. */
   flush(): Promise<boolean>;
   onGoTo(chapterId: string, start: number, end: number, text: string): void;
+  onMark?(chapterId: string, start: number, end: number, quote: string): Promise<void>;
   onClose(): void;
 }) {
   const { chapterId, providers } = props;
@@ -146,13 +147,15 @@ export default function CriticReport(props: {
             ))}
           </ul>
         )}
-        {critique && <Report critique={critique} go={go} onUpdate={update} onDelete={remove} />}
+        {critique && <Report critique={critique} go={go} mark={props.onMark} chapterId={chapterId} onUpdate={update} onDelete={remove} />}
       </div>
     </Modal>
   );
 }
 
-function Quote({ quote, verified, at, go }: { quote: string; verified: boolean; at: { start: number } | null | undefined; go(q: string): void }) {
+function Quote({ quote, verified, at, go, mark }: { quote: string; verified: boolean; at: { start: number; end: number } | null | undefined; go(q: string): void; mark?(): Promise<void> }) {
+  const [marking, setMarking] = useState(false);
+  const [markError, setMarkError] = useState("");
   if (!quote) return null;
   return (
     <span className="critic-quote">
@@ -164,6 +167,8 @@ function Quote({ quote, verified, at, go }: { quote: string; verified: boolean; 
       ) : (
         <span className="muted small">{verified ? "(ya no está en el texto)" : "(sin cita verificable)"}</span>
       )}
+      {verified && at && mark && <button className="link small" disabled={marking} onClick={() => { setMarking(true); setMarkError(""); void mark().catch((e: Error) => setMarkError(e.message)).finally(() => setMarking(false)); }}>Marcar pendiente</button>}
+      {markError && <span role="alert">{markError}</span>}
     </span>
   );
 }
@@ -171,11 +176,15 @@ function Quote({ quote, verified, at, go }: { quote: string; verified: boolean; 
 function Report({
   critique: c,
   go,
+  mark,
+  chapterId,
   onUpdate,
   onDelete,
 }: {
   critique: CritiqueView;
   go(q: string): void;
+  mark?: (chapterId: string, start: number, end: number, quote: string) => Promise<void>;
+  chapterId: string;
   onUpdate(id: string, patch: Partial<CritiqueView>): void;
   onDelete(id: string): void;
 }) {
@@ -202,7 +211,10 @@ function Report({
       setError((e as Error).message);
     }
   };
-  const q = (x: { quote: string; verified: boolean }) => <Quote quote={x.quote} verified={x.verified} at={c.at[x.quote]} go={go} />;
+  const q = (x: { quote: string; verified: boolean }) => {
+    const at = c.at[x.quote];
+    return <Quote quote={x.quote} verified={x.verified} at={at} go={go} mark={mark && at ? () => mark(chapterId, at.start, at.end, x.quote) : undefined} />;
+  };
   const ctx = c.context;
 
   return (
