@@ -76,6 +76,8 @@ interface Props {
    */
   onApply(chapterId: string, original: Selection, rewrite: string): Promise<boolean>;
   onInsert(chapterId: string, text: string, target: InsertTarget): Promise<boolean>;
+  /** The scene goes to a new chapter of the novel, opened after creating it. */
+  onInsertInNewChapter(text: string): Promise<boolean>;
   onClearSelection(): void;
 }
 
@@ -257,6 +259,7 @@ function AssistantPanel(props: Props) {
     getCursor,
     onApply,
     onInsert,
+    onInsertInNewChapter,
     onClearSelection,
   } = props;
 
@@ -1504,6 +1507,16 @@ function AssistantPanel(props: Props) {
                   onClick={() => accept(() => onInsert(last.chapterId, fromModel(parsed.proposal!), insertTarget))}
                 >
                   {applying ? "Guardando una copia…" : insertTarget.kind === "end" ? "Insertar al final" : "Insertar en el cursor"}
+                </button>
+              )}
+              {sceneReady && parsed.proposal && (
+                <button
+                  className="btn ghost"
+                  disabled={applying}
+                  onClick={() => accept(() => onInsertInNewChapter(fromModel(parsed.proposal!)))}
+                  title="Crea un capítulo nuevo con esta escena y lo abre"
+                >
+                  En capítulo nuevo
                 </button>
               )}
               {sceneReady && parsed.proposal && insertTarget.kind === "end" && (

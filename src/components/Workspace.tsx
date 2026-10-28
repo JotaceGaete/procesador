@@ -439,6 +439,22 @@ export default function Workspace({ novelId }: { novelId: string }) {
    * chapter's real end at this moment, or the fixed position, found again by its anchor
    * after the copy is saved. If that place is gone, nothing is inserted.
    */
+  /** A scene of the Asistente in a new chapter: created, filled with the scene, and opened. */
+  const insertInNewChapter = useCallback(
+    async (text: string) => {
+      if (!novel) return false;
+      const created = await api<{ id: string; chapters: ChapterInfo[] }>(`/api/novels/${novel.id}/chapters`, {
+        method: "POST",
+        json: { reserved: false, at: null },
+      });
+      const fresh = await api<{ revision: number }>(`/api/chapters/${created.id}`);
+      await api(`/api/chapters/${created.id}`, { method: "PATCH", json: { content: text, revision: fresh.revision } });
+      setChapters(created.chapters);
+      await switchChapter(created.id);
+      return true;
+    },
+    [novel, switchChapter],
+  );
   const insertScene = useCallback(
     async (chapterId: string, text: string, target: InsertTarget) => {
       assertTarget(chapterId, "insert");
@@ -923,6 +939,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
         getCursor={getCursor}
         onApply={applyRewrite}
         onInsert={insertScene}
+        onInsertInNewChapter={insertInNewChapter}
         onClearSelection={clearSelection}
       />
 
