@@ -92,3 +92,33 @@ test("sin advertencia antes de la muerte ni en capítulos anteriores a ella", ()
   });
   assert.deepEqual(w, []);
 });
+
+// Integración con la revisión de continuidad de cada propuesta (lib/continuity.ts).
+test("checkContinuity: sin estado narrativo no añade nada", async () => {
+  const { checkContinuity } = await import("@/lib/continuity");
+  const w = checkContinuity({
+    proposal: "Don Eduardo cruzó la plaza.",
+    before: "",
+    characters: [eduardo],
+    places: [],
+  });
+  assert.equal(w.filter((x) => x.kind === "estado").length, 0);
+});
+
+test("checkContinuity: un personaje muerto que aparece da una advertencia de estado", async () => {
+  const { checkContinuity } = await import("@/lib/continuity");
+  const w = checkContinuity({
+    proposal: "Don Eduardo cruzó la plaza.",
+    before: "",
+    characters: [eduardo],
+    places: [],
+    narrative: {
+      characters: [{ id: "eduardo", name: "Eduardo", aliases: "don Eduardo" }],
+      states: [st({ character_id: "eduardo", alive: false, chapter_order: 1 })],
+      chapterOrder: 2,
+    },
+  });
+  const estado = w.filter((x) => x.kind === "estado");
+  assert.equal(estado.length, 1);
+  assert.match(estado[0].message, /Eduardo murió al terminar el capítulo 2/);
+});

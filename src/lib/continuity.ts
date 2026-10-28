@@ -11,10 +11,13 @@
  *   age      «Claudia, de veinte años» when the chronology says 25 at this point
  *   relation the proposal makes a stranger of someone the text or the Memoria already ties
  *            to another character («un desconocido», «no lo conocía»)
+ *   estado   a character who died before this chapter appears acting in the proposal
+ *            (narrative-state.ts; only approved states count)
  */
+import { deadCharacterWarnings, type CharacterState } from "./narrative-state";
 
 export interface ContinuityWarning {
-  kind: "nombre" | "ropa" | "lugar" | "edad" | "relacion";
+  kind: "nombre" | "ropa" | "lugar" | "edad" | "relacion" | "estado";
   message: string;
 }
 
@@ -33,6 +36,8 @@ export interface ContinuityInput {
   ages?: { name: string; aliases: string; min: number; max: number; approx: boolean }[];
   /** The Memoria's relationships between characters, by name. */
   relationships?: { from: { name: string; aliases: string }; to: { name: string; aliases: string }; kind: string }[];
+  /** Narrative state (docs/estado-narrativo.md): approved states of the novel and the chapter's position. */
+  narrative?: { characters: { id: string; name: string; aliases: string }[]; states: CharacterState[]; chapterOrder: number };
 }
 
 const MAX_PER_KIND = 2;
@@ -239,7 +244,17 @@ function checkAges(i: ContinuityInput): ContinuityWarning[] {
 }
 
 /** Every warning, at most two of each kind. */
+function checkState(i: ContinuityInput): ContinuityWarning[] {
+  if (!i.narrative) return [];
+  return deadCharacterWarnings({
+    proposal: i.proposal,
+    characters: i.narrative.characters,
+    states: i.narrative.states,
+    chapterOrder: i.narrative.chapterOrder,
+  }).slice(0, MAX_PER_KIND).map((message) => ({ kind: "estado" as const, message }));
+}
+
 export function checkContinuity(i: ContinuityInput): ContinuityWarning[] {
   if (!i.proposal.trim()) return [];
-  return [...checkNames(i), ...checkClothes(i), ...checkPlace(i), ...checkAges(i), ...checkRelations(i)];
+  return [...checkNames(i), ...checkClothes(i), ...checkPlace(i), ...checkAges(i), ...checkRelations(i), ...checkState(i)];
 }
