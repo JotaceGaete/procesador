@@ -298,7 +298,7 @@ export const CHARACTER_SECTIONS: {
 
 export const CHARACTER_KEYS = CHARACTER_SECTIONS.flatMap((s) => s.fields.map((f) => f.key)) as (keyof Character)[];
 
-export type EditAction = "revisar" | "redaccion" | "dialogo" | "expandir" | "acortar" | "consistencia" | "personaje" | "evolucion";
+export type EditAction = "mejorar" | "revisar" | "redaccion" | "dialogo" | "expandir" | "acortar" | "consistencia" | "personaje" | "evolucion";
 
 /**
  * Where each action lives (docs/consejero.md): the Asistente writes with the author
@@ -313,6 +313,7 @@ export const EDIT_ACTIONS: {
   rewrites: boolean;
   section: AIPanelSection;
 }[] = [
+  { id: "mejorar", label: "Mejorar selección", character: "optional", rewrites: true, section: "assistant" },
   { id: "redaccion", label: "Redacción", character: "optional", rewrites: true, section: "assistant" },
   { id: "dialogo", label: "Diálogo", character: "optional", rewrites: true, section: "assistant" },
   { id: "expandir", label: "Expandir", character: "optional", rewrites: true, section: "assistant" },

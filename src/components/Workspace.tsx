@@ -91,6 +91,8 @@ export default function Workspace({ novelId }: { novelId: string }) {
   const showCard = useCallback((id: string) => requestAnimationFrame(() => requestAnimationFrame(() => setActiveImage(id))), []);
 
   const [selection, setSelection] = useState<Selection | null>(null);
+  // Goes up each time «Mejorar selección» is pressed: the Asistente improves the selection.
+  const [improveTick, setImproveTick] = useState(0);
   const [stats, setStats] = useState({ words: 0, chars: 0 });
   const [save, setSave] = useState<{ state: SaveState } & SaveActions>({
     state: "saved",
@@ -671,6 +673,16 @@ export default function Workspace({ novelId }: { novelId: string }) {
                 <em>C</em>
               </button>
               <button
+                className="link format improve"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setImproveTick((t) => t + 1)}
+                disabled={reading !== null || locked || !selection?.text.trim()}
+                title="Mejorar la selección: prosa y diálogos, sin añadir hechos. Tú decides si aplicarla."
+                aria-label="Mejorar selección"
+              >
+                Mejorar selección
+              </button>
+              <button
                 className="link format"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => editorRef.current?.insertSeparator()}
@@ -878,6 +890,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
         providers={loaded.providers}
         defaultProvider={loaded.defaultProvider}
         selection={selection}
+        improveTick={improveTick}
         novelChars={Math.round(novelChars / 1000) * 1000}
         getContent={getContent}
         getCursor={getCursor}
