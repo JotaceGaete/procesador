@@ -2,11 +2,18 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { COMPANIONS, companionPrompt, pickCompanion } from "../../src/lib/companions";
 
-test("selección: infantil → Kiki, adulta → Bruno; el elegido manda; sin género usa el primero", () => {
+test("selección: cada género va a su compañero; el elegido manda; sin género usa el primero", () => {
   assert.equal(pickCompanion("Infantil").id, "kiki");
-  assert.equal(pickCompanion("Novela adulta, policial").id, "bruno");
-  assert.equal(pickCompanion("Histórica").id, COMPANIONS[0].id);
+  assert.equal(pickCompanion("Novela adulta").id, "bruno");
+  assert.equal(pickCompanion("Thriller policial").id, "victor");
+  assert.equal(pickCompanion("Ficción histórica").id, "nathaniel");
+  assert.equal(pickCompanion("Ciencia ficción").id, "elena");
+  assert.equal(pickCompanion("Romántica").id, "valentina");
+  assert.equal(pickCompanion("Ensayo").id, "jorge");
+  assert.equal(pickCompanion("Erótica").id, "morgana");
   assert.equal(pickCompanion(undefined).id, COMPANIONS[0].id);
+  assert.equal(COMPANIONS.length, 8);
+  assert.ok(COMPANIONS.every((c) => !c.style.includes("PENDIENTE")));
   assert.equal(pickCompanion("infantil", "bruno").id, "bruno");
   assert.equal(pickCompanion("infantil", "no-existe").id, "kiki");
 });
@@ -29,7 +36,7 @@ test("pedido: lee el argumento y el capítulo antes de opinar, y no recibe el ma
 
 test("pedido: sin estilo definido, el compañero sólo lee y pregunta", () => {
   const p = companionPrompt({
-    companion: COMPANIONS[0],
+    companion: { id: "nuevo", name: "Nuevo", style: "PENDIENTE: descripción de estilo del autor.", audiences: [] },
     novel: { title: "x", guide: {} },
     synopsis: "",
     chapter: "x",
