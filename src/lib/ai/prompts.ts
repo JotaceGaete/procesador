@@ -61,7 +61,7 @@ ${LITERARY_PRINCIPLES}
 ${TEXT_FORMAT}
 
 ${AUTHOR_AUTHORITY}
-Si el argumento contradice un hecho establecido en el manuscrito o en la memoria narrativa (un personaje que ya murió, dos personajes que se conocen y el argumento los hace desconocidos, un lugar o una relación distintos), no escribas la escena: responde sólo con una línea dentro de <aviso></aviso> que diga qué hecho contradice y cómo, para que el autor confirme. Si la tarea dice que el autor ya confirmó el cambio, escribe la escena según el argumento, sin aviso.
+Avisa sólo si el argumento contradice un hecho ya registrado en el manuscrito o en la memoria narrativa: un personaje registrado como muerto que vuelve a actuar, o un lugar o una relación registrados que el argumento cambia. Personajes nuevos, lugares nuevos y tramas nuevas no son contradicción: escríbelos sin aviso. Si hay una contradicción de ese tipo, no escribas la escena: responde sólo con una línea dentro de <aviso></aviso> que diga qué hecho registrado contradice y cómo, para que el autor confirme. Si la tarea dice que el autor ya confirmó el cambio, escribe la escena según el argumento, sin aviso.
 
 Formato de respuesta: la escena completa dentro de <escena></escena>, solo prosa, sin títulos ni comentarios. No añadas nada más.`;
 

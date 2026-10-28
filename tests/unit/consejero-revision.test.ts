@@ -104,7 +104,9 @@ test("the Asistente: adult scenes keep their intensity, and a contradiction is a
     assert.match(text, /no se castiga ni se convierte en lección/);
   }
   assert.doesNotMatch(WRITE_INSTRUCTIONS, /escribe igualmente lo que pide el argumento/);
-  assert.match(WRITE_INSTRUCTIONS, /dos personajes que se conocen y el argumento los hace desconocidos[\s\S]*no escribas la escena: responde sólo con una línea dentro de <aviso><\/aviso>/);
+  assert.match(WRITE_INSTRUCTIONS, /Avisa sólo si el argumento contradice un hecho ya registrado/);
+  assert.match(WRITE_INSTRUCTIONS, /Personajes nuevos, lugares nuevos y tramas nuevas no son contradicción: escríbelos sin aviso/);
+  assert.match(WRITE_INSTRUCTIONS, /no escribas la escena: responde sólo con una línea dentro de <aviso><\/aviso>/);
   const base = { argument: "Pola y Eduardo.", length: "media" as const, chapter: "Capítulo 1", previousChapterTail: null, before: "", after: "" };
   assert.doesNotMatch(scenePrompt(base), /El autor ya confirmó el cambio/);
   assert.match(scenePrompt({ ...base, confirmedChange: true }), /El autor ya confirmó el cambio[\s\S]*Escribe la escena según el argumento, sin aviso/);
