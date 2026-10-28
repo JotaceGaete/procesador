@@ -20,10 +20,10 @@ type Props = {
 
 /** Pedidos de un clic. El que necesita un nombre pide el personaje o el tema antes de enviar. */
 const ACTIONS: { id: string; label: string; request: string; ask?: string }[] = [
-  { id: "leer", label: "Leamos juntos", request: "Lee conmigo el capítulo abierto. Comenta el último párrafo que escribí y hazme una pregunta." },
-  { id: "tramas", label: "Propón tramas", request: "Propón tres caminos posibles para lo que sigue en el capítulo, con qué cambia cada uno en la historia." },
-  { id: "personaje", label: "Pon a funcionar a este personaje", request: "Pon a funcionar a este personaje dentro del capítulo: qué quiere, qué teme y qué haría ahora.", ask: "Personaje (opcional)" },
-  { id: "flash", label: "Flashback", request: "Propón un flashback que explique una reacción del capítulo. Dime dónde iría y qué muestra, sin escribirlo entero.", ask: "Reacción a explicar (opcional)" },
+  { id: "leer", label: "Leamos juntos", request: "Lee conmigo el capítulo abierto. Dime en dos o tres frases qué te llama la atención y hazme una pregunta. Nada de listas." },
+  { id: "personajes", label: "Repasar personajes", request: "Repasa los personajes que ya conoces. Di en pocas líneas en qué punto está cada uno en este capítulo y qué le falta resolver." },
+  { id: "nuevo", label: "Personaje nuevo", request: "Propón un solo personaje nuevo que encaje en esta novela: nombre, qué quiere, qué esconde y qué papel cumpliría en lo que sigue.", ask: "Rol o tema (opcional)" },
+  { id: "cerrar", label: "Terminé el capítulo", request: "Terminé este capítulo. Dime en tres frases qué podemos hacer en el siguiente con lo que ya pasó, y pregúntame por dónde quiero ir. Nada de listas." },
 ];
 
 export default function CompanionPanel(props: Props) {
@@ -116,7 +116,7 @@ export default function CompanionPanel(props: Props) {
         className="companion-extra"
         value={extra}
         onChange={(e) => setExtra(e.target.value)}
-        placeholder="Personaje o tema para «Pon a funcionar» y «Flashback»"
+        placeholder="Rol o tema para «Personaje nuevo» (opcional)"
         maxLength={200}
       />
 

@@ -128,6 +128,8 @@ export interface CompanionInput {
   chapter: string;
   /** Final del capítulo anterior, para la continuidad inmediata. */
   previousTail?: string;
+  /** Una línea por personaje (ya acotada por la ruta): nombre, papel, qué quiere y qué teme. */
+  characters?: string[];
   /** Las últimas respuestas de esta conversación, ya acotadas por la ruta. */
   history?: { speaker: "autor" | "compañero"; text: string }[];
   /** Lo que el autor pide ahora (por ejemplo «Leamos juntos»). */
@@ -146,9 +148,11 @@ export function companionPrompt(input: CompanionInput): string {
       ? "Todavía no tienes un estilo definido: limítate a leer, preguntar y describir lo que ves, sin dar juicios de estilo."
       : `Tu estilo y forma de acompañar: ${input.companion.style}`,
     "ANTES de opinar debes leer el argumento y el capítulo. Si el capítulo no está, dilo y no opines.",
-    "Lo que sabes de la novela es sólo lo que aparece abajo. No inventes personajes, hechos ni fechas que no estén allí.",
-    "Si algo que escribe el autor contradice la Guía o la sinopsis, señálalo en una línea en vez de corregirlo.",
+    "Eres un compañero que ayuda a pensar, no un crítico: no enumeres defectos ni evalúes el texto punto por punto. Conversa, pregunta y acompaña.",
+    "Responde corto: unas pocas frases, salvo que el autor pida más. No propongas más de una idea a menos que te la pidan.",
+    "Lo que sabes de la novela es sólo lo que aparece abajo. No inventes personajes, hechos ni fechas que no estén allí. Si algo contradice la Guía o los personajes, dilo en una frase.",
     "Guía Maestra:\n" + guide,
+    input.characters?.length ? "Personajes que conoces hasta este capítulo:\n" + input.characters.join("\n") : "",
     "Argumento:\n" + (input.synopsis.trim() || "(sin argumento)"),
     input.previousTail ? "Final del capítulo anterior:\n" + input.previousTail : "",
     "Capítulo abierto:\n" + input.chapter,

@@ -59,3 +59,17 @@ test("pedido: sin estilo definido, el compañero sólo lee y pregunta", () => {
   assert.match(p, /\(sin argumento\)/);
   assert.doesNotMatch(p, /Final del capítulo anterior/);
 });
+
+test("tono: compañero, no crítico; respuestas cortas; personajes incluidos", () => {
+  const p = companionPrompt({
+    companion: COMPANIONS[0],
+    novel: { title: "x", guide: {} },
+    synopsis: "",
+    chapter: "x",
+    characters: ["- Clara (hija): quiere la casa. teme el pasado."],
+    request: "r",
+  });
+  assert.match(p, /no un crítico: no enumeres defectos/);
+  assert.match(p, /No propongas más de una idea/);
+  assert.match(p, /Personajes que conoces hasta este capítulo:\n- Clara \(hija\)/);
+});

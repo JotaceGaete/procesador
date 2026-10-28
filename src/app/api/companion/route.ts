@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { handler } from "@/lib/auth";
-import { getChapter, getChapterTexts, getNovel } from "@/lib/supabase";
+import { getChapter, getChapterTexts, getNovel, getScopedMemory } from "@/lib/supabase";
 import { HttpError, readJson } from "@/lib/http";
 import { COMPANIONS, companionPrompt, pickCompanion } from "@/lib/companions";
 import { getProvider } from "@/lib/ai/providers";
@@ -11,6 +11,9 @@ const TAIL_CHARS = 1500;
 /** Turnos previos que se mandan con cada pedido, y tope de caracteres por turno. */
 const HISTORY_TURNS = 6;
 const HISTORY_CHARS = 1500;
+/** Personajes que se mandan y tope por personaje. */
+const MAX_CHARACTERS = 15;
+const CHARACTER_CHARS = 350;
 
 /**
  * Compañero de lectura: lee el argumento y el capítulo abierto y responde. Nunca escribe en la
@@ -42,12 +45,19 @@ export const POST = handler(async (request) => {
     .slice(-HISTORY_TURNS)
     .map((t: { speaker: "autor" | "compañero"; text: string }) => ({ speaker: t.speaker, text: t.text.slice(0, HISTORY_CHARS) }));
 
+  // Personajes sólo hasta el capítulo abierto (no spoilers), resumidos para ahorrar tokens.
+  const memory = await getScopedMemory(novel.id, chapter.id);
+  const characters = memory.characters.slice(0, MAX_CHARACTERS).map((c) =>
+    `- ${c.name}${c.role ? ` (${c.role})` : ""}: ${[c.description, c.motivations && `quiere ${c.motivations}`, c.fears && `teme ${c.fears}`]
+      .filter(Boolean).join(". ")}`.slice(0, CHARACTER_CHARS));
+
   const prompt = companionPrompt({
     companion,
     novel: { title: novel.title, guide: novel.guide ?? {} },
     synopsis: novel.synopsis ?? "",
     chapter: chapter.content,
     previousTail,
+    characters,
     history,
     request: request_,
   });
@@ -55,7 +65,7 @@ export const POST = handler(async (request) => {
   let output = "";
   let truncated = false;
   for await (const event of provider.stream({
-    instructions: `Eres ${companion.name}, compañero de lectura. Responde en español rioplatense, breve y concreto.`,
+    instructions: `Eres ${companion.name}, compañero de lectura. Responde en español rioplatense, breve, cálido y sin listas salvo que el autor las pida.`,
     manuscript: null, project: "", prompt, signal: request.signal, role: "write", maxOutputTokens: 1200,
   })) {
     if (event.type === "text") output += event.text;
