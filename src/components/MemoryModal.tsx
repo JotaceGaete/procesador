@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CHARACTER_SECTIONS,
   type Character,
@@ -15,6 +15,7 @@ import {
 } from "@/lib/types";
 import { api } from "@/lib/client";
 import { chapterLabel } from "@/lib/ai/context";
+import type { StateRow } from "@/lib/narrative-state";
 import { COMMON_RELATIONS, resolveRelation, usedRelations } from "@/lib/relations";
 import Modal from "./Modal";
 import { CharacterTimeEditor } from "./Chronology";
@@ -286,6 +287,7 @@ export default function MemoryModal({
               );
             })()}
           {tab === "characters" && editing.id && <CharacterRelations id={editing.id} memory={memory} />}
+          {tab === "characters" && editing.id && <CharacterStates novelId={novelId} characterId={editing.id} chapters={chapters} />}
 
           {tab === "relationships" && (
             <>
@@ -633,6 +635,118 @@ function CharacterRelations({ id, memory }: { id: string; memory: Memory }) {
             {r.note && <span className="muted"> · {r.note}</span>}
           </li>
         ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * Estado narrativo del personaje al terminar cada capítulo (docs/estado-narrativo.md): dónde
+ * está, qué sabe, su estado físico y lo que lleva. Lo escribe el autor; cuenta como memoria
+ * al guardarlo. Sólo capítulos del manuscrito, no los de reserva.
+ */
+function CharacterStates({ novelId, characterId, chapters }: { novelId: string; characterId: string; chapters: ChapterInfo[] }) {
+  const [rows, setRows] = useState<StateRow[] | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Record<string, string | boolean>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    api<StateRow[]>(`/api/novels/${novelId}/states`)
+      .then((all) => live && setRows(all))
+      .catch((e) => live && setError((e as Error).message));
+    return () => {
+      live = false;
+    };
+  }, [novelId]);
+
+  const manuscript = chapters.filter((c) => !c.reserved);
+  const byChapter = new Map((rows ?? []).filter((r) => r.character_id === characterId).map((r) => [r.chapter_id, r]));
+
+  const openFor = (chapterId: string) => {
+    const r = byChapter.get(chapterId);
+    setError("");
+    setOpen(chapterId);
+    setDraft({
+      alive: r ? r.alive : true,
+      location: r?.location ?? "",
+      knows: r?.knows ?? "",
+      physical: r?.physical ?? "",
+      objects: r?.objects ?? "",
+    });
+  };
+
+  async function save(chapterId: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const saved = await api<StateRow>(`/api/novels/${novelId}/states`, {
+        method: "PUT",
+        json: { ...draft, character_id: characterId, chapter_id: chapterId },
+      });
+      setRows((all) => [...(all ?? []).filter((r) => !(r.character_id === characterId && r.chapter_id === chapterId)), saved]);
+      setOpen(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clear(chapterId: string) {
+    if (!confirm("¿Borrar el estado de este capítulo?")) return;
+    setBusy(true);
+    try {
+      await api(`/api/novels/${novelId}/states`, { method: "DELETE", json: { character_id: characterId, chapter_id: chapterId } });
+      setRows((all) => (all ?? []).filter((r) => !(r.character_id === characterId && r.chapter_id === chapterId)));
+      setOpen(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!rows) return <div className="group static"><span className="group-title">Estado por capítulo</span>{error ? <p className="error">{error}</p> : <p className="muted">Cargando…</p>}</div>;
+
+  return (
+    <div className="group static">
+      <span className="group-title">Estado por capítulo</span>
+      <p className="muted">Al terminar cada capítulo: dónde está, qué sabe y qué lleva. Sólo lo guardado cuenta como memoria.</p>
+      <ul className="plain">
+        {manuscript.map((c, i) => {
+          const r = byChapter.get(c.id);
+          return (
+            <li key={c.id}>
+              <button type="button" className="link" onClick={() => (open === c.id ? setOpen(null) : openFor(c.id))}>
+                {chapterLabel(i, c.title)}
+              </button>
+              <span className="muted">
+                {" · "}
+                {r ? (r.alive ? [r.location, r.physical].filter(Boolean).join(", ") || "sin datos" : "muerto/a") : "sin estado"}
+              </span>
+              {open === c.id && (
+                <div className="group static">
+                  <label>
+                    <input type="checkbox" checked={Boolean(draft.alive)} onChange={(e) => setDraft({ ...draft, alive: e.target.checked })} /> Vive al terminar el capítulo
+                  </label>
+                  <label>Dónde está<input value={String(draft.location ?? "")} maxLength={300} onChange={(e) => setDraft({ ...draft, location: e.target.value })} /></label>
+                  <label>Qué sabe<textarea rows={2} maxLength={1000} value={String(draft.knows ?? "")} onChange={(e) => setDraft({ ...draft, knows: e.target.value })} /></label>
+                  <label>Estado físico<input value={String(draft.physical ?? "")} maxLength={500} onChange={(e) => setDraft({ ...draft, physical: e.target.value })} /></label>
+                  <label>Lleva<input value={String(draft.objects ?? "")} maxLength={500} onChange={(e) => setDraft({ ...draft, objects: e.target.value })} /></label>
+                  {error && <p className="error">{error}</p>}
+                  <div className="row">
+                    <button type="button" disabled={busy} onClick={() => save(c.id)}>Guardar</button>
+                    {r && <button type="button" disabled={busy} onClick={() => clear(c.id)}>Borrar</button>}
+                    <button type="button" onClick={() => setOpen(null)}>Cancelar</button>
+                  </div>
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

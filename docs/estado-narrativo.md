@@ -17,8 +17,10 @@ estaba este personaje cuando empieza esta escena?», que la Memoria actual no co
   esquema completo dos veces.
 - [ ] Lectura automática: la lectura de capítulos (`chapter_digests`) propone estados al
   cerrar un capítulo, con cita verificada; nunca cuentan hasta que el autor los aprueba.
-- [ ] Escritura y edición: falta la ruta que guarda y aprueba estados (ahora sólo se leen)
-- [ ] Edición en la ficha del personaje (memoria visual y fichas de Memoria).
+- [x] Escritura y edición: `GET/PUT/DELETE /api/novels/[id]/states`. Lo que escribe el autor
+  se guarda como aprobado.
+- [x] Edición en la ficha del personaje: sección «Estado por capítulo» en `MemoryModal`, con
+  una fila por capítulo del manuscrito (no los de reserva).
 - [ ] Contexto del Asistente: el estado vigente de cada personaje en escena entra en la
   sección de memoria, junto a sus fichas.
 - [x] Advertencias de continuidad en la propuesta: `checkContinuity` acepta el estado
