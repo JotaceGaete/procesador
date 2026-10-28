@@ -710,6 +710,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
             >
               Lectura
             </button>
+            <span className="top-panels" role="group" aria-label="Paneles">
             <button className="link" onClick={() => setModal("memory")}>
               Memoria
             </button>
@@ -735,6 +736,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
             >
               Crítico
             </button>
+            </span>
             <button className="link focus-toggle" onClick={() => setFocusMode((f) => !f)} title="Ctrl/⌘ + .  ·  Esc para salir">
               {focusMode ? "Salir" : "Concentración"}
             </button>
