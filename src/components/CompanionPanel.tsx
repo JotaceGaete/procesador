@@ -81,6 +81,7 @@ export default function CompanionPanel(props: Props) {
             {props.providers.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
         )}
+        <button className="link" onClick={() => { setHistory([]); setError(""); setSending(null); }} disabled={busy || history.length === 0} title="Borra la conversación en pantalla y empieza de cero">Nueva conversación</button>
         <button className="link" onClick={props.onClose}>Cerrar</button>
       </header>
 
