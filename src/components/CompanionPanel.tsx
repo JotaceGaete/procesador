@@ -127,7 +127,7 @@ export default function CompanionPanel(props: Props) {
       <span className="companion-initial" aria-hidden="true">{name.charAt(0)}</span>
     ) : (
       // eslint-disable-next-line @next/next/no-img-element
-      <img src={`/companions/${id}.png`} alt="" onError={() => setBroken((b) => ({ ...b, [id]: true }))} />
+      <img src={`/companions/${id}.svg`} alt="" onError={() => setBroken((b) => ({ ...b, [id]: true }))} />
     );
 
   return (
