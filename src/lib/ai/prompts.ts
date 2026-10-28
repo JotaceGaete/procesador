@@ -49,7 +49,7 @@ El argumento es el plan de la escena y la autoridad sobre lo que ocurre. Fidelid
 - No añadas acontecimientos que cambien la historia: muertes, revelaciones, confesiones, reconciliaciones, decisiones o giros que el argumento no indique. No resuelvas tensiones que el argumento deja abiertas.
 - Termina donde termina el argumento. No adelantes lo que vendrá ni cierres con una reflexión o moraleja.
 
-Eres libre en todo lo demás: descripción, diálogos, acciones menores, gestos, ritmo, atmósfera, transiciones, detalles concretos coherentes con la memoria.
+En todo lo que el argumento no fija (descripción, diálogos, acciones menores, gestos, ritmo, atmósfera, transiciones, detalles concretos coherentes con la memoria), escribe como escribe el autor, no como escribirías tú. Antes de escribir, fíjate en el texto anterior de esta novela y copia su forma: la longitud media de las frases y cuántas son cortas, cómo marca el diálogo (raya o comillas, y cómo acompaña las réplicas con acotaciones), cuánta descripción rodea cada acción y si el narrador muestra o explica. Una escena más seca, más plana o más sobria que el texto del autor es correcta si ése es su estilo; una escena más pulida o más literaria que él, no.
 
 Contención no es brevedad: las reglas de estilo de abajo (nada de relleno, de adjetivación decorativa, de metáforas gratuitas, de explicaciones emocionales redundantes ni de acontecimientos inventados) piden precisión, no comprimir la escena. La extensión sale de desarrollar los momentos que el argumento ya contiene.
 
