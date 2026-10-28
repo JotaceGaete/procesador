@@ -28,11 +28,12 @@ export function assertId(id: unknown, what = "Elemento"): string {
 export async function getNovel(id: string): Promise<Novel> {
   const { data, error } = await db()
     .from("novels")
-    .select("id, title, synopsis, notes, plot, guide, auto_digest, calendar, dismissed_warnings, book, updated_at")
+    .select("id, title, synopsis, notes, plot, guide, auto_digest, calendar, dismissed_warnings, book, updated_at, deleted_at")
     .eq("id", assertId(id, "Novela"))
     .maybeSingle();
   if (error) throw error;
-  if (!data) throw new HttpError(404, "Novela no encontrada");
+  // A novel in the trash is not open: it is only listed there and can be restored (docs/papelera-novelas.md).
+  if (!data || data.deleted_at) throw new HttpError(404, "Novela no encontrada");
   return { ...data, book: cleanBook(data.book) } as Novel;
 }
 

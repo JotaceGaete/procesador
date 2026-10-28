@@ -2,15 +2,18 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import type { NovelSummary } from "@/lib/types";
+import type { NovelSummary, NovelTrashEntry } from "@/lib/types";
 import { api, readPref } from "@/lib/client";
+import { purgeDate } from "@/lib/novel-trash";
 import BuildStamp from "./BuildStamp";
 
 const dateFormat = new Intl.DateTimeFormat("es", { day: "numeric", month: "short", year: "numeric" });
 
-/** The author's novels: create, open, rename, duplicate, delete (with explicit confirmation). */
+/** The author's novels: create, open, rename, duplicate, move to the trash and restore (docs/papelera-novelas.md). */
 export default function Library() {
   const [novels, setNovels] = useState<NovelSummary[] | null>(null);
+  const [trash, setTrash] = useState<NovelTrashEntry[] | null>(null);
+  const [showTrash, setShowTrash] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -20,7 +23,14 @@ export default function Library() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [lastId, setLastId] = useState<string | null>(null);
 
-  const load = useCallback(() => api<NovelSummary[]>("/api/novels").then(setNovels), []);
+  const load = useCallback(
+    () =>
+      Promise.all([
+        api<NovelSummary[]>("/api/novels").then(setNovels),
+        api<NovelTrashEntry[]>("/api/novels/trash").then(setTrash),
+      ]).then(() => undefined),
+    [],
+  );
 
   useEffect(() => {
     setLastId(readPref("lastNovel"));
@@ -111,7 +121,7 @@ export default function Library() {
                   </span>
                   {deleting === n.id ? (
                     <span className="confirm-delete">
-                      ¿Eliminar «{n.title}» con todos sus capítulos y su memoria? No se puede deshacer.{" "}
+                      ¿Mover «{n.title}» a la papelera? Podrás recuperarla durante 30 días; después se borra para siempre.{" "}
                       <button
                         className="btn danger"
                         disabled={busy === n.id}
@@ -119,7 +129,7 @@ export default function Library() {
                           act(n.id, () => api(`/api/novels/${n.id}`, { method: "DELETE" })).then(() => setDeleting(null))
                         }
                       >
-                        Eliminar definitivamente
+                        Mover a la papelera
                       </button>{" "}
                       <button className="btn ghost" onClick={() => setDeleting(null)}>
                         Cancelar
@@ -156,6 +166,36 @@ export default function Library() {
       )}
 
       {novels && !novels.length && <p className="muted">Todavía no hay novelas.</p>}
+
+      {trash && trash.length > 0 && (
+        <section style={{ marginTop: 24 }} aria-label="Papelera de novelas">
+          <button className="link" aria-expanded={showTrash} onClick={() => setShowTrash((v) => !v)}>
+            Papelera ({trash.length}) {showTrash ? "▴" : "▾"}
+          </button>
+          {showTrash && (
+            <ul className="novel-list">
+              {trash.map((n) => (
+                <li key={n.id}>
+                  <span className="novel-title">{n.title}</span>
+                  <span className="muted small">
+                    {n.chapters} {n.chapters === 1 ? "capítulo" : "capítulos"} · {n.words.toLocaleString("es")} palabras · se
+                    borra el {dateFormat.format(purgeDate(n.deleted_at))}
+                  </span>
+                  <span className="row-actions">
+                    <button
+                      className="link"
+                      disabled={busy === n.id}
+                      onClick={() => act(n.id, () => api(`/api/novels/${n.id}/restore`, { method: "POST" }))}
+                    >
+                      {busy === n.id ? "Recuperando…" : "Recuperar"}
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {creating ? (
         <form className="rename" onSubmit={create}>
