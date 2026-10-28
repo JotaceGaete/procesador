@@ -5,7 +5,7 @@ import { roleplayPrompt, roleplayMessages } from "../../src/lib/ai/roleplay";
 test("roleplay: responde solo el interlocutor y conserva la dirección", () => {
   const prompt = roleplayPrompt({ name: "Any", authorName: "Carlos", personality: "Espontánea",
     objective: "Desea aceptar una invitación pero disimula", avoid: "No tutear a Carlos; tratarlo de usted", permanentRules: "No usar frases de conquista", history: [{ speaker: "autor", text: "Hola Any, ¿cómo estás?" }] });
-  assert.match(prompt, /no escribas por ella/i);
+  assert.match(prompt, /INTERPRETA SOLO TU PERSONAJE/);
   assert.match(prompt, /Desea aceptar/);
   assert.match(prompt, /No tutear a Carlos; tratarlo de usted/);
   assert.match(prompt, /No usar frases de conquista/);
@@ -58,4 +58,13 @@ test("roleplay: escena dirigida ofrece interpretación más desarrollada", () =>
   assert.match(directed, /MODO ESCENA DIRIGIDA/);
   assert.match(directed, /gestos significativos, pausas, emociones, subtexto/);
   assert.match(free, /MODO CONVERSACIÓN LIBRE/);
+});
+
+test("roleplay: el diálogo busca textura literaria y voz completa", () => {
+  const voice = "v".repeat(500);
+  const prompt = roleplayPrompt({ name: "Anny", authorName: "Carlos", voice, history: [{ speaker: "autor", text: "¿Vienes?" }] });
+  assert.match(prompt, /OFICIO DEL DIÁLOGO/);
+  assert.match(prompt, /subtexto/);
+  assert.match(prompt, /frases de asistente/);
+  assert.match(prompt, new RegExp("Voz: v{500}"));
 });

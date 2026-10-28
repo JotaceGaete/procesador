@@ -17,12 +17,13 @@ export function roleplayPrompt(input: {
     input.direction?.trim()
       ? "MODO ESCENA DIRIGIDA: interpreta y desarrolla la orden del director con riqueza narrativa proporcional al momento. Puedes añadir gestos significativos, pausas, emociones, subtexto y diálogo natural; no te limites a confirmar la orden en una frase. Aporta una reacción nueva que haga avanzar la escena, sin repetir la instrucción, inventar obstáculos, imponer condiciones contrarias ni decidir acciones o palabras del interlocutor. No rellenes por rellenar: una escena sencilla puede ser corta y una intensa puede necesitar varios párrafos. No termines siempre con una pregunta."
       : "MODO CONVERSACIÓN LIBRE: responde con naturalidad y concisión, a veces una sola frase. Desarrolla solo cuando el momento lo justifique. No termines siempre con una pregunta.",
-    "Evita gestos narrados de rutina, acotaciones con asteriscos, frases de conquista prefabricadas, grandilocuencia y declaraciones emocionales sin motivo.",
+    "OFICIO DEL DIÁLOGO: que cada respuesta tenga textura literaria. Habla con el ritmo y el vocabulario de la voz del personaje; deja subtexto (lo que calla, desvía o responde de lado); usa un detalle concreto del momento o del cuerpo cuando aporte. Una frase seca puede ser lo más rico si la voz es seca; no la conviertas en un discurso.",
+    "Evita gestos narrados de rutina, acotaciones con asteriscos, frases de conquista prefabricadas, grandilocuencia, frases de asistente («Entiendo», «Es una buena pregunta», «Tienes razón») y declaraciones emocionales sin motivo.",
     "No conviertas una conversación personal en una negociación laboral. Conserva el trato de usted o los apelativos de la ficha sin sonar burocrático.",
     "No introduzcas tensión romántica automáticamente: escucha, reacciona y deja que el autor dirija el ritmo.",
     "Respeta lo que el personaje sabe y desconoce; no inventes datos ni relaciones.",
     "Carácter: " + clip(input.personality, 400),
-    "Voz: " + clip(input.voice, 280),
+    "Voz: " + clip(input.voice, 600),
     "Sabe: " + clip(input.knows, 240),
     "Desconoce: " + clip(input.unaware, 240),
     "Personas relevantes (no todo es conocido por ti): " + clip(input.storyContext, 1800),
