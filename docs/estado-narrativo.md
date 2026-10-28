@@ -21,8 +21,8 @@ estaba este personaje cuando empieza esta escena?», que la Memoria actual no co
 - [ ] Edición en la ficha del personaje (memoria visual y fichas de Memoria).
 - [ ] Contexto del Asistente: el estado vigente de cada personaje en escena entra en la
   sección de memoria, junto a sus fichas.
-- [ ] Advertencias de continuidad en la propuesta, con `deadCharacterWarnings`, integradas
-  en `continuity.ts`.
+- [x] Advertencias de continuidad en la propuesta: `checkContinuity` acepta el estado
+  narrativo (tipo «estado») y lo alimenta la ruta del Asistente cuando haya estados guardados.
 
 ## Reglas
 
