@@ -3343,3 +3343,27 @@ details.group > p {
     max-width: 9em;
   }
 }
+
+/* Compañero de lectura (src/components/CompanionPanel.tsx) */
+.companion-panel { min-width: 0; box-sizing: border-box; position: fixed; top: 0; right: 0; bottom: 0; width: min(380px, 100vw); z-index: 40; display: flex; flex-direction: column; gap: 10px; padding: 16px; overflow: hidden; background: var(--panel-bg, #fff); border-left: 1px solid rgba(0,0,0,.12); box-shadow: -8px 0 24px rgba(0,0,0,.08); }
+.companion-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.companion-avatar { width: 44px; height: 44px; border-radius: 50%; overflow: hidden; display: grid; place-items: center; background: #e7e2d8; flex: none; }
+.companion-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.companion-initial { font-weight: 600; font-size: 1.2rem; }
+.companion-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.companion-extra { width: 100%; box-sizing: border-box; padding: 6px 8px; }
+.companion-log { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.companion-hint { opacity: .7; font-size: .9rem; }
+.companion-say-author { opacity: .6; font-style: italic; }
+.companion-error { color: #b42318; }
+@media (max-width: 600px) { .companion-panel { width: 100vw; padding: 16px; } }
+.companion-send { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid rgba(0,0,0,.15); border-radius: 8px; background: var(--panel-bg, #fff); }
+.companion-send textarea { width: 100%; box-sizing: border-box; font: inherit; }
+.companion-choice { display: flex; gap: 6px; align-items: flex-start; font-size: .92rem; }
+.companion-send-actions { display: flex; gap: 12px; }
+.companion-send-btn { margin-left: 8px; font-size: .85rem; }
+.companion-chat { display: flex; gap: 8px; align-items: flex-end; }
+.companion-chat textarea { flex: 1; box-sizing: border-box; font: inherit; resize: vertical; min-width: 0; }
+.companion-x { margin-left: auto; font-size: 1.4rem; line-height: 1; padding: 0 6px; }
+.companion-review { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid rgba(0,0,0,.15); border-radius: 8px; background: var(--panel-bg, #fff); max-height: 60vh; overflow-y: auto; }
+.companion-review-text { white-space: pre-wrap; font-size: .92rem; line-height: 1.5; max-height: 28vh; overflow-y: auto; padding: 8px; background: rgba(0,0,0,.03); border-radius: 6px; }

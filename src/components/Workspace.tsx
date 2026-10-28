@@ -27,6 +27,7 @@ import NovelModal from "./NovelModal";
 import MemoryModal from "./MemoryModal";
 import AssistantPanel from "./AssistantPanel";
 import DialogueDirector from "./DialogueDirector";
+import CompanionPanel from "./CompanionPanel";
 import { ChapterImagesModal, ImageCard, ReadingView, type Pending } from "./ManuscriptImages";
 import { addManuscriptImage, rejectReason, replaceImage } from "@/lib/upload";
 import { imageAt, imageIds } from "@/lib/manuscript";
@@ -104,6 +105,8 @@ export default function Workspace({ novelId }: { novelId: string }) {
   const [navOpen, setNavOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [dialogueOpen, setDialogueOpen] = useState(false);
+  const [companionOpen, setCompanionOpen] = useState(false);
+  const [handoff, setHandoff] = useState<{ text: string; write: boolean; nonce: number } | null>(null);
   const [section, setSection] = useState<AIPanelSection>("assistant");
   // A Consejero "Ir" into another chapter: applied once that chapter's editor is mounted.
   const pendingGoTo = useRef<{ chapterId: string; start: number; end: number; text: string } | null>(null);
@@ -436,6 +439,22 @@ export default function Workspace({ novelId }: { novelId: string }) {
    * chapter's real end at this moment, or the fixed position, found again by its anchor
    * after the copy is saved. If that place is gone, nothing is inserted.
    */
+  /** A scene of the Asistente in a new chapter: created, filled with the scene, and opened. */
+  const insertInNewChapter = useCallback(
+    async (text: string) => {
+      if (!novel) return false;
+      const created = await api<{ id: string; chapters: ChapterInfo[] }>(`/api/novels/${novel.id}/chapters`, {
+        method: "POST",
+        json: { reserved: false, at: null },
+      });
+      const fresh = await api<{ revision: number }>(`/api/chapters/${created.id}`);
+      await api(`/api/chapters/${created.id}`, { method: "PATCH", json: { content: text, revision: fresh.revision } });
+      setChapters(created.chapters);
+      await switchChapter(created.id);
+      return true;
+    },
+    [novel, switchChapter],
+  );
   const insertScene = useCallback(
     async (chapterId: string, text: string, target: InsertTarget) => {
       assertTarget(chapterId, "insert");
@@ -729,6 +748,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
               Consejero
             </button>
             <button className={`link${dialogueOpen ? " on" : ""}`} onClick={() => setDialogueOpen(true)} title="Dirigir una conversación entre personajes">Diálogos</button>
+            <button className={`link${companionOpen ? " on" : ""}`} onClick={() => setCompanionOpen((o) => !o)} aria-pressed={companionOpen} title="Leer con un compañero: lee el argumento y el capítulo, no escribe en la novela">Compañero</button>
             <button
               className={`link${modal === "critic" ? " on" : ""}`}
               onClick={() => setModal("critic")}
@@ -860,6 +880,26 @@ export default function Workspace({ novelId }: { novelId: string }) {
         )}
       </main>
 
+      {companionOpen && (
+        <CompanionPanel
+          novelId={novel.id}
+          chapterId={chapter.id}
+          genre={typeof (novel.guide as Record<string, unknown>)?.genre === "string" ? String((novel.guide as Record<string, unknown>).genre) : undefined}
+          providers={loaded.providers}
+          defaultProvider={loaded.defaultProvider}
+          onClose={() => setCompanionOpen(false)}
+          onApplyChapter={(text) => {
+            const current = editorRef.current?.getContent() ?? "";
+            return applyRewrite(chapter.id, { start: 0, end: current.length, text: current }, text);
+          }}
+          onSendToAssistant={(text, write) => {
+            setHandoff({ text, write, nonce: Date.now() });
+            chooseSection("assistant");
+            setPanelOpen(true);
+            setCompanionOpen(false);
+          }}
+        />
+      )}
       {dialogueOpen && (
         <DialogueDirector
           novelId={novel.id}
@@ -893,11 +933,13 @@ export default function Workspace({ novelId }: { novelId: string }) {
         defaultProvider={loaded.defaultProvider}
         selection={selection}
         improveTick={improveTick}
+        handoff={handoff}
         novelChars={Math.round(novelChars / 1000) * 1000}
         getContent={getContent}
         getCursor={getCursor}
         onApply={applyRewrite}
         onInsert={insertScene}
+        onInsertInNewChapter={insertInNewChapter}
         onClearSelection={clearSelection}
       />
 
