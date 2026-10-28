@@ -106,6 +106,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [dialogueOpen, setDialogueOpen] = useState(false);
   const [companionOpen, setCompanionOpen] = useState(false);
+  const [handoff, setHandoff] = useState<{ text: string; write: boolean; nonce: number } | null>(null);
   const [section, setSection] = useState<AIPanelSection>("assistant");
   // A Consejero "Ir" into another chapter: applied once that chapter's editor is mounted.
   const pendingGoTo = useRef<{ chapterId: string; start: number; end: number; text: string } | null>(null);
@@ -871,6 +872,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
           providers={loaded.providers}
           defaultProvider={loaded.defaultProvider}
           onClose={() => setCompanionOpen(false)}
+          onSendToAssistant={(text, write) => setHandoff({ text, write, nonce: Date.now() })}
         />
       )}
       {dialogueOpen && (
@@ -906,6 +908,7 @@ export default function Workspace({ novelId }: { novelId: string }) {
         defaultProvider={loaded.defaultProvider}
         selection={selection}
         improveTick={improveTick}
+        handoff={handoff}
         novelChars={Math.round(novelChars / 1000) * 1000}
         getContent={getContent}
         getCursor={getCursor}

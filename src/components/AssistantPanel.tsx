@@ -64,6 +64,8 @@ interface Props {
   selection: Selection | null;
   /** Goes up each time the author presses «Mejorar selección» in the editor. */
   improveTick?: number;
+  /** A reply of a reading companion, sent by the author: the scene argument, optionally written at once. */
+  handoff?: { text: string; write: boolean; nonce: number } | null;
   novelChars: number;
   getContent(): string;
   getCursor(): number;
@@ -249,6 +251,7 @@ function AssistantPanel(props: Props) {
     defaultProvider,
     selection,
     improveTick = 0,
+    handoff = null,
     novelChars,
     getContent,
     getCursor,
@@ -703,6 +706,28 @@ function AssistantPanel(props: Props) {
     if (req && provider) void run(req, provider);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the author presses the button
   }, [improveTick]);
+
+  // A reply of a reading companion, sent by the author from its dialog: it becomes the argument
+  // of a scene. If the author chose «escribir», the scene is written now; it reaches the
+  // manuscript only when the author accepts it, as with any scene.
+  const autoWrite = useRef(false);
+  useEffect(() => {
+    if (!handoff) return;
+    setBrief(null);
+    setArgument(handoff.text);
+    setMode("scene");
+    onSection("assistant");
+    autoWrite.current = handoff.write;
+    if (handoff.write) setLength("larga");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the author sends a new reply
+  }, [handoff?.nonce]);
+  useEffect(() => {
+    if (!autoWrite.current || !handoff || argument !== handoff.text) return;
+    autoWrite.current = false;
+    const req = buildRequest();
+    if (req && provider) void run(req, provider);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per handoff, after its argument is set
+  }, [argument, length, handoff?.nonce]);
 
   // Views of the Consejero that are not a request about the selection.
   const overview = section === "advisor" && advisorView !== "selection";

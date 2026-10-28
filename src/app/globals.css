@@ -3357,3 +3357,8 @@ details.group > p {
 .companion-say-author { opacity: .6; font-style: italic; }
 .companion-error { color: #b42318; }
 @media (max-width: 600px) { .companion-panel { width: 100vw; padding: 16px; } }
+.companion-send { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid rgba(0,0,0,.15); border-radius: 8px; background: var(--panel-bg, #fff); }
+.companion-send textarea { width: 100%; box-sizing: border-box; font: inherit; }
+.companion-choice { display: flex; gap: 6px; align-items: flex-start; font-size: .92rem; }
+.companion-send-actions { display: flex; gap: 12px; }
+.companion-send-btn { margin-left: 8px; font-size: .85rem; }

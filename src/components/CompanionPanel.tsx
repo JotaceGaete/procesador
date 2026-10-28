@@ -14,6 +14,8 @@ type Props = {
   providers: ProviderId[];
   defaultProvider: ProviderId | null;
   onClose(): void;
+  /** The author sends a reply to the Asistente, edited if needed; `write` asks for the scene now. */
+  onSendToAssistant(text: string, write: boolean): void;
 };
 
 /** Pedidos de un clic. El que necesita un nombre pide el personaje o el tema antes de enviar. */
@@ -33,6 +35,12 @@ export default function CompanionPanel(props: Props) {
   const [error, setError] = useState("");
   const [extra, setExtra] = useState("");
   const [broken, setBroken] = useState<Record<string, boolean>>({});
+  const [sending, setSending] = useState<{ text: string; write: boolean } | null>(null);
+  const confirmSend = () => {
+    if (!sending?.text.trim()) return;
+    props.onSendToAssistant(sending.text.trim(), sending.write);
+    setSending(null);
+  };
   const companion = COMPANIONS.find((c) => c.id === companionId) ?? initial;
 
   const ask = async (action: (typeof ACTIONS)[number]) => {
@@ -89,12 +97,35 @@ export default function CompanionPanel(props: Props) {
         maxLength={200}
       />
 
+      {sending && (
+        <div className="companion-send" role="dialog" aria-modal="true" aria-label="Enviar al asistente">
+          <p><strong>Enviar al asistente</strong></p>
+          <p className="companion-hint">Revisa el texto que va al Asistente. Si la respuesta trae varios caminos, deja sólo el que quieras.</p>
+          <textarea value={sending.text} onChange={(e) => setSending({ ...sending, text: e.target.value })} rows={8} maxLength={10000} aria-label="Texto para el Asistente" />
+          <label className="companion-choice">
+            <input type="radio" name="send-mode" checked={!sending.write} onChange={() => setSending({ ...sending, write: false })} />
+            Dejarlo como argumento de escena, sin escribir
+          </label>
+          <label className="companion-choice">
+            <input type="radio" name="send-mode" checked={sending.write} onChange={() => setSending({ ...sending, write: true })} />
+            Escribir el capítulo según esta idea ahora (usa el proveedor; no entra a la novela hasta que lo aceptes)
+          </label>
+          <div className="companion-send-actions">
+            <button className="link" onClick={confirmSend} disabled={!sending.text.trim()}>Enviar</button>
+            <button className="link" onClick={() => setSending(null)}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
       <div className="companion-log" aria-live="polite">
         {history.length === 0 && <p className="companion-hint">Lee el argumento y el capítulo abierto. Nada de lo que responde se escribe en tu novela.</p>}
         {history.map((t, i) => (
           <p key={i} className={t.speaker === "autor" ? "companion-say-author" : "companion-say"}>
             {t.speaker === "compañero" && <strong>{t.companion}: </strong>}
             {t.text}
+            {t.speaker === "compañero" && (
+              <button className="link companion-send-btn" onClick={() => setSending({ text: t.text, write: false })}>Enviar al asistente</button>
+            )}
           </p>
         ))}
         {busy && <p className="companion-hint">{companion.name} está leyendo…</p>}
