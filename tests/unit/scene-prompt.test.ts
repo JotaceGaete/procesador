@@ -64,6 +64,7 @@ test("xAI: su bloque en el sistema, con el ejemplo Marta/Juan; nadie más lo rec
   assert.match(xai, /No inventes antecedentes que el argumento o lo ya escrito no traen/);
   assert.match(xai, /no personifiques el lugar/);
   assert.match(xai, /no abuses de «como si»/);
+  assert.match(xai, /No repitas en pocas líneas «el mismo», «la misma», «volver» ni los gestos de sentarse y levantarse/);
   assert.equal(writeInstructions("openai"), WRITE_INSTRUCTIONS);
   assert.equal(writeInstructions("anthropic"), WRITE_INSTRUCTIONS);
 });
