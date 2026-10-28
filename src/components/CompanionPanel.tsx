@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/client";
 import { COMPANIONS, pickCompanion, type Companion } from "@/lib/companions";
+import { appendImages } from "@/lib/manuscript";
 import type { ProviderId } from "@/lib/types";
 
 type Turn = { speaker: "autor" | "compañero"; text: string; companion?: string };
@@ -16,6 +17,8 @@ type Props = {
   onClose(): void;
   /** The author sends a reply to the Asistente, edited if needed; `write` asks for the scene now. */
   onSendToAssistant(text: string, write: boolean): void;
+  /** Replaces the chapter body with a reviewed text, after the author's click. Resolves to success. */
+  onApplyChapter(text: string): Promise<boolean>;
 };
 
 /** Pedidos de un clic. El que necesita un nombre pide el personaje o el tema antes de enviar. */
@@ -35,6 +38,8 @@ export default function CompanionPanel(props: Props) {
   const [error, setError] = useState("");
   const [extra, setExtra] = useState("");
   const [draft, setDraft] = useState("");
+  const [review, setReview] = useState<{ proposal: string; missing: string[]; changes: string } | null>(null);
+  const [applying, setApplying] = useState(false);
   const [broken, setBroken] = useState<Record<string, boolean>>({});
   const [sending, setSending] = useState<{ text: string; write: boolean } | null>(null);
   // Esc cierra el diálogo de envío si está abierto; si no, cierra el panel.
@@ -76,6 +81,40 @@ export default function CompanionPanel(props: Props) {
     const request = action.ask && extra.trim() ? `${action.request} Sobre: ${extra.trim()}.` : action.request;
     void send(action.label, request);
   };
+  /** Revisión del capítulo entero, con lo que el autor cuenta en la caja. Nada se aplica aquí. */
+  const reviewChapter = async () => {
+    if (busy || !provider) return;
+    const notes = draft.trim();
+    setBusy(true); setError(""); setReview(null);
+    try {
+      const result = await api<{ proposal: string; missing: string[]; changes: string }>("/api/companion", {
+        method: "POST",
+        body: JSON.stringify({ novelId: props.novelId, chapterId: props.chapterId, companionId, provider, task: "revisar", request: notes }),
+      });
+      setReview({ proposal: result.proposal, missing: result.missing, changes: result.changes });
+      setDraft("");
+    } catch (e) {
+      setError(e instanceof ApiError || e instanceof Error ? e.message : "No se pudo revisar el capítulo");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const applyReview = async () => {
+    if (!review || applying) return;
+    setApplying(true); setError("");
+    const text = review.missing.length ? appendImages(review.proposal, review.missing) : review.proposal;
+    try {
+      const ok = await props.onApplyChapter(text);
+      if (ok) {
+        setReview(null);
+        setHistory((h) => [...h, { speaker: "compañero", text: "Revisión aplicada al capítulo. Antes quedó una copia en el historial.", companion: companion.name }]);
+      } else setError("No se pudo aplicar la revisión. Tu capítulo no cambió.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo aplicar la revisión. Tu capítulo no cambió.");
+    } finally {
+      setApplying(false);
+    }
+  };
   const chat = () => {
     const text = draft.trim();
     if (!text || busy) return;
@@ -111,6 +150,7 @@ export default function CompanionPanel(props: Props) {
         {ACTIONS.map((a) => (
           <button key={a.id} className="link" disabled={busy || !provider} onClick={() => ask(a)}>{a.label}</button>
         ))}
+        <button className="link" disabled={busy || !provider} onClick={() => void reviewChapter()} title="Revisa el capítulo entero con lo que le cuentes en la caja. Antes de cambiar algo, te muestra la propuesta.">Revisar capítulo entero</button>
       </div>
       <input
         className="companion-extra"
@@ -120,6 +160,23 @@ export default function CompanionPanel(props: Props) {
         maxLength={200}
       />
 
+      {review && (
+        <div className="companion-review" role="dialog" aria-modal="false" aria-label="Revisión propuesta">
+          <p><strong>Propuesta de revisión</strong></p>
+          {review.changes && <p className="companion-hint">{review.changes}</p>}
+          {review.missing.length > 0 && (
+            <p className="companion-error">La propuesta quitó {review.missing.length === 1 ? "una imagen" : `${review.missing.length} imágenes`}. Si aplicas, las añado al final del capítulo.</p>
+          )}
+          <div className="companion-review-text">{review.proposal}</div>
+          <div className="companion-send-actions">
+            <button className="link" onClick={() => void applyReview()} disabled={applying}>
+              {review.missing.length ? "Reemplazar y añadir imágenes al final" : "Reemplazar el capítulo"}
+            </button>
+            <button className="link" onClick={() => setReview(null)} disabled={applying}>Descartar</button>
+          </div>
+          <p className="companion-hint">Se guarda una copia del capítulo antes de reemplazarlo.</p>
+        </div>
+      )}
       {sending && (
         <div className="companion-send" role="dialog" aria-modal="true" aria-label="Enviar al asistente">
           <p><strong>Enviar al asistente</strong></p>

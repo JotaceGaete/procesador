@@ -162,3 +162,34 @@ export function companionPrompt(input: CompanionInput): string {
     "Pedido del autor: " + input.request,
   ].filter(Boolean).join("\n\n");
 }
+
+export interface ReviewInput {
+  companion: Companion;
+  novel: { title: string; guide: Record<string, unknown> };
+  synopsis: string;
+  /** El capítulo completo, ya protegido (marcadores [IMAGEN n] y separadores para el modelo). */
+  chapter: string;
+  /** Lo que el autor le cuenta: incoherencias, errores, detalles. Puede estar vacío. */
+  notes: string;
+  characters?: string[];
+}
+
+/**
+ * Revisión del capítulo entero. El compañero piensa el texto completo y devuelve el capítulo
+ * corregido entre etiquetas, más una lista corta de cambios. Nada se aplica sin el autor.
+ */
+export function reviewPrompt(input: ReviewInput): string {
+  const guide = compileGuide(input.novel as never);
+  return [
+    `Eres ${input.companion.name}, compañero de lectura. El autor te pide revisar el capítulo completo.`,
+    "Piensa el capítulo entero antes de responder. Corrige las incoherencias y errores que señala el autor y también los que encuentres: fechas, nombres, lugares, relaciones, y contradicciones con los personajes o la Guía.",
+    "Conserva la voz, los hechos, el orden de los acontecimientos y las réplicas que el autor escribió. No añadas acontecimientos, revelaciones ni personajes nuevos.",
+    "Los marcadores [IMAGEN n] y los separadores * * * se conservan tal cual, en el mismo lugar.",
+    "Responde con el capítulo completo corregido entre <capitulo> y </capitulo>. Después de esa etiqueta, escribe una lista corta de los cambios (máximo 8 líneas), sin nada más.",
+    "Guía Maestra:\n" + guide,
+    "Argumento:\n" + (input.synopsis.trim() || "(sin argumento)"),
+    input.characters?.length ? "Personajes que conoces hasta este capítulo:\n" + input.characters.join("\n") : "",
+    "Lo que el autor te cuenta:\n" + (input.notes.trim() || "(nada en particular: revisa el capítulo completo)"),
+    "Capítulo:\n" + input.chapter,
+  ].filter(Boolean).join("\n\n");
+}

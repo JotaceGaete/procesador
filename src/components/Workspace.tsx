@@ -872,6 +872,10 @@ export default function Workspace({ novelId }: { novelId: string }) {
           providers={loaded.providers}
           defaultProvider={loaded.defaultProvider}
           onClose={() => setCompanionOpen(false)}
+          onApplyChapter={(text) => {
+            const current = editorRef.current?.getContent() ?? "";
+            return applyRewrite(chapter.id, { start: 0, end: current.length, text: current }, text);
+          }}
           onSendToAssistant={(text, write) => {
             setHandoff({ text, write, nonce: Date.now() });
             chooseSection("assistant");

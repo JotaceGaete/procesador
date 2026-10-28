@@ -3365,3 +3365,5 @@ details.group > p {
 .companion-chat { display: flex; gap: 8px; align-items: flex-end; }
 .companion-chat textarea { flex: 1; box-sizing: border-box; font: inherit; resize: vertical; min-width: 0; }
 .companion-x { margin-left: auto; font-size: 1.4rem; line-height: 1; padding: 0 6px; }
+.companion-review { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid rgba(0,0,0,.15); border-radius: 8px; background: var(--panel-bg, #fff); max-height: 60vh; overflow-y: auto; }
+.companion-review-text { white-space: pre-wrap; font-size: .92rem; line-height: 1.5; max-height: 28vh; overflow-y: auto; padding: 8px; background: rgba(0,0,0,.03); border-radius: 6px; }

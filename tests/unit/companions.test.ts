@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { COMPANIONS, companionPrompt, pickCompanion } from "../../src/lib/companions";
+import { COMPANIONS, companionPrompt, pickCompanion, reviewPrompt } from "../../src/lib/companions";
 
 test("selección: cada género va a su compañero; el elegido manda; sin género usa el primero", () => {
   assert.equal(pickCompanion("Infantil").id, "kiki");
@@ -72,4 +72,19 @@ test("tono: compañero, no crítico; respuestas cortas; personajes incluidos", (
   assert.match(p, /no un crítico: no enumeres defectos/);
   assert.match(p, /No propongas más de una idea/);
   assert.match(p, /Personajes que conoces hasta este capítulo:\n- Clara \(hija\)/);
+});
+
+test("revisión: capítulo entero entre etiquetas, imágenes intactas, sin hechos nuevos", () => {
+  const p = reviewPrompt({
+    companion: COMPANIONS[0],
+    novel: { title: "x", guide: {} },
+    synopsis: "",
+    chapter: "[IMAGEN 1] Texto.",
+    notes: "Clara tiene 30 años, no 40.",
+  });
+  assert.match(p, /Piensa el capítulo entero antes de responder/);
+  assert.match(p, /<capitulo> y <\/capitulo>/);
+  assert.match(p, /No añadas acontecimientos, revelaciones ni personajes nuevos/);
+  assert.match(p, /Los marcadores \[IMAGEN n\] y los separadores \* \* \* se conservan/);
+  assert.match(p, /Clara tiene 30 años, no 40\./);
 });
