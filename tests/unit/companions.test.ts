@@ -34,6 +34,19 @@ test("pedido: lee el argumento y el capítulo antes de opinar, y no recibe el ma
   assert.match(p, /Pedido del autor: Leamos juntos/);
 });
 
+test("conversación: el pedido lleva los turnos anteriores, con quién habla cada uno", () => {
+  const p = companionPrompt({
+    companion: COMPANIONS[0],
+    novel: { title: "x", guide: {} },
+    synopsis: "",
+    chapter: "x",
+    history: [{ speaker: "autor", text: "¿Y si Clara miente?" }, { speaker: "compañero", text: "Eso cambia el secreto." }],
+    request: "Sigue",
+  });
+  assert.match(p, /Conversación hasta ahora:\nAutor: ¿Y si Clara miente\?\nKiki: Eso cambia el secreto\./);
+  assert.doesNotMatch(companionPrompt({ companion: COMPANIONS[0], novel: { title: "x", guide: {} }, synopsis: "", chapter: "x", request: "r" }), /Conversación hasta ahora/);
+});
+
 test("pedido: sin estilo definido, el compañero sólo lee y pregunta", () => {
   const p = companionPrompt({
     companion: { id: "nuevo", name: "Nuevo", style: "PENDIENTE: descripción de estilo del autor.", audiences: [] },

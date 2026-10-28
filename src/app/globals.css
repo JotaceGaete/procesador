@@ -3362,3 +3362,5 @@ details.group > p {
 .companion-choice { display: flex; gap: 6px; align-items: flex-start; font-size: .92rem; }
 .companion-send-actions { display: flex; gap: 12px; }
 .companion-send-btn { margin-left: 8px; font-size: .85rem; }
+.companion-chat { display: flex; gap: 8px; align-items: flex-end; }
+.companion-chat textarea { flex: 1; box-sizing: border-box; font: inherit; resize: vertical; min-width: 0; }

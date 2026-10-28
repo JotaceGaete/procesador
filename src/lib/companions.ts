@@ -128,6 +128,8 @@ export interface CompanionInput {
   chapter: string;
   /** Final del capítulo anterior, para la continuidad inmediata. */
   previousTail?: string;
+  /** Las últimas respuestas de esta conversación, ya acotadas por la ruta. */
+  history?: { speaker: "autor" | "compañero"; text: string }[];
   /** Lo que el autor pide ahora (por ejemplo «Leamos juntos»). */
   request: string;
 }
@@ -150,6 +152,9 @@ export function companionPrompt(input: CompanionInput): string {
     "Argumento:\n" + (input.synopsis.trim() || "(sin argumento)"),
     input.previousTail ? "Final del capítulo anterior:\n" + input.previousTail : "",
     "Capítulo abierto:\n" + input.chapter,
+    input.history?.length
+      ? "Conversación hasta ahora:\n" + input.history.map((t) => `${t.speaker === "autor" ? "Autor" : input.companion.name}: ${t.text}`).join("\n")
+      : "",
     "Pedido del autor: " + input.request,
   ].filter(Boolean).join("\n\n");
 }

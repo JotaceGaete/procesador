@@ -34,6 +34,7 @@ export default function CompanionPanel(props: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [extra, setExtra] = useState("");
+  const [draft, setDraft] = useState("");
   const [broken, setBroken] = useState<Record<string, boolean>>({});
   const [sending, setSending] = useState<{ text: string; write: boolean } | null>(null);
   const confirmSend = () => {
@@ -43,22 +44,33 @@ export default function CompanionPanel(props: Props) {
   };
   const companion = COMPANIONS.find((c) => c.id === companionId) ?? initial;
 
-  const ask = async (action: (typeof ACTIONS)[number]) => {
-    if (busy || !provider) return;
-    const text = action.ask && extra.trim() ? `${action.request} Sobre: ${extra.trim()}.` : action.request;
+  /** Envía un mensaje con los turnos recientes; el historial se acota en la ruta. */
+  const send = async (label: string, request: string) => {
+    if (busy || !provider || !request.trim()) return;
     setBusy(true); setError("");
+    const recent = history.slice(-6).map((t) => ({ speaker: t.speaker, text: t.text }));
     try {
       const result = await api<{ text: string }>("/api/companion", {
         method: "POST",
-        body: JSON.stringify({ novelId: props.novelId, chapterId: props.chapterId, companionId, provider, request: text }),
+        body: JSON.stringify({ novelId: props.novelId, chapterId: props.chapterId, companionId, provider, request, history: recent }),
       });
-      setHistory((h) => [...h, { speaker: "autor", text: action.label }, { speaker: "compañero", text: result.text, companion: companion.name }]);
+      setHistory((h) => [...h, { speaker: "autor", text: label }, { speaker: "compañero", text: result.text, companion: companion.name }]);
       setExtra("");
     } catch (e) {
       setError(e instanceof ApiError || e instanceof Error ? e.message : "No se pudo responder");
     } finally {
       setBusy(false);
     }
+  };
+  const ask = (action: (typeof ACTIONS)[number]) => {
+    const request = action.ask && extra.trim() ? `${action.request} Sobre: ${extra.trim()}.` : action.request;
+    void send(action.label, request);
+  };
+  const chat = () => {
+    const text = draft.trim();
+    if (!text || busy) return;
+    setDraft("");
+    void send(text, text);
   };
 
   const avatar = (id: string, name: string) =>
@@ -117,6 +129,20 @@ export default function CompanionPanel(props: Props) {
           </div>
         </div>
       )}
+
+      <div className="companion-chat">
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); chat(); } }}
+          placeholder={`Escríbele a ${companion.name}… (Enter envía, Shift+Enter salta línea)`}
+          rows={2}
+          maxLength={2000}
+          aria-label={`Mensaje para ${companion.name}`}
+          disabled={!provider}
+        />
+        <button className="link" onClick={chat} disabled={busy || !draft.trim() || !provider}>Enviar</button>
+      </div>
 
       <div className="companion-log" aria-live="polite">
         {history.length === 0 && <p className="companion-hint">Lee el argumento y el capítulo abierto. Nada de lo que responde se escribe en tu novela.</p>}

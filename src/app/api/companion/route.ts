@@ -8,6 +8,9 @@ import type { ProviderId } from "@/lib/types";
 
 /** Cuántos caracteres del capítulo anterior se mandan: sólo la continuidad inmediata. */
 const TAIL_CHARS = 1500;
+/** Turnos previos que se mandan con cada pedido, y tope de caracteres por turno. */
+const HISTORY_TURNS = 6;
+const HISTORY_CHARS = 1500;
 
 /**
  * Compañero de lectura: lee el argumento y el capítulo abierto y responde. Nunca escribe en la
@@ -33,12 +36,19 @@ export const POST = handler(async (request) => {
   const request_ = String(body.request ?? "").trim().slice(0, 600);
   if (!request_) throw new HttpError(400, "Falta el pedido");
 
+  // Sólo los últimos turnos, acotados: la conversación no crece sin límite en tokens.
+  const history = (Array.isArray(body.history) ? body.history : [])
+    .filter((t: { speaker?: unknown; text?: unknown }) => (t.speaker === "autor" || t.speaker === "compañero") && typeof t.text === "string")
+    .slice(-HISTORY_TURNS)
+    .map((t: { speaker: "autor" | "compañero"; text: string }) => ({ speaker: t.speaker, text: t.text.slice(0, HISTORY_CHARS) }));
+
   const prompt = companionPrompt({
     companion,
     novel: { title: novel.title, guide: novel.guide ?? {} },
     synopsis: novel.synopsis ?? "",
     chapter: chapter.content,
     previousTail,
+    history,
     request: request_,
   });
 
