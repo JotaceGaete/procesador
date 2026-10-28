@@ -58,7 +58,12 @@ test("xAI: su bloque en el sistema, con el ejemplo Marta/Juan; nadie más lo rec
   assert.match(xai, /Para cada acontecimiento: qué hace el cuerpo \(una microacción\), qué se ve u oye en ese instante, cómo reacciona el otro/);
   assert.match(xai, /Resumen \(no\): «Marta estaba nerviosa y le pidió a Juan que se fuera\.»/);
   assert.match(xai, /enseña el procedimiento, no un estilo/);
-  assert.ok(SCENE_PROVIDER_CRAFT.xai!.length < 1000, "short: a behaviour, not a style");
+  assert.ok(SCENE_PROVIDER_CRAFT.xai!.length < 1500, "short: a behaviour, not a style");
+  // Recuerdos e introspección que sostienen la escena, sin inventar antecedentes; y sin tics repetidos.
+  assert.match(xai, /La introspección y los recuerdos sí tienen lugar cuando sostienen algo/);
+  assert.match(xai, /No inventes antecedentes que el argumento o lo ya escrito no traen/);
+  assert.match(xai, /no personifiques el lugar/);
+  assert.match(xai, /no abuses de «como si»/);
   assert.equal(writeInstructions("openai"), WRITE_INSTRUCTIONS);
   assert.equal(writeInstructions("anthropic"), WRITE_INSTRUCTIONS);
 });

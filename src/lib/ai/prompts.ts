@@ -428,7 +428,9 @@ export function scenePrompt(opts: {
 /** Appended to WRITE_INSTRUCTIONS (system) for that provider. */
 export const SCENE_PROVIDER_CRAFT: Partial<Record<ProviderId, string>> = {
   xai: `Escenificar, no resumir:
-Tiendes a reescribir el argumento en frases breves que cuentan lo que pasa. Aquí eso no sirve: cada frase del argumento debe convertirse en un momento visible, sin añadir acontecimientos. Para cada acontecimiento: qué hace el cuerpo (una microacción), qué se ve u oye en ese instante, cómo reacciona el otro, y la pausa o la réplica si la hay. Sin acumular adjetivos ni metáforas, y sin introspección inventada.
+Tiendes a reescribir el argumento en frases breves que cuentan lo que pasa. Aquí eso no sirve: cada frase del argumento debe convertirse en un momento visible, sin añadir acontecimientos. Para cada acontecimiento: qué hace el cuerpo (una microacción), qué se ve u oye en ese instante, cómo reacciona el otro, y la pausa o la réplica si la hay. Sin acumular adjetivos ni metáforas.
+La introspección y los recuerdos sí tienen lugar cuando sostienen algo: un recuerdo que explica una reacción, una sensación que cambia lo que el personaje hace o dice. Eso da profundidad a la escena, no la aplana. No inventes antecedentes que el argumento o lo ya escrito no traen, y no dejes un recuerdo suelto: tiene que pesar en el momento.
+Evita los tics: no personifiques el lugar («la casa sabe», «la casa escucha») más de una vez por escena, y no abuses de «como si» ni de «como quien».
 
 Ejemplo de la diferencia (enseña el procedimiento, no un estilo: no lo imites ni lo reutilices):
 Argumento: «Marta estaba nerviosa. Le pidió a Juan que se fuera.»
