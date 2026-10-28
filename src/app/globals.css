@@ -3364,3 +3364,4 @@ details.group > p {
 .companion-send-btn { margin-left: 8px; font-size: .85rem; }
 .companion-chat { display: flex; gap: 8px; align-items: flex-end; }
 .companion-chat textarea { flex: 1; box-sizing: border-box; font: inherit; resize: vertical; min-width: 0; }
+.companion-x { margin-left: auto; font-size: 1.4rem; line-height: 1; padding: 0 6px; }

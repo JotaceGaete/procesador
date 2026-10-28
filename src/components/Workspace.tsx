@@ -872,7 +872,12 @@ export default function Workspace({ novelId }: { novelId: string }) {
           providers={loaded.providers}
           defaultProvider={loaded.defaultProvider}
           onClose={() => setCompanionOpen(false)}
-          onSendToAssistant={(text, write) => setHandoff({ text, write, nonce: Date.now() })}
+          onSendToAssistant={(text, write) => {
+            setHandoff({ text, write, nonce: Date.now() });
+            chooseSection("assistant");
+            setPanelOpen(true);
+            setCompanionOpen(false);
+          }}
         />
       )}
       {dialogueOpen && (

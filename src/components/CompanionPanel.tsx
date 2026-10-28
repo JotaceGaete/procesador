@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/client";
 import { COMPANIONS, pickCompanion, type Companion } from "@/lib/companions";
 import type { ProviderId } from "@/lib/types";
@@ -37,6 +37,16 @@ export default function CompanionPanel(props: Props) {
   const [draft, setDraft] = useState("");
   const [broken, setBroken] = useState<Record<string, boolean>>({});
   const [sending, setSending] = useState<{ text: string; write: boolean } | null>(null);
+  // Esc cierra el diálogo de envío si está abierto; si no, cierra el panel.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (sending) setSending(null);
+      else props.onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sending, props]);
   const confirmSend = () => {
     if (!sending?.text.trim()) return;
     props.onSendToAssistant(sending.text.trim(), sending.write);
@@ -94,7 +104,7 @@ export default function CompanionPanel(props: Props) {
           </select>
         )}
         <button className="link" onClick={() => { setHistory([]); setError(""); setSending(null); }} disabled={busy || history.length === 0} title="Borra la conversación en pantalla y empieza de cero">Nueva conversación</button>
-        <button className="link" onClick={props.onClose}>Cerrar</button>
+        <button className="link companion-x" onClick={props.onClose} aria-label="Cerrar compañero" title="Cerrar (Esc)">×</button>
       </header>
 
       <div className="companion-actions">
