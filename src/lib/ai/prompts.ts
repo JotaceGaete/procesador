@@ -221,6 +221,11 @@ export function memoryBlock(
 const REWRITE_RULES = `Si propones cambios, entrega al final la versión completa del fragmento dentro de <reescritura></reescritura>: solo el texto, conservando todo lo que no hace falta cambiar. Si el fragmento ya funciona, dilo y no incluyas <reescritura>.`;
 
 const EDIT_TASKS: Record<EditAction, (c: Character | null) => string> = {
+  mejorar: (c) => `Mejora <seleccion> como un editor de oficio: la prosa (ritmo, precisión, verbos fuertes, detalles concretos, sin muletillas ni repeticiones) y los diálogos (que cada línea suene como quien la dice${c ? `, sobre todo **${c.name}**` : ""}, subtexto en lugar de explicación, acotaciones precisas).
+Conserva todos los hechos, el orden de lo que ocurre, quién habla, lo que cada personaje sabe, los objetos y la intensidad y explicitud del original. No inventes acontecimientos, personajes, revelaciones, detalles nuevos ni frases que aporten información que no estaba.
+Si el fragmento ya está bien, dilo en una línea y no incluyas <reescritura>. Si propones cambios, explica en una o dos líneas cuáles fueron los principales.
+${REWRITE_RULES}`,
+
   redaccion:
     () => `Revisa la redacción de <seleccion>: claridad, ritmo, repeticiones, verbos débiles, adjetivación, puntuación, tiempos verbales y punto de vista, según la Guía Maestra.
 Señala solo los problemas que de verdad importan (máximo 5), cada uno con la cita exacta, el problema y una propuesta breve.

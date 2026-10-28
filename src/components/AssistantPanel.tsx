@@ -62,6 +62,8 @@ interface Props {
   providers: ProviderId[];
   defaultProvider: ProviderId | null;
   selection: Selection | null;
+  /** Goes up each time the author presses «Mejorar selección» in the editor. */
+  improveTick?: number;
   novelChars: number;
   getContent(): string;
   getCursor(): number;
@@ -246,6 +248,7 @@ function AssistantPanel(props: Props) {
     providers,
     defaultProvider,
     selection,
+    improveTick = 0,
     novelChars,
     getContent,
     getCursor,
@@ -409,21 +412,27 @@ function AssistantPanel(props: Props) {
         },
       };
     }
+    return editRequest(action, section);
+  }
+
+  /** The request that works on the selection with this action (the «Mejorar selección» button sends its own). */
+  function editRequest(act: EditAction, sec: AIPanelSection): Request | null {
     if (!selection) return null;
+    const base = { novelId, chapterId, includeManuscript, content: getContent() };
     return {
       chapterId,
-      section,
-      mode,
-      action,
+      section: sec,
+      mode: "edit",
+      action: act,
       target: selection,
       body: {
         ...base,
-        mode,
-        action,
+        mode: "edit",
+        action: act,
         characterIds: characterId ? [characterId] : [],
         selectionStart: selection.start,
         selectionEnd: selection.end,
-        ...(action === "revisar" && reviewNotes.trim() ? { notes: reviewNotes.trim() } : {}),
+        ...(act === "revisar" && reviewNotes.trim() ? { notes: reviewNotes.trim() } : {}),
       },
     };
   }
@@ -682,6 +691,18 @@ function AssistantPanel(props: Props) {
     setMode("scene");
     onSection("assistant");
   };
+
+  // «Mejorar selección» from the editor: the Asistente improves the selection and shows the
+  // proposal with its changes. Nothing reaches the manuscript until the author accepts it.
+  useEffect(() => {
+    if (!improveTick) return;
+    setActions((all) => ({ ...all, assistant: "mejorar" }));
+    setMode("edit");
+    onSection("assistant");
+    const req = editRequest("mejorar", "assistant");
+    if (req && provider) void run(req, provider);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the author presses the button
+  }, [improveTick]);
 
   // Views of the Consejero that are not a request about the selection.
   const overview = section === "advisor" && advisorView !== "selection";
