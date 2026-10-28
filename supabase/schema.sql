@@ -205,6 +205,28 @@ create table if not exists public.fact_characters (
 );
 select public.procesador_secure_table('public.fact_characters', false);
 
+-- Estado narrativo por personaje y capítulo (docs/estado-narrativo.md). Igual que en
+-- actualizar-estado-narrativo.sql. Sólo 'approved' cuenta como memoria.
+create table if not exists public.character_states (
+  id           uuid primary key default gen_random_uuid(),
+  novel_id     uuid not null references public.novels(id) on delete cascade,
+  character_id uuid not null,
+  chapter_id   uuid not null,
+  alive        boolean not null default true,
+  location     text not null default '' check (length(location) <= 300),
+  knows        text not null default '' check (length(knows) <= 1000),
+  physical     text not null default '' check (length(physical) <= 500),
+  objects      text not null default '' check (length(objects) <= 500),
+  status       text not null default 'approved' check (status in ('approved', 'suggested')),
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  unique (novel_id, character_id, chapter_id),
+  foreign key (character_id, novel_id) references public.characters(id, novel_id) on delete cascade,
+  foreign key (chapter_id, novel_id) references public.chapters(id, novel_id) on delete cascade
+);
+create index if not exists character_states_novel_idx on public.character_states(novel_id);
+select public.procesador_secure_table('public.character_states', true);
+
 -- Archivos de la novela (ver docs/archivos.md). Un archivo: el original, conservado siempre,
 -- y sus derivados para la interfaz. Los bytes viven en el bucket privado 'novel-files';
 -- aquí sólo rutas y metadatos. Los usos (galería, manuscrito…) son tablas aparte que lo

@@ -74,3 +74,41 @@ export function deadCharacterWarnings(opts: {
   }
   return warnings;
 }
+
+/** Una fila de la tabla character_states, tal como la devuelve la base. */
+export interface StateRow {
+  id: string;
+  character_id: string;
+  chapter_id: string;
+  alive: boolean;
+  location: string;
+  knows: string;
+  physical: string;
+  objects: string;
+  status: "approved" | "suggested";
+}
+
+/**
+ * Pasa las filas a estados con su posición en la novela. `chapterIds` va en el orden de los
+ * capítulos. Las filas de capítulos que ya no existen se descartan, sin error.
+ */
+export function toCharacterStates(rows: StateRow[], chapterIds: string[]): CharacterState[] {
+  const order = new Map(chapterIds.map((id, i) => [id, i]));
+  const out: CharacterState[] = [];
+  for (const r of rows) {
+    const chapter_order = order.get(r.chapter_id);
+    if (chapter_order === undefined) continue;
+    out.push({
+      id: r.id,
+      character_id: r.character_id,
+      chapter_order,
+      alive: r.alive,
+      location: r.location,
+      knows: r.knows,
+      physical: r.physical,
+      objects: r.objects,
+      status: r.status,
+    });
+  }
+  return out;
+}

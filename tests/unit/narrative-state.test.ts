@@ -122,3 +122,35 @@ test("checkContinuity: un personaje muerto que aparece da una advertencia de est
   assert.equal(estado.length, 1);
   assert.match(estado[0].message, /Eduardo murió al terminar el capítulo 2/);
 });
+
+test("toCharacterStates: calcula la posición desde el orden de capítulos y descarta los de capítulos borrados", async () => {
+  const { toCharacterStates } = await import("@/lib/narrative-state");
+  const row = (over: Record<string, unknown>) => ({
+    id: "r",
+    character_id: "pola",
+    chapter_id: "c2",
+    alive: true,
+    location: "",
+    knows: "",
+    physical: "",
+    objects: "",
+    status: "approved" as const,
+    ...over,
+  });
+  const states = toCharacterStates(
+    [row({ id: "a", chapter_id: "c2", location: "Santiago" }), row({ id: "b", chapter_id: "fantasma" })],
+    ["c1", "c2", "c3"],
+  );
+  assert.equal(states.length, 1);
+  assert.equal(states[0].chapter_order, 1);
+  assert.equal(states[0].location, "Santiago");
+});
+
+test("toCharacterStates: sin filas o sin capítulos devuelve lista vacía", async () => {
+  const { toCharacterStates } = await import("@/lib/narrative-state");
+  assert.deepEqual(toCharacterStates([], ["c1"]), []);
+  assert.deepEqual(
+    toCharacterStates([{ id: "a", character_id: "p", chapter_id: "c1", alive: true, location: "", knows: "", physical: "", objects: "", status: "approved" }], []),
+    [],
+  );
+});
