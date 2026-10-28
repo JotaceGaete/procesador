@@ -596,6 +596,21 @@ input:focus,
 .chapters .add {
   font-size: 13px;
 }
+/* Acciones de cada capítulo: si no caben en el panel, bajan a otra línea en lugar de cortarse. */
+.chapters .row-actions {
+  flex-wrap: wrap;
+  row-gap: 2px;
+  max-width: 100%;
+}
+/* Los paneles de la barra superior (Memoria, Asistente, Consejero…) van juntos, separados de la escritura. */
+.top-panels {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding-left: 12px;
+  margin-left: 4px;
+  border-left: 1px solid var(--faint);
+}
 /* Capítulos en reserva (docs/capitulos-reserva.md): the manuscript and the reserve, apart. */
 .chapters ul {
   list-style: none;
@@ -654,8 +669,8 @@ input:focus,
   justify-content: space-between;
   gap: 12px;
   width: 100%;
-  margin: 12px 0 0;
-  padding: 10px 12px;
+  margin: 8px 0 0;
+  padding: 6px 10px;
   border: 1px solid var(--faint);
   border-radius: 8px;
   background: none;

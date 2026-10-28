@@ -217,7 +217,7 @@ export default function ChapterNav({
                 </span>
               )}
               {c.reserved ? c.title.trim() || "Sin título" : label(c)}
-              <span className="muted small"> · {c.words.toLocaleString("es")}</span>
+              <span className="muted small" title="Palabras del capítulo"> · {c.words.toLocaleString("es")} pal.</span>
             </button>
             <span className="row-actions">
               <button className="link" disabled={busy || i === 0} onClick={() => moveTo(c, c.reserved, i)} aria-label="Subir">
