@@ -9,6 +9,15 @@ export interface NovelSummary {
   words: number;
 }
 
+/** A novel in the trash: what the library shows to restore it, and when it is erased for good. */
+export interface NovelTrashEntry {
+  id: string;
+  title: string;
+  deleted_at: string;
+  chapters: number;
+  words: number;
+}
+
 /** Longest Argumento general (characters): a whole plot, read by the Consejero by parts, never whole. */
 export const PLOT_MAX = 100_000;
 

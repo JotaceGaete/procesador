@@ -7,7 +7,7 @@ import { cleanBook } from "@/lib/book";
 import { PLOT_MAX } from "@/lib/types";
 import { availableProviders, defaultProvider } from "@/lib/ai/providers";
 import { confirmTokens } from "@/lib/ai/models";
-import { getManuscriptImages, getNovelImages, novelFiles, removeFiles } from "@/lib/assets-server";
+import { getManuscriptImages, getNovelImages } from "@/lib/assets-server";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -70,12 +70,10 @@ export const PATCH = handler<Ctx>(async (request, { params }) => {
   return NextResponse.json({ ...data, book: cleanBook(data.book) });
 });
 
-/** Deletes the novel with its chapters, memory and files (cascade), then the files in Storage. The UI asks for explicit confirmation. */
+/** Moves the novel to the trash: it stays 30 days, where it can be restored, and then it is erased for good (docs/papelera-novelas.md). */
 export const DELETE = handler<Ctx>(async (_request, { params }) => {
   const id = assertId((await params).id, "Novela");
-  const files = await novelFiles(id);
-  const { error } = await db().from("novels").delete().eq("id", id);
+  const { error } = await db().rpc("trash_novel", { p_novel: id });
   if (error) throw error;
-  await removeFiles(files);
   return new NextResponse(null, { status: 204 });
 });

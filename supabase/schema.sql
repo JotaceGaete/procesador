@@ -73,6 +73,8 @@ create table if not exists public.novels (
   updated_at timestamptz not null default now()
 );
 select public.procesador_secure_table('public.novels', true);
+-- Papelera de novelas (docs/papelera-novelas.md): eliminar la marca con la fecha; a los 30 días se borra de verdad.
+alter table public.novels add column if not exists deleted_at timestamptz;
 
 create table if not exists public.chapters (
   id         uuid primary key default gen_random_uuid(),
@@ -671,18 +673,6 @@ language sql immutable set search_path = '' as $$
 $$;
 
 -- Biblioteca: novelas con número de capítulos y palabras.
-create or replace function public.library()
-returns table (id uuid, title text, updated_at timestamptz, chapters integer, words integer)
-language sql stable set search_path = '' as $$
-  select n.id, n.title, n.updated_at,
-         count(c.id)::integer,
-         coalesce(sum(public.word_count(c.content)), 0)::integer
-  from public.novels n
-  left join public.chapters c on c.novel_id = n.id
-  group by n.id
-  order by n.updated_at desc
-$$;
-
 -- Bloqueo de capítulos (docs/bloqueo-capitulos.md): un capítulo revisado no se modifica hasta que
 -- el autor lo desbloquea. Los existentes quedan desbloqueados. Mientras está bloqueado, la base
 -- rechaza cualquier cambio de su texto o su título (trigger chapters_guard_locked), venga de
@@ -925,6 +915,26 @@ begin
   update public.chapter_versions set chapter_id = v_id, source_chapter_id = v_id
   where novel_id = p_novel and source_chapter_id = p_source and chapter_id is null;
   return v_id;
+end $$;
+
+-- Papelera de novelas (docs/papelera-novelas.md). Eliminar una novela sólo la marca; a los 30 días
+-- la purga el servidor (src/lib/novel-trash-server.ts), que también borra sus archivos.
+create or replace function public.trash_novel(p_novel uuid)
+returns void language plpgsql set search_path = '' as $$
+begin
+  update public.novels set deleted_at = now() where id = p_novel and deleted_at is null;
+  if not found then
+    raise exception 'Novela no encontrada' using errcode = 'P0002';
+  end if;
+end $$;
+
+create or replace function public.restore_novel(p_novel uuid)
+returns void language plpgsql set search_path = '' as $$
+begin
+  update public.novels set deleted_at = null where id = p_novel and deleted_at is not null;
+  if not found then
+    raise exception 'Esa novela ya no está en la papelera' using errcode = 'P0002';
+  end if;
 end $$;
 
 -- Usos de cada archivo. Al añadir otra tabla de uso (manuscript_images, place_images…),
@@ -1241,6 +1251,35 @@ begin
   end if;
 end $$;
 
+-- La biblioteca y la papelera leen deleted_at: se crean después de la comprobación de arriba, para
+-- que una ejecución parcial se detenga con su mensaje claro y no con un error de columna.
+create or replace function public.library()
+returns table (id uuid, title text, updated_at timestamptz, chapters integer, words integer)
+language sql stable set search_path = '' as $$
+  select n.id, n.title, n.updated_at,
+         count(c.id)::integer,
+         coalesce(sum(public.word_count(c.content)), 0)::integer
+  from public.novels n
+  left join public.chapters c on c.novel_id = n.id
+  where n.deleted_at is null
+  group by n.id
+  order by n.updated_at desc
+$$;
+
+-- La papelera: las novelas eliminadas, la más reciente primero.
+create or replace function public.novel_trash()
+returns table (id uuid, title text, deleted_at timestamptz, chapters integer, words integer)
+language sql stable set search_path = '' as $$
+  select n.id, n.title, n.deleted_at,
+         count(c.id)::integer,
+         coalesce(sum(public.word_count(c.content)), 0)::integer
+  from public.novels n
+  left join public.chapters c on c.novel_id = n.id
+  where n.deleted_at is not null
+  group by n.id
+  order by n.deleted_at desc
+$$;
+
 revoke execute on function public.touch_row() from public, anon, authenticated;
 revoke execute on function public.touch_chapter() from public, anon, authenticated;
 revoke execute on function public.word_count(text) from public, anon, authenticated;
@@ -1267,6 +1306,9 @@ revoke execute on function public.save_chapter_version(uuid, text, text, text) f
 revoke execute on function public.trash_chapter(uuid) from public, anon, authenticated;
 revoke execute on function public.chapter_trash(uuid) from public, anon, authenticated;
 revoke execute on function public.restore_chapter(uuid, uuid) from public, anon, authenticated;
+revoke execute on function public.trash_novel(uuid) from public, anon, authenticated;
+revoke execute on function public.restore_novel(uuid) from public, anon, authenticated;
+revoke execute on function public.novel_trash() from public, anon, authenticated;
 grant execute on function public.word_count(text), public.library(), public.novel_outline(uuid),
   public.reorder_chapters(uuid, uuid[]), public.duplicate_novel(uuid, text),
   public.create_chapter(uuid, text, boolean, integer), public.move_chapter(uuid, boolean, integer),
@@ -1275,7 +1317,8 @@ grant execute on function public.word_count(text), public.library(), public.nove
   public.finalize_asset(uuid, text, text, bigint, integer, integer, smallint, text, text, text),
   public.replace_asset_uses(text, uuid, uuid, boolean), public.sync_chapter_images(uuid, uuid[]),
   public.save_chapter_version(uuid, text, text, text), public.trash_chapter(uuid), public.chapter_trash(uuid),
-  public.restore_chapter(uuid, uuid) to service_role;
+  public.restore_chapter(uuid, uuid), public.trash_novel(uuid), public.restore_novel(uuid),
+  public.novel_trash() to service_role;
 
 -- ---------------------------------------------------------------------------
 -- Storage: un bucket privado para todos los archivos de las novelas (docs/archivos.md).

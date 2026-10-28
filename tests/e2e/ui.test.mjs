@@ -323,9 +323,16 @@ test("library: rename, duplicate, delete with explicit confirmation", async () =
   await copy.hover();
   await copy.getByRole("button", { name: "Eliminar" }).click();
   assert.ok(await page.locator(".confirm-delete").isVisible());
-  await page.getByRole("button", { name: "Eliminar definitivamente" }).click();
-  await page.waitForFunction(() => !document.body.innerText.includes("(copia)"));
-  assert.equal(await page.locator(".novel-list li").count(), 2);
+  await page.getByRole("button", { name: "Mover a la papelera" }).click();
+  await page.getByRole("button", { name: /^Papelera \(1\)/ }).waitFor();
+  assert.equal(await page.locator(".novel-list li").count(), 2, "la copia sale de la biblioteca");
+
+  // La papelera: la copia vuelve con todo lo suyo (docs/papelera-novelas.md).
+  await page.getByRole("button", { name: /^Papelera \(1\)/ }).click();
+  const trashed = page.locator(".novel-list li", { hasText: "(copia)" });
+  await trashed.getByRole("button", { name: "Recuperar" }).click();
+  await page.waitForSelector("text=Valparaíso, 1972 (copia)");
+  assert.equal(await page.locator(".novel-list li").count(), 3, "la copia recuperada vuelve a la biblioteca");
 });
 
 // ---------------------------------------------------------------- mobile
