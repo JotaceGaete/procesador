@@ -696,7 +696,15 @@ export default function Workspace({ novelId }: { novelId: string }) {
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => setImproveTick((t) => t + 1)}
                 disabled={reading !== null || locked || !selection?.text.trim()}
-                title="Mejorar la selección: prosa y diálogos, sin añadir hechos. Tú decides si aplicarla."
+                title={
+                  locked
+                    ? "El capítulo está revisado y bloqueado: desbloquéalo para mejorar un fragmento."
+                    : reading !== null
+                      ? "Sal de la vista de lectura para mejorar un fragmento."
+                      : !selection?.text.trim()
+                        ? "Selecciona primero el fragmento que quieres mejorar."
+                        : "Mejorar la selección: prosa y diálogos, sin añadir hechos. Tú decides si aplicarla."
+                }
                 aria-label="Mejorar selección"
               >
                 Mejorar selección

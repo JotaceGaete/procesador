@@ -815,6 +815,8 @@ function AssistantPanel(props: Props) {
   const fixHere = () => !elsewhere && update(slot, () => ({ insertTarget: { kind: "at", anchor: anchorAt(getContent(), getCursor()) }, applyFailed: null }));
   const chapterIndex = chapters.findIndex((c) => c.id === chapterId);
   const here = chapterIndex >= 0 ? chapterLabel(chapterIndex, chapters[chapterIndex].title, chapters[chapterIndex].reserved) : "este capítulo";
+  // Where the scene really goes: the chapter it was prepared for, not the one open now.
+  const insertLabel = elsewhere && originLabel ? originLabel : here;
 
   // What "Abrir propuesta" shows, and its main action (the same as the panel's).
   const reader =
@@ -840,7 +842,7 @@ function AssistantPanel(props: Props) {
         : sceneReady
           ? {
               title: "Propuesta de escena",
-              where: insertTarget.kind === "end" ? `Se insertará al final del capítulo · ${here}` : `Se insertará en la posición fijada · ${here}`,
+              where: insertTarget.kind === "end" ? `Se insertará al final del capítulo · ${insertLabel}` : `Se insertará en la posición fijada · ${insertLabel}`,
               text: fromModel(parsed.proposal),
               changes: undefined,
               original: undefined,
@@ -1277,7 +1279,12 @@ function AssistantPanel(props: Props) {
       {!overview && !provider && <p className="error">No hay proveedor de IA configurado.</p>}
 
       <div className="run" hidden={overview}>
-        <button className="btn primary" onClick={() => req && provider && run(req, provider)} disabled={!canRun}>
+        <button
+          className="btn primary"
+          onClick={() => req && provider && run(req, provider)}
+          disabled={!canRun}
+          title={canRun ? undefined : "Falta un fragmento seleccionado o una instrucción para empezar."}
+        >
           {runningHere
             ? mode === "scene"
               ? "Escribiendo…"
@@ -1366,7 +1373,7 @@ function AssistantPanel(props: Props) {
                 )}
                 <span className="muted small">
                   {" "}
-                  · {here}
+                  · {insertLabel}
                   {insertTarget.kind === "end"
                     ? ", después de su último párrafo."
                     : insertion?.atStart
