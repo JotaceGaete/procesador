@@ -1,7 +1,6 @@
-// The argument of "Escribir escena" lives exactly as long as the scene it asks for:
-// kept while generating and while the proposal is pending (to edit it or ask again),
-// emptied only once the scene is inserted in the manuscript, kept if inserting fails or
-// the proposal is discarded with «Descartar». Same on a desktop and on a phone.
+// Escribir escena es una conversación: se escribe lo que pasa (o un cambio), la IA responde en
+// prosa dentro del hilo, «Rehacer» vuelve a escribir la última respuesta y «Guardar como
+// capítulo» crea el capítulo y empieza una conversación nueva. Escritorio y teléfono.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
@@ -23,7 +22,7 @@ let call, browser, novel, chapterId;
 before(async () => {
   await resetDb();
   call = client(await login());
-  novel = (await call("/api/novels", "POST", { title: "Argumentos" })).data.id;
+  novel = (await call("/api/novels", "POST", { title: "Conversación" })).data.id;
   chapterId = (await call(`/api/novels/${novel}`)).data.chapters[0].id;
   browser = await chromium.launch(
     process.env.PLAYWRIGHT_CHROMIUM_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } : {},
@@ -44,74 +43,36 @@ async function open(device) {
   await editor.waitFor();
   const panel = page.locator("aside.panel");
   const press = (loc) => (device.mobile ? loc.tap() : loc.click());
-  const argument = page.getByPlaceholder(/Escribí lo que pasa/);
-  const openScene = async () => {
-    if (!(await panel.isVisible())) await press(page.getByRole("button", { name: "Asistente", exact: true }).first());
-    await press(panel.getByRole("button", { name: "Escribir escena" }));
-    await argument.waitFor();
-  };
-  // The cursor after the first paragraph, where the scene goes.
-  await editor.evaluate((el) => {
-    el.focus();
-    el.setSelectionRange(4, 4);
-    el.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
-  });
-  await openScene();
-  await argument.fill("");
-  return { ctx, page, editor, panel, press, argument, openScene };
+  const message = page.getByLabel("Mensaje para la IA");
+  if (!(await panel.isVisible())) await press(page.getByRole("button", { name: "Asistente", exact: true }).first());
+  await press(panel.getByRole("button", { name: "Escribir escena", exact: true }));
+  await message.waitFor();
+  return { ctx, page, panel, press, message };
 }
 
-async function generate({ panel, press, argument }) {
-  await argument.fill(A);
-  await press(panel.getByRole("button", { name: "Escribir", exact: true }));
-  // Asking for it does not take the argument away…
-  assert.equal(await argument.inputValue(), A);
-  await panel.getByRole("button", { name: "Guardar como capítulo" }).waitFor();
-  // …nor does the answer arriving: the proposal is pending, the argument still editable.
-  assert.equal(await argument.inputValue(), A);
-}
-
-for (const device of DEVICES) {
-  test(`${device.name}: argumento A → generar → insertar → argumento vacío, también al volver`, async () => {
-    const s = await open(device);
-    await generate(s);
-    await s.press(s.panel.getByRole("button", { name: "Guardar como capítulo" }));
-    await s.page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
-    assert.ok((await s.editor.inputValue()).includes("—dijo él."), "the scene is in the manuscript");
-    assert.equal(await s.panel.locator(".result").count(), 0, "the used proposal is gone");
-    assert.equal(await s.argument.inputValue(), "");
-    // The manuscript keeps the focus, to go on writing after the scene.
-    assert.ok(await s.editor.evaluate((el) => document.activeElement === el));
-    if (device.mobile) assert.ok(!(await s.panel.isVisible()), "the sheet closed");
-
-    // Coming back to Escribir escena: empty, with the cursor in it for the next one.
-    if (!device.mobile) await s.press(s.panel.getByRole("button", { name: "Editar selección" }));
-    await s.openScene();
-    assert.equal(await s.argument.inputValue(), "");
-    // (On a phone the tap's click comes a moment after the touch.)
-    await s.page.waitForFunction(() => document.activeElement?.matches("label.argument textarea"), null, { timeout: 2000 });
-    await s.page.keyboard.type("La siguiente escena.");
-    assert.equal(await s.argument.inputValue(), "La siguiente escena.");
-
-    // And the emptied argument is what a reload brings back (not the old one).
-    await s.argument.fill("");
-    await s.page.waitForTimeout(700);
-    await s.page.reload();
-    await s.editor.waitFor();
-    await s.openScene();
-    assert.equal(await s.argument.inputValue(), "");
-    await s.ctx.close();
-  });
-
-}
-
-test("escritorio: si el autor ya escribió otro argumento mientras tanto, insertar no se lo borra", async () => {
+test("escritorio: enviar → respuesta en el hilo → cambio → rehacer → guardar como capítulo empieza de cero", async () => {
   const s = await open(DEVICES[0]);
-  await generate(s);
-  await s.argument.fill("Otra escena distinta.");
-  await s.press(s.panel.getByRole("button", { name: "Guardar como capítulo" }));
-  await s.page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
-  assert.equal(await s.panel.locator(".result").count(), 0);
-  assert.equal(await s.argument.inputValue(), "Otra escena distinta.");
+  const chaptersBefore = (await call(`/api/novels/${novel}`)).data.chapters.length;
+
+  await s.message.fill(A);
+  await s.panel.getByRole("button", { name: "Enviar", exact: true }).click();
+  await s.panel.getByRole("button", { name: "Guardar como capítulo" }).waitFor();
+  assert.equal(await s.message.inputValue(), "", "the message leaves the box");
+  assert.ok(await s.panel.getByText(A).isVisible(), "the ask stays in the thread");
+
+  // A follow-up is a new turn; only the last reply offers the actions.
+  await s.message.fill("Más seco.");
+  await s.panel.getByRole("button", { name: "Enviar", exact: true }).click();
+  await s.panel.getByText("Más seco.").waitFor();
+  await s.panel.getByRole("button", { name: "Guardar como capítulo" }).waitFor();
+  assert.equal(await s.panel.getByRole("button", { name: "Guardar como capítulo" }).count(), 1);
+
+  await s.panel.getByRole("button", { name: "Rehacer" }).click();
+  await s.panel.getByRole("button", { name: "Guardar como capítulo" }).waitFor();
+
+  await s.panel.getByRole("button", { name: "Guardar como capítulo" }).click();
+  await s.panel.getByText("Más seco.").waitFor({ state: "detached" });
+  const chaptersAfter = (await call(`/api/novels/${novel}`)).data.chapters.length;
+  assert.equal(chaptersAfter, chaptersBefore + 1, "a new chapter was created");
   await s.ctx.close();
 });
