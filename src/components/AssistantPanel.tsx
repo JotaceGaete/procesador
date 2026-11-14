@@ -286,6 +286,8 @@ function AssistantPanel(props: Props) {
   const sceneTarget: SceneTarget = "end";
   // «Revisar escena»: the changes the author wants (from the Consejero's review, or their own).
   const [reviewNotes, setReviewNotes] = useState("");
+  // Escribir escena as a conversation: each request and its reply (kept while the panel lives).
+  const [turns, setTurns] = useState<{ id: number; ask: string; reply: string | null }[]>([]);
   // Juicio comparativo of the last «Revisar escena» rewrite: a recommendation, never a decision.
   const [judgment, setJudgment] = useState<{ for: string; loading: boolean; data: Comparison | null; error: string } | null>(null);
 
@@ -835,6 +837,36 @@ function AssistantPanel(props: Props) {
 
   const req = buildRequest();
   const canRun = Boolean(req && provider && !running && (mode === "scene" || current.character !== "required" || character));
+
+  // A finished scene reply goes into its turn of the conversation.
+  useEffect(() => {
+    if (!finished || last?.mode !== "scene" || !parsed?.proposal) return;
+    setTurns((t) => (t.length && t[t.length - 1].reply === null ? [...t.slice(0, -1), { ...t[t.length - 1], reply: parsed.proposal! }] : t));
+  }, [finished, parsed?.proposal, last?.mode]);
+  // Sending: a follow-up carries the previous reply as the draft to revise.
+  const sceneText = argument.trim();
+  const sendScene = () => {
+    if (!sceneText || !req || !provider || running) return;
+    const prev = turns.length ? turns[turns.length - 1].reply : null;
+    setTurns((t) => [...t, { id: Date.now(), ask: sceneText, reply: null }]);
+    setArgument("");
+    writePref(`argument:${novelId}`, "");
+    void run(prev ? { ...req, body: { ...req.body, expand: prev } } : req, provider);
+  };
+  // Rehacer: the last request again; its reply replaces the previous one.
+  const redoScene = () => {
+    if (!last || last.mode !== "scene" || !provider) return;
+    setTurns((t) => (t.length ? [...t.slice(0, -1), { ...t[t.length - 1], reply: null }] : t));
+    void run(last, last.provider);
+  };
+  // Guardar como capítulo: the reply becomes a new chapter, and the conversation starts again.
+  const saveScene = (text: string) => {
+    void onInsertInNewChapter(fromModel(text)).then((ok) => {
+      if (!ok) return;
+      setTurns([]);
+      clearResult(slot);
+    });
+  };
   const manuscriptTokens = estimateTokens(novelChars);
 
   const providerSelect = providers.length > 1 && (
@@ -1097,25 +1129,71 @@ function AssistantPanel(props: Props) {
         </>
       ) : (
         <>
-          {/* Escribir escena: argumento → dónde va → extensión → (personajes, lugar) → contexto → Desarrollar. */}
-          <label className="argument">
-            <span>Qué pasa y cómo escribirlo</span>
+          {/* Escribir escena: una conversación. Cada respuesta se puede rehacer o guardar como capítulo. */}
+          <div className="scene-thread" aria-live="polite">
+            {turns.length === 0 && <p className="muted small">Escribí qué pasa y cómo debe sonar; la IA lo escribe en prosa.</p>}
+            {turns.map((t, k) => {
+              const isLast = k === turns.length - 1;
+              const streaming = isLast && runningHere;
+              const text = t.reply ?? (streaming ? parse(output, "scene").proposal : null);
+              return (
+                <div key={t.id} className="scene-turn">
+                  <p className="scene-ask">{t.ask}</p>
+                  {text ? (
+                    <div className="scene-reply">
+                      <p className="prose">{fromModel(text)}</p>
+                      {isLast && t.reply && !running && (
+                        <p className="scene-actions">
+                          <button className="btn ghost" onClick={redoScene}>
+                            Rehacer
+                          </button>
+                          <button className="btn primary" onClick={() => saveScene(t.reply!)}>
+                            Guardar como capítulo
+                          </button>
+                        </p>
+                      )}
+                    </div>
+                  ) : streaming ? (
+                    <p className="muted small">Escribiendo…</p>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+          {notice && <p className={`notice ${notice.kind}`}>{notice.message}</p>}
+          {contextControls}
+          <form
+            className="scene-composer"
+            onSubmit={(e) => {
+              e.preventDefault();
+              sendScene();
+            }}
+          >
             <textarea
               ref={argumentRef}
               data-origin={`argument (estado argument, localStorage argument:${novelId})`}
-              rows={6}
+              rows={3}
               value={argument}
+              aria-label="Mensaje para la IA"
               onChange={(e) => setArgument(e.target.value)}
-              placeholder="Escribí lo que pasa, el tono y cómo debe sonar. Ej.: más seco, en tercera persona, sin adjetivos."
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  sendScene();
+                }
+              }}
+              placeholder={turns.length ? "Pedí cambios: más seco, otro tono…" : "Escribí lo que pasa, el tono y cómo debe sonar."}
             />
-          </label>
-          {contextControls}
+            <button type="submit" className="btn primary" disabled={!sceneText || running || !provider}>
+              {runningHere ? "Escribiendo…" : "Enviar"}
+            </button>
+          </form>
         </>
       )}
 
       {!overview && !provider && <p className="error">No hay proveedor de IA configurado.</p>}
 
-      <div className="run" hidden={overview}>
+      <div className="run" hidden={overview || mode === "scene"}>
         <button
           className="btn primary"
           onClick={() => req && provider && run(req, provider)}
@@ -1140,7 +1218,7 @@ function AssistantPanel(props: Props) {
       </div>
       {!overview && advanced}
 
-      {showResult && parsed && last && (
+      {showResult && parsed && last && mode !== "scene" && (
         <section className="result" aria-live="polite" ref={resultRef} data-origin={`results["${slot}"] (showResult && parsed && last)`}>
           <div className="result-head">
             <span className="muted small">Respuesta del {last.section === "advisor" ? "Consejero" : "Asistente"}</span>

@@ -3367,3 +3367,12 @@ details.group > p {
 .companion-x { margin-left: auto; font-size: 1.4rem; line-height: 1; padding: 0 6px; }
 .companion-review { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid rgba(0,0,0,.15); border-radius: 8px; background: var(--panel-bg, #fff); max-height: 60vh; overflow-y: auto; }
 .companion-review-text { white-space: pre-wrap; font-size: .92rem; line-height: 1.5; max-height: 28vh; overflow-y: auto; padding: 8px; background: rgba(0,0,0,.03); border-radius: 6px; }
+
+/* Escribir escena: conversación */
+.scene-thread { display: flex; flex-direction: column; gap: 12px; margin: 8px 0; }
+.scene-turn { display: flex; flex-direction: column; gap: 6px; }
+.scene-ask { align-self: flex-end; max-width: 85%; margin: 0; padding: 8px 12px; border-radius: 14px; background: rgba(0,0,0,.06); white-space: pre-wrap; }
+.scene-reply .prose { margin: 0; white-space: pre-wrap; }
+.scene-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 0; }
+.scene-composer { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; }
+.scene-composer textarea { flex: 1; resize: vertical; }
