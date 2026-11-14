@@ -282,12 +282,12 @@ function AssistantPanel(props: Props) {
   const [placeId, setPlaceId] = useState("");
   const [length, setLength] = useState<SceneLength>("media");
   // Where a new scene goes: the end of the chapter unless the author chooses the cursor.
-  const [sceneTarget, setSceneTarget] = useState<SceneTarget>("end");
+  // Escribir escena always continues the end of the chapter (the position choice is gone).
+  const sceneTarget: SceneTarget = "end";
   // «Revisar escena»: the changes the author wants (from the Consejero's review, or their own).
   const [reviewNotes, setReviewNotes] = useState("");
   // Juicio comparativo of the last «Revisar escena» rewrite: a recommendation, never a decision.
   const [judgment, setJudgment] = useState<{ for: string; loading: boolean; data: Comparison | null; error: string } | null>(null);
-  useEffect(() => setSceneTarget(readPref("sceneTarget") === "cursor" ? "cursor" : "end"), []);
 
   // One pending result per tab (Editar selección, Escribir escena, the Consejero's analysis):
   // generating in one never discards an unused proposal in another. Using a proposal
@@ -813,18 +813,18 @@ function AssistantPanel(props: Props) {
         : sceneReady
           ? {
               title: "Propuesta de escena",
-              where: insertTarget.kind === "end" ? `Se insertará al final del capítulo · ${insertLabel}` : `Se insertará en la posición fijada · ${insertLabel}`,
+              where: "Se guardará como capítulo nuevo",
               text: fromModel(parsed.proposal),
               changes: undefined,
               original: undefined,
-              primary: applying ? "Guardando una copia…" : insertTarget.kind === "end" ? "Insertar al final" : "Insertar en el cursor",
-              primaryDisabled: applying || !insertion || applyBlocked,
+              primary: applying ? "Guardando una copia…" : "Guardar como capítulo",
+              primaryDisabled: applying,
               notice: elsewhere
                 ? null
                 : insertion
                   ? null
                   : "El texto alrededor del lugar fijado cambió y ya no se encuentra. Fíjalo de nuevo en el cursor o inserta al final.",
-              onPrimary: () => accept(() => onInsert(last.chapterId, fromModel(parsed.proposal!), insertTarget)),
+              onPrimary: () => accept(() => onInsertInNewChapter(fromModel(parsed.proposal!))),
             }
           : null
       : null;
@@ -1099,89 +1099,17 @@ function AssistantPanel(props: Props) {
         <>
           {/* Escribir escena: argumento → dónde va → extensión → (personajes, lugar) → contexto → Desarrollar. */}
           <label className="argument">
-            <span>Argumento</span>
+            <span>Qué pasa y cómo escribirlo</span>
             <textarea
               ref={argumentRef}
               data-origin={`argument (estado argument, localStorage argument:${novelId})`}
               rows={6}
               value={argument}
               onChange={(e) => setArgument(e.target.value)}
-              placeholder="Qué ocurre en la escena, con tus palabras. Ej.: ya estaba todo preparado, ducha nueva, el cuarto inmenso… solo faltaba comenzar con el trato."
+              placeholder="Escribí lo que pasa, el tono y cómo debe sonar. Ej.: más seco, en tercera persona, sin adjetivos."
             />
           </label>
-          <p className="muted small field-help">
-            Escríbelo como te salga: Procesador lo desarrolla en prosa, con la voz y el contexto de tu novela. Los personajes y
-            lugares que nombres se incluyen solos.
-          </p>
-          <div className="controls scene-controls">
-            <fieldset className="checks inline scene-target">
-              <legend>Dónde va</legend>
-              {(
-                [
-                  ["end", "Al final del capítulo"],
-                  ["cursor", "En el cursor"],
-                ] as const
-              ).map(([id, label]) => (
-                <label key={id} className="check">
-                  <input
-                    type="radio"
-                    name="scene-target"
-                    checked={sceneTarget === id}
-                    onChange={() => {
-                      setSceneTarget(id);
-                      writePref("sceneTarget", id);
-                    }}
-                  />
-                  {label}
-                </label>
-              ))}
-            </fieldset>
-            <p className="muted small check-help scene-target-help">
-              {sceneTarget === "end"
-                ? "Continúa el final del capítulo, esté donde esté el cursor."
-                : "Se escribe para la posición del cursor, que queda fijada al pedirla."}
-            </p>
-            <label>
-              <span>Extensión</span>
-              <select value={length} onChange={(e) => setLength(e.target.value as SceneLength)}>
-                {SCENE_LENGTHS.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.label}
-                    {l.words ? ` (~${l.words} palabras)` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {memory.characters.length > 0 && (
-              <fieldset className="checks inline">
-                <legend>En escena</legend>
-                {memory.characters.map((c) => (
-                  <label key={c.id} className="check">
-                    <input
-                      type="checkbox"
-                      checked={sceneCharacters.includes(c.id)}
-                      onChange={(e) => setSceneCharacters((l) => (e.target.checked ? [...l, c.id] : l.filter((x) => x !== c.id)))}
-                    />
-                    {c.name}
-                  </label>
-                ))}
-              </fieldset>
-            )}
-            {memory.places.length > 0 && (
-              <label>
-                <span>Lugar</span>
-                <select value={placeId} onChange={(e) => setPlaceId(e.target.value)}>
-                  <option value="">Según el argumento</option>
-                  {memory.places.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {contextControls}
-          </div>
+          {contextControls}
         </>
       )}
 
@@ -1199,7 +1127,7 @@ function AssistantPanel(props: Props) {
               ? "Escribiendo…"
               : "Analizando…"
             : mode === "scene"
-              ? "Desarrollar escena"
+              ? "Escribir"
               : current.rewrites
                 ? "Proponer cambios"
                 : "Analizar"}
@@ -1272,50 +1200,8 @@ function AssistantPanel(props: Props) {
               {judgeKey && judgment?.for === judgeKey && <Judgment j={judgment} />}
             </div>
           ) : parsed.proposal !== null && sceneReady ? (
-            // A scene: what goes in, and exactly where.
-            <div className="compare" data-origin="vista previa de la inserción">
-              <p className="insert-where" data-target={insertTarget.kind}>
-                {insertTarget.kind === "end" ? (
-                  <strong>Se insertará al final del capítulo</strong>
-                ) : (
-                  <strong>Se insertará en la posición actual</strong>
-                )}
-                <span className="muted small">
-                  {" "}
-                  · {insertLabel}
-                  {insertTarget.kind === "end"
-                    ? ", después de su último párrafo."
-                    : insertion?.atStart
-                      ? ", al principio. Es la posición fijada al elegirla: mover el cursor no la cambia."
-                      : ", entre estos párrafos. Es la posición fijada al elegirla: mover el cursor no la cambia."}
-                </span>
-              </p>
-              {elsewhere ? null : !insertion ? (
-                <p className="notice" role="alert">
-                  El texto alrededor del lugar fijado cambió y ya no se encuentra. Fíjalo de nuevo en el cursor o inserta al final.
-                </p>
-              ) : (
-              <DiffView
-                ops={[
-                  { kind: "same", text: insertion.before },
-                  { kind: "add", text: insertion.scene },
-                  { kind: "same", text: insertion.after },
-                ]}
-                label="La escena en su lugar"
-                full
-              />
-              )}
-              {insertTarget.kind === "at" && (
-                <p className="small insert-options">
-                  <button type="button" className="link small" onClick={fixHere}>
-                    Fijar en la posición actual del cursor
-                  </button>
-                  {" · "}
-                  <button type="button" className="link small" onClick={() => update(slot, () => ({ insertTarget: { kind: "end" }, applyFailed: null }))}>
-                    Insertar al final en su lugar
-                  </button>
-                </p>
-              )}
+            <div className="compare">
+              <p className="prose">{fromModel(parsed.proposal)}</p>
               {parsed.warning && <p className="notice">Aviso: {parsed.warning}</p>}
             </div>
           ) : (
@@ -1401,48 +1287,29 @@ function AssistantPanel(props: Props) {
               {sceneReady && parsed.proposal && (
                 <button
                   className="btn primary"
-                  disabled={applying || !insertion || applyBlocked}
-                  onClick={() => accept(() => onInsert(last.chapterId, fromModel(parsed.proposal!), insertTarget))}
-                >
-                  {applying ? "Guardando una copia…" : insertTarget.kind === "end" ? "Insertar al final" : "Insertar en el cursor"}
-                </button>
-              )}
-              {sceneReady && parsed.proposal && (
-                <button
-                  className="btn ghost"
                   disabled={applying}
                   onClick={() => accept(() => onInsertInNewChapter(fromModel(parsed.proposal!)))}
                   title="Crea un capítulo nuevo con esta escena y lo abre"
                 >
-                  En capítulo nuevo
+                  Guardar como capítulo
                 </button>
               )}
-              {sceneReady && parsed.proposal && insertTarget.kind === "end" && (
-                <button
-                  className="btn ghost"
-                  disabled={applying || applyBlocked}
-                  onClick={fixHere}
-                  title="Muestra dónde está ahora el cursor y fija allí la escena; después se confirma"
-                >
-                  Insertar en el cursor…
-                </button>
-              )}
-              <button className="btn ghost" onClick={() => run(last, last.provider)}>
-                Otra versión
+              <button className="btn ghost" onClick={() => (sceneReady && req && provider ? run(req, provider) : run(last, last.provider))}>
+                {sceneReady ? "Rehacer" : "Otra versión"}
               </button>
-              {last.section === "assistant" && (
+              {!sceneReady && last.section === "assistant" && (
                 <button className="btn ghost" onClick={discard} title="Quitar esta propuesta sin usarla">
                   Descartar
                 </button>
               )}
-              {parsed.proposal && (
+              {!sceneReady && parsed.proposal && (
                 <button className="btn ghost" onClick={() => navigator.clipboard.writeText(parsed.proposal!)}>
                   Copiar
                 </button>
               )}
             </div>
           )}
-          {!runningHere && others.length > 0 && (
+          {!runningHere && !sceneReady && others.length > 0 && (
             <p className="retry-with muted small">
               Probar con{" "}
               {others.map((p, i) => (
