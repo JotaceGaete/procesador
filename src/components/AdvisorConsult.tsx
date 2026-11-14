@@ -26,9 +26,8 @@ import { formatTokens } from "./format";
 import UsageLine from "./UsageLine";
 import ObservationCard, { type CardActions } from "./ObservationCard";
 import { conversationCards, currentFocus } from "@/lib/advisor/cards";
-import { conversationPlan, lastProposal, wantsHandoff, wantsSave, type AdvisorMode, type SceneBrief } from "@/lib/advisor/converse";
+import { conversationPlan, lastProposal, wantsSave, type AdvisorMode } from "@/lib/advisor/converse";
 import ProposalCard from "./ProposalCard";
-import SceneBriefEditor from "./SceneBriefEditor";
 
 interface Props {
   novelId: string;
@@ -43,8 +42,6 @@ interface Props {
   onGoTo(chapterId: string, start: number, end: number, text: string): void;
   /** An alternative of "¿Cómo seguir?" goes to the Asistente as the argument of a scene. */
   onSendToAssistant(text: string): void;
-  /** «Enviar al Asistente» from Conversar: the scene order the author reviewed. */
-  onSendBrief(b: SceneBrief): void;
   /** «Revisar escena»: the review goes to the Asistente (Editar) as the changes to apply to that scene. */
   onSendReview?(r: { notes: string; start: number; end: number }): void;
   memory: Memory;
@@ -109,8 +106,6 @@ export default function AdvisorConsult(p: Props) {
     setModeState(m);
     writePref(`advisorMode:${p.novelId}`, m);
   };
-  // «Enviar al Asistente»: the brief being prepared or reviewed.
-  const [brief, setBrief] = useState<{ loading: boolean; data: SceneBrief | null; error: string } | null>(null);
   const [newDecision, setNewDecision] = useState("");
   const [text, setText] = useState("");
   const [cards, setCards] = useState<Observation[] | null>(null);
@@ -376,24 +371,6 @@ export default function AdvisorConsult(p: Props) {
     const list = (m?.context?.[kind] ?? []).filter((x) => x !== item.text);
     return planEdit({ messageId: m.id, [kind]: list });
   };
-  // «Enviar al Asistente»: the brief, prepared from the conversation, for the author to review.
-  async function handoff(anchorId: string | null) {
-    if (!conversationId || !p.provider) return;
-    setBrief({ loading: true, data: null, error: "" });
-    try {
-      const res = await fetch("/api/advisor", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brief: true, novelId: p.novelId, chapterId: p.chapterId, conversationId, anchorId, provider: p.provider }),
-      });
-      if (res.status === 401) window.location.href = "/login";
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || `Error ${res.status}`);
-      setBrief({ loading: false, data: json as SceneBrief, error: "" });
-    } catch (e) {
-      setBrief({ loading: false, data: null, error: (e as Error).message });
-    }
-  }
   const cardsNow = conversationCards(history);
   const onTable = () => (focus ? cardsNow.find((c) => c.id === focus.id) ?? null : lastProposal(cardsNow));
   // What the author types: «envíala al Asistente» and «guárdala» act on the proposal on the
@@ -402,10 +379,6 @@ export default function AdvisorConsult(p: Props) {
     const q = question.trim();
     if (!q) return;
     const card = mode === "conversar" && conversationId ? onTable() : null;
-    if (card && wantsHandoff(q)) {
-      setQuestion("");
-      return handoff(card.id);
-    }
     if (card && wantsSave(q)) {
       setQuestion("");
       return api<StoredObservation>(`/api/observations/${card.id}`, { method: "PATCH", json: { status: "saved" } }).then(update);
@@ -549,7 +522,6 @@ export default function AdvisorConsult(p: Props) {
                         onChanged={update}
                         busy={running || !p.provider}
                         onDevelop={develop}
-                        onHandoff={(x) => handoff(x.id)}
                       />
                     ))}
                   </ul>
@@ -707,30 +679,6 @@ export default function AdvisorConsult(p: Props) {
             </form>
           )}
         </details>
-      )}
-      {brief && (
-        <div className="brief-box" data-origin="consejero: encargo para el Asistente">
-          {brief.loading && <p className="muted small" role="status">Preparando el encargo para el Asistente…</p>}
-          {brief.error && (
-            <p className="error small">
-              {brief.error}{" "}
-              <button className="link small" onClick={() => setBrief(null)}>
-                Cerrar
-              </button>
-            </p>
-          )}
-          {brief.data && (
-            <SceneBriefEditor
-              brief={brief.data}
-              memory={p.memory}
-              onCancel={() => setBrief(null)}
-              onSend={(b) => {
-                setBrief(null);
-                p.onSendBrief(b);
-              }}
-            />
-          )}
-        </div>
       )}
       {conversing && liveResult}
       {conversing && reviewOffer}

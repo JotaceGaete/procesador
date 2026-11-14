@@ -16,7 +16,6 @@ export default function ProposalCard(p: {
   onGoTo(chapterId: string, start: number, end: number, text: string): void;
   /** Stored proposals only (the live answer has no actions yet). */
   onDevelop?(o: StoredObservation): void;
-  onHandoff?(o: StoredObservation): void;
   onChanged?(o: StoredObservation): void;
   busy?: boolean;
 }) {
@@ -86,11 +85,6 @@ export default function ProposalCard(p: {
           {p.onDevelop && (
             <button className="link" disabled={p.busy} onClick={() => p.onDevelop!(stored)}>
               Desarrollar idea
-            </button>
-          )}
-          {p.onHandoff && (
-            <button className="link strong" disabled={p.busy} onClick={() => p.onHandoff!(stored)}>
-              Enviar al Asistente
             </button>
           )}
           {stored.status !== "saved" ? (

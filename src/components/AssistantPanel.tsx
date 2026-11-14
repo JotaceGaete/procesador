@@ -32,10 +32,8 @@ import AdvisorConsult from "./AdvisorConsult";
 import AdvisorSaved from "./AdvisorSaved";
 import { formatCount, formatTokens } from "./format";
 import UsageLine from "./UsageLine";
-import ContextView from "./ContextView";
 import DiffView from "./DiffView";
 import ProposalReader from "./ProposalReader";
-import type { SceneBrief } from "@/lib/advisor/converse";
 import type { Comparison } from "@/lib/advisor/compare";
 
 interface Props {
@@ -284,15 +282,12 @@ function AssistantPanel(props: Props) {
   const [placeId, setPlaceId] = useState("");
   const [length, setLength] = useState<SceneLength>("media");
   // Where a new scene goes: the end of the chapter unless the author chooses the cursor.
-  const [sceneTarget, setSceneTarget] = useState<SceneTarget>("end");
-  // «Enviar al Asistente» from the Consejero: the decisions, limits and discards that go with
-  // the argument (the author reviewed them there). Only for the next scene.
-  const [brief, setBrief] = useState<SceneBrief | null>(null);
+  // Escribir escena always continues the end of the chapter (the position choice is gone).
+  const sceneTarget: SceneTarget = "end";
   // «Revisar escena»: the changes the author wants (from the Consejero's review, or their own).
   const [reviewNotes, setReviewNotes] = useState("");
   // Juicio comparativo of the last «Revisar escena» rewrite: a recommendation, never a decision.
   const [judgment, setJudgment] = useState<{ for: string; loading: boolean; data: Comparison | null; error: string } | null>(null);
-  useEffect(() => setSceneTarget(readPref("sceneTarget") === "cursor" ? "cursor" : "end"), []);
 
   // One pending result per tab (Editar selección, Escribir escena, the Consejero's analysis):
   // generating in one never discards an unused proposal in another. Using a proposal
@@ -309,15 +304,11 @@ function AssistantPanel(props: Props) {
     /** The inputs changed since: a new estimate is on its way. */
     stale?: boolean;
   } | null>(null);
-  // "Ver contexto" open; opening it asks again (the manuscript may have changed meanwhile).
-  const [showContext, setShowContext] = useState(false);
   const [contextAsked, setContextAsked] = useState(0);
   // A proposal being applied (the copy of the current text is being saved first).
   const [applying, setApplying] = useState(false);
   // How a rewrite is shown before accepting it: the changes, the clean proposal, or the author's text.
   const [compareView, setCompareView] = useState<"changes" | "proposal" | "original">("changes");
-  // «Ver lo que se envió», under an answer.
-  const [showSent, setShowSent] = useState(false);
   // "Abrir propuesta": the Asistente's proposal read in large (a view; the proposal stays here).
   const [readerOpen, setReaderOpen] = useState(false);
   // Where a scene will go follows the cursor while the proposal waits.
@@ -412,7 +403,6 @@ function AssistantPanel(props: Props) {
           characterIds: sceneCharacters,
           placeIds: placeId ? [placeId] : [],
           sceneTarget,
-          ...(brief ? { brief: { decisions: brief.decisions, constraints: brief.constraints, discarded: brief.discarded } } : {}),
           // Written to continue the chapter's end, or the text at the cursor (fixed in run()).
           cursor: sceneTarget === "end" ? getContent().length : getCursor(),
         },
@@ -488,7 +478,6 @@ function AssistantPanel(props: Props) {
     memory,
     provider,
     sceneTarget,
-    brief,
   ]);
 
   async function run(req: Request, using: ProviderId) {
@@ -629,7 +618,6 @@ function AssistantPanel(props: Props) {
     if (last?.mode === "scene" && argument.trim() === String(last.body.argument ?? "").trim()) {
       setArgument("");
       writePref(`argument:${novelId}`, "");
-      setBrief(null);
     }
   };
   /**
@@ -668,7 +656,6 @@ function AssistantPanel(props: Props) {
   // The author chose a path of "¿Cómo seguir?": the Asistente gets it as the argument of a scene.
   const sendToAssistant = (text: string) => {
     note(`Enviar al Asistente → argument (${text.length} car.)`);
-    setBrief(null);
     setArgument(text);
     setMode("scene");
     onSection("assistant");
@@ -684,20 +671,6 @@ function AssistantPanel(props: Props) {
     if (!selection || selection.start !== r.start || selection.end !== r.end)
       onGoTo(chapterId, r.start, r.end, getContent().slice(r.start, r.end));
   };
-  // The Consejero's brief, reviewed by the author: it fills the scene's fields (still nothing
-  // is written: the author asks for the scene, reads it and decides).
-  const sendBrief = (b: SceneBrief) => {
-    note(`Enviar al Asistente → encargo (${b.decisions.length} decisiones)`);
-    setArgument(b.argument);
-    writePref(`argument:${novelId}`, b.argument);
-    setSceneCharacters(b.characterIds);
-    setPlaceId(b.placeId ?? "");
-    setSceneTarget(b.target);
-    setBrief(b);
-    setMode("scene");
-    onSection("assistant");
-  };
-
   // «Mejorar selección» from the editor: the Asistente improves the selection and shows the
   // proposal with its changes. Nothing reaches the manuscript until the author accepts it.
   useEffect(() => {
@@ -716,7 +689,6 @@ function AssistantPanel(props: Props) {
   const autoWrite = useRef(false);
   useEffect(() => {
     if (!handoff) return;
-    setBrief(null);
     setArgument(handoff.text);
     setMode("scene");
     onSection("assistant");
@@ -785,7 +757,6 @@ function AssistantPanel(props: Props) {
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per finished rewrite
   }, [judgeKey]);
-  useEffect(() => setShowSent(false), [last]);
   // A finished scene: its preview, redrawn while it waits.
   const sceneReady = finished && last?.mode === "scene";
   useEffect(() => {
@@ -842,18 +813,18 @@ function AssistantPanel(props: Props) {
         : sceneReady
           ? {
               title: "Propuesta de escena",
-              where: insertTarget.kind === "end" ? `Se insertará al final del capítulo · ${insertLabel}` : `Se insertará en la posición fijada · ${insertLabel}`,
+              where: "Se guardará como capítulo nuevo",
               text: fromModel(parsed.proposal),
               changes: undefined,
               original: undefined,
-              primary: applying ? "Guardando una copia…" : insertTarget.kind === "end" ? "Insertar al final" : "Insertar en el cursor",
-              primaryDisabled: applying || !insertion || applyBlocked,
+              primary: applying ? "Guardando una copia…" : "Guardar como capítulo",
+              primaryDisabled: applying,
               notice: elsewhere
                 ? null
                 : insertion
                   ? null
                   : "El texto alrededor del lugar fijado cambió y ya no se encuentra. Fíjalo de nuevo en el cursor o inserta al final.",
-              onPrimary: () => accept(() => onInsert(last.chapterId, fromModel(parsed.proposal!), insertTarget)),
+              onPrimary: () => accept(() => onInsertInNewChapter(fromModel(parsed.proposal!))),
             }
           : null
       : null;
@@ -931,34 +902,7 @@ function AssistantPanel(props: Props) {
       {estimate && (
         <p className={`estimate${estimate.total > confirmTokens ? " large" : ""}${quiet ? " quiet" : ""}`}>
           Contexto de esta consulta: ≈{formatTokens(estimate.total)} tokens estimados
-          {estimate.sections && (
-            <>
-              {" · "}
-              <button
-                type="button"
-                className="link small"
-                aria-expanded={showContext}
-                onClick={() => {
-                  if (!showContext) setContextAsked((n) => n + 1);
-                  setShowContext(!showContext);
-                }}
-              >
-                {showContext ? "Ocultar contexto" : "Ver contexto"}
-              </button>
-            </>
-          )}
         </p>
-      )}
-      {showContext && estimate?.sections && (
-        <ContextView
-          sections={estimate.sections}
-          total={estimate.total}
-          instructions={estimate.instructions ?? 0}
-          includeManuscript={includeManuscript}
-          scene={mode === "scene"}
-          updating={Boolean(estimate.stale)}
-          notices={estimate.notices}
-        />
       )}
     </>
   );
@@ -1072,7 +1016,6 @@ function AssistantPanel(props: Props) {
               flush={flush}
               onFactAdded={onFactAdded}
               onSendToAssistant={sendToAssistant}
-              onSendBrief={sendBrief}
               onSendReview={sendReview}
             />
           </>
@@ -1156,123 +1099,17 @@ function AssistantPanel(props: Props) {
         <>
           {/* Escribir escena: argumento → dónde va → extensión → (personajes, lugar) → contexto → Desarrollar. */}
           <label className="argument">
-            <span>Argumento</span>
+            <span>Qué pasa y cómo escribirlo</span>
             <textarea
               ref={argumentRef}
               data-origin={`argument (estado argument, localStorage argument:${novelId})`}
               rows={6}
               value={argument}
               onChange={(e) => setArgument(e.target.value)}
-              placeholder="Qué ocurre en la escena, con tus palabras. Ej.: ya estaba todo preparado, ducha nueva, el cuarto inmenso… solo faltaba comenzar con el trato."
+              placeholder="Escribí lo que pasa, el tono y cómo debe sonar. Ej.: más seco, en tercera persona, sin adjetivos."
             />
           </label>
-          {brief && (
-            <div className="brief-note" data-origin="encargo del Consejero (estado brief)">
-              <p className="small">
-                <strong>Del Consejero</strong>
-                {brief.source ? ` (${brief.source})` : ""}:{" "}
-                {[
-                  brief.decisions.length && `${brief.decisions.length} ${brief.decisions.length === 1 ? "decisión" : "decisiones"}`,
-                  brief.constraints.length && `${brief.constraints.length} ${brief.constraints.length === 1 ? "restricción" : "restricciones"}`,
-                  brief.discarded.length && `${brief.discarded.length} descartado${brief.discarded.length === 1 ? "" : "s"}`,
-                ]
-                  .filter(Boolean)
-                  .join(" · ") || "la propuesta elegida"}{" "}
-                <button className="link small" onClick={() => setBrief(null)} title="La escena se escribirá sólo con el argumento">
-                  Quitar
-                </button>
-              </p>
-              {(brief.decisions.length > 0 || brief.constraints.length > 0 || brief.discarded.length > 0) && (
-                <details>
-                  <summary className="small muted">Ver lo que va con la escena</summary>
-                  <ul className="small">
-                    {brief.decisions.map((d, i) => (
-                      <li key={`d${i}`}>Decisión: {d}</li>
-                    ))}
-                    {brief.constraints.map((d, i) => (
-                      <li key={`c${i}`}>Restricción: {d}</li>
-                    ))}
-                    {brief.discarded.map((d, i) => (
-                      <li key={`x${i}`}>Descartado: {d}</li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-            </div>
-          )}
-          <p className="muted small field-help">
-            Escríbelo como te salga: Procesador lo desarrolla en prosa, con la voz y el contexto de tu novela. Los personajes y
-            lugares que nombres se incluyen solos.
-          </p>
-          <div className="controls scene-controls">
-            <fieldset className="checks inline scene-target">
-              <legend>Dónde va</legend>
-              {(
-                [
-                  ["end", "Al final del capítulo"],
-                  ["cursor", "En el cursor"],
-                ] as const
-              ).map(([id, label]) => (
-                <label key={id} className="check">
-                  <input
-                    type="radio"
-                    name="scene-target"
-                    checked={sceneTarget === id}
-                    onChange={() => {
-                      setSceneTarget(id);
-                      writePref("sceneTarget", id);
-                    }}
-                  />
-                  {label}
-                </label>
-              ))}
-            </fieldset>
-            <p className="muted small check-help scene-target-help">
-              {sceneTarget === "end"
-                ? "Continúa el final del capítulo, esté donde esté el cursor."
-                : "Se escribe para la posición del cursor, que queda fijada al pedirla."}
-            </p>
-            <label>
-              <span>Extensión</span>
-              <select value={length} onChange={(e) => setLength(e.target.value as SceneLength)}>
-                {SCENE_LENGTHS.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.label}
-                    {l.words ? ` (~${l.words} palabras)` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {memory.characters.length > 0 && (
-              <fieldset className="checks inline">
-                <legend>En escena</legend>
-                {memory.characters.map((c) => (
-                  <label key={c.id} className="check">
-                    <input
-                      type="checkbox"
-                      checked={sceneCharacters.includes(c.id)}
-                      onChange={(e) => setSceneCharacters((l) => (e.target.checked ? [...l, c.id] : l.filter((x) => x !== c.id)))}
-                    />
-                    {c.name}
-                  </label>
-                ))}
-              </fieldset>
-            )}
-            {memory.places.length > 0 && (
-              <label>
-                <span>Lugar</span>
-                <select value={placeId} onChange={(e) => setPlaceId(e.target.value)}>
-                  <option value="">Según el argumento</option>
-                  {memory.places.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {contextControls}
-          </div>
+          {contextControls}
         </>
       )}
 
@@ -1290,7 +1127,7 @@ function AssistantPanel(props: Props) {
               ? "Escribiendo…"
               : "Analizando…"
             : mode === "scene"
-              ? "Desarrollar escena"
+              ? "Escribir"
               : current.rewrites
                 ? "Proponer cambios"
                 : "Analizar"}
@@ -1363,50 +1200,8 @@ function AssistantPanel(props: Props) {
               {judgeKey && judgment?.for === judgeKey && <Judgment j={judgment} />}
             </div>
           ) : parsed.proposal !== null && sceneReady ? (
-            // A scene: what goes in, and exactly where.
-            <div className="compare" data-origin="vista previa de la inserción">
-              <p className="insert-where" data-target={insertTarget.kind}>
-                {insertTarget.kind === "end" ? (
-                  <strong>Se insertará al final del capítulo</strong>
-                ) : (
-                  <strong>Se insertará en la posición actual</strong>
-                )}
-                <span className="muted small">
-                  {" "}
-                  · {insertLabel}
-                  {insertTarget.kind === "end"
-                    ? ", después de su último párrafo."
-                    : insertion?.atStart
-                      ? ", al principio. Es la posición fijada al elegirla: mover el cursor no la cambia."
-                      : ", entre estos párrafos. Es la posición fijada al elegirla: mover el cursor no la cambia."}
-                </span>
-              </p>
-              {elsewhere ? null : !insertion ? (
-                <p className="notice" role="alert">
-                  El texto alrededor del lugar fijado cambió y ya no se encuentra. Fíjalo de nuevo en el cursor o inserta al final.
-                </p>
-              ) : (
-              <DiffView
-                ops={[
-                  { kind: "same", text: insertion.before },
-                  { kind: "add", text: insertion.scene },
-                  { kind: "same", text: insertion.after },
-                ]}
-                label="La escena en su lugar"
-                full
-              />
-              )}
-              {insertTarget.kind === "at" && (
-                <p className="small insert-options">
-                  <button type="button" className="link small" onClick={fixHere}>
-                    Fijar en la posición actual del cursor
-                  </button>
-                  {" · "}
-                  <button type="button" className="link small" onClick={() => update(slot, () => ({ insertTarget: { kind: "end" }, applyFailed: null }))}>
-                    Insertar al final en su lugar
-                  </button>
-                </p>
-              )}
+            <div className="compare">
+              <p className="prose">{fromModel(parsed.proposal)}</p>
               {parsed.warning && <p className="notice">Aviso: {parsed.warning}</p>}
             </div>
           ) : (
@@ -1456,24 +1251,6 @@ function AssistantPanel(props: Props) {
           )}
           {notice && <p className={`notice ${notice.kind}`}>{notice.message}</p>}
           {!runningHere && (readParts || usage) && <UsageLine parts={readParts} usage={usage} />}
-          {!runningHere && result?.sent && (
-            <p className="muted small">
-              <button type="button" className="link small" aria-expanded={showSent} onClick={() => setShowSent(!showSent)}>
-                {showSent ? "Ocultar lo que se envió" : "Ver lo que se envió"}
-              </button>
-            </p>
-          )}
-          {showSent && result?.sent && (
-            <ContextView
-              sections={result.sent.sections}
-              total={result.sent.total}
-              instructions={result.sent.instructions}
-              includeManuscript={last.body.includeManuscript === true}
-              scene={last.mode === "scene"}
-              notices={result.sent.notices}
-              sent
-            />
-          )}
 
           {!runningHere && applyBlocked && parsed.proposal && (
             <p className="notice target-guard" role="alert" data-reason={elsewhere ? "other-chapter" : "locked"}>
@@ -1510,48 +1287,29 @@ function AssistantPanel(props: Props) {
               {sceneReady && parsed.proposal && (
                 <button
                   className="btn primary"
-                  disabled={applying || !insertion || applyBlocked}
-                  onClick={() => accept(() => onInsert(last.chapterId, fromModel(parsed.proposal!), insertTarget))}
-                >
-                  {applying ? "Guardando una copia…" : insertTarget.kind === "end" ? "Insertar al final" : "Insertar en el cursor"}
-                </button>
-              )}
-              {sceneReady && parsed.proposal && (
-                <button
-                  className="btn ghost"
                   disabled={applying}
                   onClick={() => accept(() => onInsertInNewChapter(fromModel(parsed.proposal!)))}
                   title="Crea un capítulo nuevo con esta escena y lo abre"
                 >
-                  En capítulo nuevo
+                  Guardar como capítulo
                 </button>
               )}
-              {sceneReady && parsed.proposal && insertTarget.kind === "end" && (
-                <button
-                  className="btn ghost"
-                  disabled={applying || applyBlocked}
-                  onClick={fixHere}
-                  title="Muestra dónde está ahora el cursor y fija allí la escena; después se confirma"
-                >
-                  Insertar en el cursor…
-                </button>
-              )}
-              <button className="btn ghost" onClick={() => run(last, last.provider)}>
-                Otra versión
+              <button className="btn ghost" onClick={() => (sceneReady && req && provider ? run(req, provider) : run(last, last.provider))}>
+                {sceneReady ? "Rehacer" : "Otra versión"}
               </button>
-              {last.section === "assistant" && (
+              {!sceneReady && last.section === "assistant" && (
                 <button className="btn ghost" onClick={discard} title="Quitar esta propuesta sin usarla">
                   Descartar
                 </button>
               )}
-              {parsed.proposal && (
+              {!sceneReady && parsed.proposal && (
                 <button className="btn ghost" onClick={() => navigator.clipboard.writeText(parsed.proposal!)}>
                   Copiar
                 </button>
               )}
             </div>
           )}
-          {!runningHere && others.length > 0 && (
+          {!runningHere && !sceneReady && others.length > 0 && (
             <p className="retry-with muted small">
               Probar con{" "}
               {others.map((p, i) => (
