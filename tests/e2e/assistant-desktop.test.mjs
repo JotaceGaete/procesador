@@ -134,7 +134,7 @@ test("Escribir escena: argumento → dónde va → extensión → contexto → D
   assert.match(await panel.locator(".check-help").last().innerText(), /Lee los capítulos anteriores/);
   await panel.locator(".estimate").waitFor();
   assert.ok((await panel.locator(".estimate").evaluate((el) => parseFloat(getComputedStyle(el).fontSize))) <= 11);
-  assert.ok(await panel.getByRole("button", { name: "Ver contexto" }).isVisible());
+  assert.equal(await panel.getByRole("button", { name: "Ver contexto" }).count(), 0, "the context panel is hidden");
   await read.uncheck();
   await ctx.close();
 });

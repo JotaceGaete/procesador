@@ -229,7 +229,7 @@ for (const device of DEVICES) {
     await s.ctx.close();
   });
 
-  test(`${device.name}: Insertar en el cursor (elegido) muestra la escena y dónde irá; después se puede ver lo que se envió`, async () => {
+  test(`${device.name}: Insertar en el cursor (elegido) muestra la escena y dónde irá; `, async () => {
     const target = ch[8]; // chapter 9
     const text = "Primer párrafo del nueve.\n\nSegundo párrafo del nueve.";
     const { revision } = (await call(`/api/chapters/${target}`)).data;
@@ -250,12 +250,6 @@ for (const device of DEVICES) {
     assert.match(await preview.locator("ins").innerText(), /Leyó \*Rayuela\* de un tirón\.\s+⁂ cambio de escena\s+Al día siguiente dijo \*nunca\*\./);
     assert.match(await preview.innerText(), /^Primer párrafo del nueve\.[\s\S]+Segundo párrafo del nueve\.$/);
     assert.equal(await s.editor.inputValue(), text, "nothing inserted yet");
-
-    // What the real request carried.
-    await s.press(s.panel.getByRole("button", { name: "Ver lo que se envió" }));
-    const sentView = s.panel.getByRole("region", { name: "Contexto que recibió la IA" });
-    await sentView.getByText("La IA tuvo en cuenta").waitFor();
-    await sentView.getByText("Tu argumento").waitFor();
 
     await s.press(s.panel.getByRole("button", { name: "Insertar en el cursor", exact: true }));
     await s.page.waitForFunction(() => document.querySelector("textarea.editor")?.value.includes("[[separador]]"));
