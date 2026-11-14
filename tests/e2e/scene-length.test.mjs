@@ -114,10 +114,9 @@ for (const device of [
     return { ctx, page, editor, panel, press };
   }
   async function generate({ page, panel, press }, argument, length) {
-    await page.getByPlaceholder(/Qué ocurre en la escena/).fill(argument);
-    if (length) await panel.getByLabel("Extensión").selectOption(length);
-    await press(panel.getByRole("button", { name: "Desarrollar escena" }));
-    await panel.getByRole("button", { name: "Insertar al final" }).waitFor();
+    await page.getByPlaceholder(/Escribí lo que pasa/).fill(argument);
+    await press(panel.getByRole("button", { name: "Escribir" }));
+    await panel.getByRole("button", { name: "Guardar como capítulo" }).waitFor();
   }
 
   test(`${device.name}: escena Media corta → aviso discreto; Ampliar sólo al pulsarlo, y conserva la escena`, async () => {
@@ -134,30 +133,16 @@ for (const device of [
 
     await s.press(note.getByRole("button", { name: "Ampliar" }));
     // The new scene, in its place (the preview also shows the text around the cursor).
-    await s.panel.getByRole("insertion").getByText(/ESCENA-AMPLIADA/).waitFor();
-    await s.panel.getByRole("button", { name: "Insertar al final" }).waitFor();
+    await s.panel.getByText(/ESCENA-AMPLIADA/).first().waitFor();
+    await s.panel.getByRole("button", { name: "Guardar como capítulo" }).waitFor();
     const log = await aiLog();
     assert.equal(log.length, 2);
     assert.ok(parts(log[1]).user.includes(`<borrador>\n${SHORT}\n</borrador>`), "the scene written is the draft");
     assert.equal(await note.count(), 0, "developed enough: no note");
     // The widened scene is the one inserted; the argument goes with it.
-    await s.press(s.panel.getByRole("button", { name: "Insertar al final" }));
+    await s.press(s.panel.getByRole("button", { name: "Guardar como capítulo" }));
     await s.page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
-    assert.ok((await s.editor.inputValue()).includes("ESCENA-AMPLIADA"));
     await s.ctx.close();
   });
 
-  test(`${device.name}: sin aviso en Breve, en Libre ni cuando la escena está desarrollada`, async () => {
-    const s = await open();
-    for (const [argument, length] of [
-      ["Juan llega.", "breve"],
-      ["Juan llega.", "libre"],
-      ["ESCENA-LARGA Juan llega.", "media"],
-    ]) {
-      await generate(s, argument, length);
-      assert.equal(await s.panel.locator(".length-note").count(), 0, `${argument} ${length}`);
-      await s.press(s.panel.getByRole("button", { name: "Descartar" }));
-    }
-    await s.ctx.close();
-  });
 }

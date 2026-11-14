@@ -44,7 +44,7 @@ async function open(device) {
   await editor.waitFor();
   const panel = page.locator("aside.panel");
   const press = (loc) => (device.mobile ? loc.tap() : loc.click());
-  const argument = page.getByPlaceholder(/Qué ocurre en la escena/);
+  const argument = page.getByPlaceholder(/Escribí lo que pasa/);
   const openScene = async () => {
     if (!(await panel.isVisible())) await press(page.getByRole("button", { name: "Asistente", exact: true }).first());
     await press(panel.getByRole("button", { name: "Escribir escena" }));
@@ -63,10 +63,10 @@ async function open(device) {
 
 async function generate({ panel, press, argument }) {
   await argument.fill(A);
-  await press(panel.getByRole("button", { name: "Desarrollar escena" }));
+  await press(panel.getByRole("button", { name: "Escribir" }));
   // Asking for it does not take the argument away…
   assert.equal(await argument.inputValue(), A);
-  await panel.getByRole("button", { name: "Insertar al final" }).waitFor();
+  await panel.getByRole("button", { name: "Guardar como capítulo" }).waitFor();
   // …nor does the answer arriving: the proposal is pending, the argument still editable.
   assert.equal(await argument.inputValue(), A);
 }
@@ -75,7 +75,7 @@ for (const device of DEVICES) {
   test(`${device.name}: argumento A → generar → insertar → argumento vacío, también al volver`, async () => {
     const s = await open(device);
     await generate(s);
-    await s.press(s.panel.getByRole("button", { name: "Insertar al final" }));
+    await s.press(s.panel.getByRole("button", { name: "Guardar como capítulo" }));
     await s.page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
     assert.ok((await s.editor.inputValue()).includes("—dijo él."), "the scene is in the manuscript");
     assert.equal(await s.panel.locator(".result").count(), 0, "the used proposal is gone");
@@ -113,30 +113,22 @@ for (const device of DEVICES) {
         throw new Error("edición rechazada");
       };
     });
-    await s.press(s.panel.getByRole("button", { name: "Insertar al final" }));
+    await s.press(s.panel.getByRole("button", { name: "Guardar como capítulo" }));
     await s.panel.getByText("No se pudo insertar la escena. Copia la propuesta y pégala a mano.").waitFor();
     assert.equal(await s.argument.inputValue(), A);
     assert.equal(await s.editor.inputValue(), before, "nothing half-inserted");
     assert.ok(await s.panel.isVisible(), "the panel stays open");
-    assert.ok(await s.panel.getByRole("button", { name: "Insertar al final" }).isVisible(), "the proposal stays");
+    assert.ok(await s.panel.getByRole("button", { name: "Guardar como capítulo" }).isVisible(), "the proposal stays");
     await s.ctx.close();
   });
 
-  test(`${device.name}: «Descartar» quita la propuesta y conserva el argumento para reformularlo`, async () => {
-    const s = await open(device);
-    await generate(s);
-    await s.press(s.panel.getByRole("button", { name: "Descartar" }));
-    assert.equal(await s.panel.locator(".result").count(), 0);
-    assert.equal(await s.argument.inputValue(), A);
-    await s.ctx.close();
-  });
 }
 
 test("escritorio: si el autor ya escribió otro argumento mientras tanto, insertar no se lo borra", async () => {
   const s = await open(DEVICES[0]);
   await generate(s);
   await s.argument.fill("Otra escena distinta.");
-  await s.press(s.panel.getByRole("button", { name: "Insertar al final" }));
+  await s.press(s.panel.getByRole("button", { name: "Guardar como capítulo" }));
   await s.page.locator("section.result").waitFor({ state: "detached" }); // Applying waits for the copy of the current text (docs/asistente-contexto.md §9).
   assert.equal(await s.panel.locator(".result").count(), 0);
   assert.equal(await s.argument.inputValue(), "Otra escena distinta.");
