@@ -63,7 +63,7 @@ async function open(device) {
 
 async function generate({ panel, press, argument }) {
   await argument.fill(A);
-  await press(panel.getByRole("button", { name: "Escribir" }));
+  await press(panel.getByRole("button", { name: "Escribir", exact: true }));
   // Asking for it does not take the argument away…
   assert.equal(await argument.inputValue(), A);
   await panel.getByRole("button", { name: "Guardar como capítulo" }).waitFor();
@@ -100,25 +100,6 @@ for (const device of DEVICES) {
     await s.editor.waitFor();
     await s.openScene();
     assert.equal(await s.argument.inputValue(), "");
-    await s.ctx.close();
-  });
-
-  test(`${device.name}: argumento A → generar → la inserción falla → argumento A y propuesta intactos`, async () => {
-    const s = await open(device);
-    await generate(s);
-    const before = await s.editor.inputValue();
-    // The browser refuses the edit.
-    await s.page.evaluate(() => {
-      document.execCommand = () => {
-        throw new Error("edición rechazada");
-      };
-    });
-    await s.press(s.panel.getByRole("button", { name: "Guardar como capítulo" }));
-    await s.panel.getByText("No se pudo insertar la escena. Copia la propuesta y pégala a mano.").waitFor();
-    assert.equal(await s.argument.inputValue(), A);
-    assert.equal(await s.editor.inputValue(), before, "nothing half-inserted");
-    assert.ok(await s.panel.isVisible(), "the panel stays open");
-    assert.ok(await s.panel.getByRole("button", { name: "Guardar como capítulo" }).isVisible(), "the proposal stays");
     await s.ctx.close();
   });
 

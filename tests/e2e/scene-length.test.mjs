@@ -115,7 +115,7 @@ for (const device of [
   }
   async function generate({ page, panel, press }, argument, length) {
     await page.getByPlaceholder(/Escribí lo que pasa/).fill(argument);
-    await press(panel.getByRole("button", { name: "Escribir" }));
+    await press(panel.getByRole("button", { name: "Escribir", exact: true }));
     await panel.getByRole("button", { name: "Guardar como capítulo" }).waitFor();
   }
 
